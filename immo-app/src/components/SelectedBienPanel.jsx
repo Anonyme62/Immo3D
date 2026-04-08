@@ -18,6 +18,14 @@ export default function SelectedBienPanel({
 }) {
   const photos = getSelectedBienPhotos(selectedBien);
   const annonceLinks = getAnnonceLinks(selectedBien);
+  const selectedBienKey =
+    selectedBien?.id ||
+    selectedBien?.bien_id ||
+    selectedBien?.id_bien ||
+    selectedBien?.lien_yanport ||
+    selectedBien?.lien_leboncoin ||
+    selectedBien?.adresse ||
+    "selected-bien";
 
   return (
     <div
@@ -36,7 +44,7 @@ export default function SelectedBienPanel({
       {!selectedBien ? (
         <div style={{ color: "var(--text-muted)" }}>Selectionne un bien</div>
       ) : (
-        <>
+        <div key={selectedBienKey}>
           {isMobile ? (
             <div
               style={{
@@ -224,6 +232,7 @@ export default function SelectedBienPanel({
               <div style={{ fontWeight: 700, marginBottom: 10 }}>Photos</div>
 
               <div
+                key={`photos-${selectedBienKey}`}
                 style={{
                   display: "flex",
                   gap: 10,
@@ -234,7 +243,7 @@ export default function SelectedBienPanel({
               >
                 {photos.map((photo, index) => (
                   <img
-                    key={index}
+                    key={`${selectedBienKey}-${photo}-${index}`}
                     src={photo}
                     alt={`Photo ${index + 1}`}
                     style={{
@@ -289,7 +298,7 @@ export default function SelectedBienPanel({
               </button>
             )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
