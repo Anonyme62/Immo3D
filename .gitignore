@@ -1,0 +1,16 @@
+backend/.env
+backend/__pycache__/
+backend/app/**/__pycache__/
+backend/tests/**/__pycache__/
+*.pyc
+backend/immo3d.db
+backend/token.txt
+
+immo-app/.env
+immo-app/node_modules/
+immo-app/dist/
+immo-app/dist-ssr/
+immo-app/src/*token*.txt
+immo-app/src/*google*.txt
+
+Sauvegarde app SATFI/

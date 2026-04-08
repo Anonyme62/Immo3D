@@ -1,0 +1,3 @@
+cd C:\Users\Alexis\App SAFTI\immo-app
+npm.cmd run dev
+npm.cmd run dev:network

@@ -1,0 +1,64 @@
+from tests.support import BackendApiTestCase
+
+
+class CustomMarkersApiTests(BackendApiTestCase):
+    def setUp(self):
+        super().setUp()
+
+        self.set_fake_yanport_login(
+            lambda username, password: {
+                "token": f"token-{username}",
+                "username": username,
+                "email": f"{username}@example.com",
+            }
+        )
+
+    def test_markers_are_isolated_per_user(self):
+        self.login("alice")
+        create_response = self.client.post(
+            "/markers",
+            json={"lat": 50.45, "lon": 2.79, "note": "Visite mercredi"},
+        )
+        self.assertEqual(create_response.status_code, 200)
+        marker_id = create_response.json()["id"]
+
+        self.client.post("/auth/logout")
+        self.login("bob")
+
+        bob_list = self.client.get("/markers")
+        self.assertEqual(bob_list.status_code, 200)
+        self.assertEqual(bob_list.json(), [])
+
+        delete_response = self.client.delete(f"/markers/{marker_id}")
+        self.assertEqual(delete_response.status_code, 200)
+
+        self.client.post("/auth/logout")
+        self.login("alice")
+
+        alice_list = self.client.get("/markers")
+        self.assertEqual(alice_list.status_code, 200)
+        self.assertEqual(len(alice_list.json()), 1)
+
+    def test_marker_can_be_updated_and_deleted(self):
+        self.login("charlie")
+
+        create_response = self.client.post(
+            "/markers",
+            json={"lat": 50.45, "lon": 2.79, "note": "Visite mercredi"},
+        )
+        self.assertEqual(create_response.status_code, 200)
+        marker_id = create_response.json()["id"]
+
+        update_response = self.client.patch(
+            f"/markers/{marker_id}",
+            json={"note": "Visite reportee jeudi"},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["note"], "Visite reportee jeudi")
+
+        delete_response = self.client.delete(f"/markers/{marker_id}")
+        self.assertEqual(delete_response.status_code, 200)
+
+        list_response = self.client.get("/markers")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json(), [])
