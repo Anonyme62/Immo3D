@@ -7,6 +7,10 @@ function defaultApiBaseUrl() {
     return "http://127.0.0.1:8000";
   }
 
+  if (import.meta.env.PROD) {
+    return "";
+  }
+
   return `${window.location.protocol}//${window.location.hostname}:8000`;
 }
 
