@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     session_cookie_name: str = "immo3d_session"
     session_max_age_seconds: int = 60 * 60 * 24 * 7
     cookie_secure: bool = False
+    cookie_samesite: str = "lax"
 
     @field_validator("app_secret_key")
     @classmethod
@@ -64,6 +65,14 @@ class Settings(BaseSettings):
         if self.app_env.lower() == "production" and not self.cookie_secure:
             raise ValueError("COOKIE_SECURE doit etre active en production.")
         return self
+
+    @field_validator("cookie_samesite")
+    @classmethod
+    def validate_cookie_samesite(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"lax", "strict", "none"}:
+            raise ValueError("COOKIE_SAMESITE doit etre lax, strict ou none.")
+        return normalized
 
 
 settings = Settings()

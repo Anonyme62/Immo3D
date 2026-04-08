@@ -38,7 +38,7 @@ def set_session_cookie(response: Response, session_id: str) -> None:
         max_age=settings.session_max_age_seconds,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.cookie_samesite,
         path="/",
     )
 
@@ -152,7 +152,7 @@ def logout(
         path="/",
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.cookie_samesite,
     )
     return {"success": True}
 
