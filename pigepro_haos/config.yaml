@@ -1,0 +1,29 @@
+name: "PigePro"
+description: "Heberge l'application PigePro sur Home Assistant OS."
+version: "0.1.0"
+slug: "pigepro_haos"
+init: false
+startup: services
+url: "https://github.com/Anonyme62/Immo3D"
+arch:
+  - aarch64
+  - armv7
+  - amd64
+ports:
+  10000/tcp: 10000
+ports_description:
+  10000/tcp: "PigePro web"
+options:
+  public_hostname: "app.pigepro.fr"
+  allowed_hosts: "app.pigepro.fr,localhost,127.0.0.1"
+  app_secret_key: "replace-with-a-random-secret-of-at-least-32-characters"
+  data_encryption_key: "replace-with-a-second-random-secret-of-at-least-32-characters"
+  backup_encryption_key: "replace-with-a-third-random-secret-of-at-least-32-characters"
+  session_max_age_seconds: 604800
+schema:
+  public_hostname: str
+  allowed_hosts: str
+  app_secret_key: str
+  data_encryption_key: str
+  backup_encryption_key: str
+  session_max_age_seconds: int
