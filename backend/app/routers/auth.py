@@ -6,15 +6,19 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.deps import get_current_session, get_current_user
+from app.deps import get_current_session, get_current_user, require_valid_csrf
 from app.models import AppSession, User, YanportSession
-from app.schemas import AuthStatusResponse, UserResponse, YanportLoginRequest
+from app.schemas import AuthStatusResponse, YanportLoginRequest
 from app.security import (
+    build_lookup_hash,
     build_login_attempt_identifier,
     clear_login_failures,
+    create_csrf_token,
     create_session_value,
     encrypt_sensitive_value,
     ensure_login_allowed,
+    ensure_rate_limit,
+    normalize_client_ip,
     register_login_failure,
 )
 from app.services.yanport import login_to_yanport
@@ -43,16 +47,18 @@ def set_session_cookie(response: Response, session_id: str) -> None:
     )
 
 
-@router.post("/login", response_model=UserResponse)
+@router.post("/login", response_model=AuthStatusResponse)
 def login(
     request: Request,
     response: Response,
     payload: YanportLoginRequest = Body(...),
     db: Session = Depends(get_db),
 ):
+    client_ip = normalize_client_ip(request.headers, request.client.host if request.client else None)
+    ensure_rate_limit("login-ip", client_ip, limit=20, window_seconds=10 * 60)
     attempt_identifier = build_login_attempt_identifier(
         payload.username,
-        request.client.host if request.client else None,
+        client_ip,
     )
     ensure_login_allowed(attempt_identifier)
 
@@ -69,9 +75,9 @@ def login(
     yanport_email = normalize_identity(yanport_data.get("email"))
     access_token = yanport_data["token"]
 
-    user_filters = [User.yanport_username == normalized_username]
+    user_filters = [User.yanport_username_hash == build_lookup_hash(normalized_username)]
     if yanport_email:
-        user_filters.append(User.yanport_email == yanport_email)
+        user_filters.append(User.yanport_email_hash == build_lookup_hash(yanport_email))
 
     user = db.query(User).filter(or_(*user_filters)).first()
 
@@ -87,7 +93,7 @@ def login(
             normalized_username != user.yanport_username
             and db.query(User)
             .filter(
-                User.yanport_username == normalized_username,
+                User.yanport_username_hash == build_lookup_hash(normalized_username),
                 User.id != user.id,
             )
             .first()
@@ -112,6 +118,7 @@ def login(
 
     app_session = AppSession(
         user_id=user.id,
+        csrf_token=create_csrf_token(),
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.session_max_age_seconds),
     )
     db.add(app_session)
@@ -120,14 +127,18 @@ def login(
     db.refresh(app_session)
 
     set_session_cookie(response, app_session.id)
-    return user
+    return {
+        "authenticated": True,
+        "user": user,
+        "csrf_token": app_session.csrf_token,
+    }
 
 
 @router.post("/logout")
 def logout(
     response: Response,
     db: Session = Depends(get_db),
-    app_session: AppSession = Depends(get_current_session),
+    app_session: AppSession = Depends(require_valid_csrf),
 ):
     db.delete(app_session)
 
@@ -158,8 +169,12 @@ def logout(
 
 
 @router.get("/me", response_model=AuthStatusResponse)
-def me(user: User = Depends(get_current_user)):
+def me(
+    user: User = Depends(get_current_user),
+    app_session: AppSession = Depends(get_current_session),
+):
     return {
         "authenticated": True,
         "user": user,
+        "csrf_token": app_session.csrf_token,
     }

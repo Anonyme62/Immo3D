@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_subscribed_user, require_valid_csrf
 from app.models import CustomMarker, User
 from app.schemas import (
     CustomMarkerCreateRequest,
@@ -22,7 +22,7 @@ def normalize_search_zone(value: str | None) -> str:
 def list_markers(
     zone: str = Query(default=""),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_subscribed_user),
 ):
     normalized_zone = normalize_search_zone(zone)
     return (
@@ -40,7 +40,8 @@ def list_markers(
 def create_marker(
     payload: CustomMarkerCreateRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     marker = CustomMarker(
         user_id=user.id,
@@ -60,7 +61,8 @@ def update_marker(
     marker_id: str,
     payload: CustomMarkerUpdateRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     marker = (
         db.query(CustomMarker)
@@ -81,7 +83,8 @@ def update_marker(
 def delete_marker(
     marker_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     marker = (
         db.query(CustomMarker)

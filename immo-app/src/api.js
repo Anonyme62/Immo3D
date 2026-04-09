@@ -1,5 +1,7 @@
 import { API_BASE_URL } from "./config";
 
+const CSRF_STORAGE_KEY = "immo3d_csrf_token";
+
 async function readJson(response) {
   try {
     return await response.json();
@@ -8,14 +10,38 @@ async function readJson(response) {
   }
 }
 
+function storeCsrfToken(token) {
+  if (token) {
+    localStorage.setItem(CSRF_STORAGE_KEY, token);
+    return;
+  }
+
+  localStorage.removeItem(CSRF_STORAGE_KEY);
+}
+
+function getStoredCsrfToken() {
+  return localStorage.getItem(CSRF_STORAGE_KEY) || "";
+}
+
+function syncAuthPayload(payload) {
+  if (payload && typeof payload === "object" && "csrf_token" in payload) {
+    storeCsrfToken(payload.csrf_token || "");
+  }
+}
+
 async function apiFetch(path, options = {}) {
   let response;
+  const method = (options.method || "GET").toUpperCase();
+  const csrfToken = getStoredCsrfToken();
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        ...(csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)
+          ? { "X-CSRF-Token": csrfToken }
+          : {}),
         ...(options.headers || {}),
       },
       ...options,
@@ -29,6 +55,7 @@ async function apiFetch(path, options = {}) {
   }
 
   const data = await readJson(response);
+  syncAuthPayload(data);
 
   if (!response.ok) {
     if (Array.isArray(data?.detail)) {
@@ -69,7 +96,9 @@ export function loginYanport(username, password) {
 }
 
 export function logoutYanport() {
-  return apiFetch("/auth/logout", { method: "POST" });
+  return apiFetch("/auth/logout", { method: "POST" }).finally(() => {
+    storeCsrfToken("");
+  });
 }
 
 export function getBiens(zoneRecherche) {
@@ -171,4 +200,19 @@ export function getBoundary(query) {
   const params = new URLSearchParams();
   params.append("q", query.trim());
   return apiFetch(`/geocoding/boundary?${params.toString()}`, { method: "GET" });
+}
+
+export function createBillingCheckoutSession() {
+  return apiFetch("/billing/checkout-session", { method: "POST" });
+}
+
+export function syncBillingCheckoutSession(sessionId) {
+  return apiFetch("/billing/checkout-session/sync", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
+export function createBillingPortalSession() {
+  return apiFetch("/billing/portal-session", { method: "POST" });
 }

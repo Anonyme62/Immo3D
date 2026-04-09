@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   addBlacklist,
   addSetAside,
-  deleteBienPlacement,
   addFavorite,
+  createBillingCheckoutSession,
+  createBillingPortalSession,
   createCustomMarker,
+  deleteBienPlacement,
   getBoundary,
   deleteCustomMarker,
   getAuthStatus,
@@ -17,6 +19,7 @@ import {
   removeSetAside,
   saveNote,
   saveBienPlacement,
+  syncBillingCheckoutSession,
   updateCustomMarker,
 } from "./api";
 import AppMenu from "./components/AppMenu";
@@ -25,6 +28,7 @@ import CesiumMap from "./CesiumMap";
 import { CESIUM_ION_TOKEN } from "./config";
 import LoginScreen from "./components/LoginScreen";
 import SelectedBienPanel from "./components/SelectedBienPanel";
+import SubscriptionScreen from "./components/SubscriptionScreen";
 import { countBienCategories, filterBiens } from "./utils/bienFilters";
 import { downloadKmlExport } from "./utils/kmlExport";
 
@@ -53,10 +57,14 @@ function App() {
   });
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [billingNotice, setBillingNotice] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
 
   const [biens, setBiens] = useState([]);
@@ -95,6 +103,8 @@ function App() {
     () => inferBoundaryQuery(activeZoneRecherche, biens),
     [activeZoneRecherche, biens]
   );
+  const hasAppAccess = currentUser?.has_app_access ?? true;
+  const canUseApp = isLoggedIn && hasAppAccess;
 
   function scrollPageToTop(behavior = "auto") {
     window.scrollTo({ top: 0, left: 0, behavior });
@@ -120,6 +130,11 @@ function App() {
     });
   }
 
+  function applyAuthState(data) {
+    setIsLoggedIn(!!data?.authenticated);
+    setCurrentUser(data?.user ?? null);
+  }
+
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
@@ -127,6 +142,56 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STYLE_STORAGE_KEY, styleMode);
   }, [styleMode]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billingState = params.get("billing");
+    const sessionId = params.get("session_id");
+    if (!billingState) return;
+
+    let cancelled = false;
+
+    async function handleBillingReturn() {
+      if (billingState === "success") {
+        setBillingNotice("Paiement confirme. Synchronisation de ton abonnement...");
+
+        if (sessionId) {
+          try {
+            const authData = await syncBillingCheckoutSession(sessionId);
+            if (cancelled) return;
+
+            applyAuthState(authData);
+            if (authData?.user?.has_app_access) {
+              setBillingNotice("Abonnement actif. Acces debloque.");
+              return;
+            }
+          } catch (error) {
+            console.error("Erreur synchronisation retour Stripe :", error);
+          }
+        }
+
+        if (!cancelled) {
+          refreshBillingStatus();
+        }
+      } else if (billingState === "cancel") {
+        setBillingNotice("Paiement annule. Tu peux reprendre plus tard.");
+      } else if (billingState === "portal") {
+        setBillingNotice("Retour du portail Stripe. Verification de ton abonnement...");
+        refreshBillingStatus();
+      }
+    }
+
+    handleBillingReturn();
+    params.delete("billing");
+    params.delete("session_id");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const savedEmail = localStorage.getItem("yanport_email");
@@ -143,8 +208,13 @@ function App() {
       }
     }
 
-    setLoginEmail(savedEmail || "");
-    setRememberMe(savedRemember === "true");
+    const shouldRememberEmail = savedRemember === "true";
+    if (!shouldRememberEmail) {
+      localStorage.removeItem("yanport_email");
+    }
+
+    setLoginEmail(shouldRememberEmail ? savedEmail || "" : "");
+    setRememberMe(shouldRememberEmail);
     setLoginPassword("");
     setZoneRecherche(savedSearchZone || "");
     setActiveZoneRecherche(savedSearchZone || "");
@@ -216,7 +286,7 @@ function App() {
 
   useEffect(() => {
     async function chargerReperesPersonnels() {
-      if (!isLoggedIn) {
+      if (!canUseApp) {
         setCustomMarkers([]);
         return;
       }
@@ -230,7 +300,7 @@ function App() {
     }
 
     chargerReperesPersonnels();
-  }, [isLoggedIn, activeZoneRecherche]);
+  }, [canUseApp, activeZoneRecherche]);
 
   useEffect(() => {
     let cancelled = false;
@@ -261,7 +331,7 @@ function App() {
   }, [showBoundary, boundaryQuery]);
 
   async function refreshBiensInBackground() {
-    if (!isLoggedIn || isBackgroundRefreshingRef.current || loading) return;
+    if (!canUseApp || isBackgroundRefreshingRef.current || loading) return;
 
     const nextZoneRecherche = activeZoneRecherche.trim();
     if (!nextZoneRecherche) return;
@@ -296,9 +366,17 @@ function App() {
 
       if (error.status === 401) {
         setIsLoggedIn(false);
+        setCurrentUser(null);
         setBiens([]);
         setSelectedBien(null);
         setLoginError("Session expiree. Merci de vous reconnecter.");
+      } else if (error.status === 402) {
+        try {
+          const authData = await getAuthStatus();
+          applyAuthState(authData);
+        } catch (authError) {
+          console.error("Erreur verification abonnement :", authError);
+        }
       }
     } finally {
       isBackgroundRefreshingRef.current = false;
@@ -309,10 +387,11 @@ function App() {
     async function verifierAuth() {
       try {
         const data = await getAuthStatus();
-        setIsLoggedIn(!!data?.authenticated);
+        applyAuthState(data);
       } catch (error) {
         console.error("Erreur auth status :", error);
         setIsLoggedIn(false);
+        setCurrentUser(null);
       } finally {
         setAuthChecked(true);
       }
@@ -322,13 +401,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn) {
+    if (canUseApp) {
       chargerBiens();
     }
-  }, [isLoggedIn]);
+  }, [canUseApp]);
 
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!canUseApp) return;
 
     function handleAppVisible() {
       if (document.visibilityState === "visible") {
@@ -354,7 +433,7 @@ function App() {
       document.removeEventListener("visibilitychange", handleAppVisible);
       window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [isLoggedIn, zoneRecherche, loading, selectedBien?.id, selectedBien?.note, noteDraft]);
+  }, [canUseApp, zoneRecherche, loading, selectedBien?.id, selectedBien?.note, noteDraft]);
 
   useEffect(() => {
     return () => {
@@ -427,7 +506,7 @@ function App() {
   }, [isMobile, mobilePanel, selectedBien]);
 
   async function chargerBiens() {
-    if (!isLoggedIn) return;
+    if (!canUseApp) return;
 
     const nextZoneRecherche = zoneRecherche.trim();
     if (!nextZoneRecherche) {
@@ -461,9 +540,17 @@ function App() {
 
       if (error.status === 401) {
         setIsLoggedIn(false);
+        setCurrentUser(null);
         setBiens([]);
         setSelectedBien(null);
         setLoginError("Session expiree. Merci de vous reconnecter.");
+      } else if (error.status === 402) {
+        try {
+          const authData = await getAuthStatus();
+          applyAuthState(authData);
+        } catch (authError) {
+          console.error("Erreur verification abonnement :", authError);
+        }
       } else {
         setBiens([]);
         setSelectedBien(null);
@@ -482,12 +569,18 @@ function App() {
 
     setLoginLoading(true);
     setLoginError("");
+    setBillingError("");
+    setBillingNotice("");
 
     try {
-      await loginYanport(loginEmail, loginPassword);
-      localStorage.setItem("yanport_email", loginEmail);
+      const authData = await loginYanport(loginEmail, loginPassword);
       localStorage.setItem("yanport_remember_me", rememberMe ? "true" : "false");
-      setIsLoggedIn(true);
+      if (rememberMe) {
+        localStorage.setItem("yanport_email", loginEmail.trim());
+      } else {
+        localStorage.removeItem("yanport_email");
+      }
+      applyAuthState(authData);
       setLoginPassword("");
       setLoginError("");
       setSyncError("");
@@ -512,12 +605,75 @@ function App() {
     }
 
     setIsLoggedIn(false);
+    setCurrentUser(null);
     setBiens([]);
     setSelectedBien(null);
     setLoginError("");
+    setBillingError("");
     setLoginPassword("");
     setNoteDraft("");
     setCustomMarkers([]);
+  }
+
+  async function refreshBillingStatus() {
+    setBillingLoading(true);
+    setBillingError("");
+    setBillingNotice("");
+
+    try {
+      const authData = await getAuthStatus();
+      applyAuthState(authData);
+      if (authData?.user?.has_app_access) {
+        setBillingNotice("Abonnement actif. Acces debloque.");
+      }
+    } catch (error) {
+      console.error("Erreur rafraichissement abonnement :", error);
+      setBillingError(error.message || "Impossible de verifier l'abonnement.");
+    } finally {
+      setBillingLoading(false);
+    }
+  }
+
+  async function ouvrirCheckoutAbonnement() {
+    setBillingLoading(true);
+    setBillingError("");
+    setBillingNotice("");
+
+    try {
+      const data = await createBillingCheckoutSession();
+      if (data?.url) {
+        window.location.assign(data.url);
+        return;
+      }
+
+      setBillingError("Stripe n'a pas renvoye d'URL de paiement.");
+    } catch (error) {
+      console.error("Erreur ouverture paiement :", error);
+      setBillingError(error.message || "Impossible d'ouvrir la page de paiement.");
+    } finally {
+      setBillingLoading(false);
+    }
+  }
+
+  async function ouvrirPortailAbonnement() {
+    setBillingLoading(true);
+    setBillingError("");
+    setBillingNotice("");
+
+    try {
+      const data = await createBillingPortalSession();
+      if (data?.url) {
+        window.location.assign(data.url);
+        return;
+      }
+
+      setBillingError("Stripe n'a pas renvoye d'URL de portail.");
+    } catch (error) {
+      console.error("Erreur ouverture portail abonnement :", error);
+      setBillingError(error.message || "Impossible d'ouvrir la gestion d'abonnement.");
+    } finally {
+      setBillingLoading(false);
+    }
   }
 
   async function blacklisterBien() {
@@ -857,6 +1013,22 @@ function App() {
         onPasswordChange={setLoginPassword}
         onRememberMeChange={setRememberMe}
         onSubmit={seConnecter}
+      />
+    );
+  }
+
+  if (!hasAppAccess) {
+    return (
+      <SubscriptionScreen
+        themeMode={themeMode}
+        user={currentUser}
+        loading={billingLoading}
+        error={billingError}
+        notice={billingNotice}
+        onStartCheckout={ouvrirCheckoutAbonnement}
+        onOpenPortal={ouvrirPortailAbonnement}
+        onRefreshStatus={refreshBillingStatus}
+        onLogout={seDeconnecter}
       />
     );
   }

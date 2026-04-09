@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -10,6 +12,13 @@ class UserResponse(BaseModel):
     id: str
     yanport_username: str
     yanport_email: str | None = None
+    stripe_customer_id: str | None = None
+    subscription_status: str | None = None
+    subscription_current_period_end: datetime | None = None
+    subscription_cancel_at_period_end: bool = False
+    has_active_subscription: bool
+    has_app_access: bool
+    billing_required: bool
 
     model_config = {"from_attributes": True}
 
@@ -17,6 +26,15 @@ class UserResponse(BaseModel):
 class AuthStatusResponse(BaseModel):
     authenticated: bool
     user: UserResponse | None = None
+    csrf_token: str | None = None
+
+
+class BillingSessionResponse(BaseModel):
+    url: str
+
+
+class CheckoutSessionSyncRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=255)
 
 
 class NoteUpsertRequest(BaseModel):

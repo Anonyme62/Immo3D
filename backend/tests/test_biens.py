@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 
 from app.models import BlacklistItem, Note, User, YanportSession
+from app.security import build_lookup_hash
 from tests.support import BackendApiTestCase
 
 
@@ -93,18 +94,28 @@ class BiensTests(BackendApiTestCase):
 
         self.login("alexis")
         with self.TestSessionLocal() as db:
-            alexis_user_id = db.query(User).filter(User.yanport_username == "alexis").first().id
+            alexis_user_id = (
+                db.query(User)
+                .filter(User.yanport_username_hash == build_lookup_hash("alexis"))
+                .first()
+                .id
+            )
             db.add(Note(user_id=alexis_user_id, bien_id="bien-1", note="Note Alexis"))
             db.add(BlacklistItem(user_id=alexis_user_id, bien_id="bien-2", surface=82, prix=248000))
             db.commit()
-        self.client.post("/auth/logout")
+        self.logout()
 
         self.login("marine")
         with self.TestSessionLocal() as db:
-            marine_user_id = db.query(User).filter(User.yanport_username == "marine").first().id
+            marine_user_id = (
+                db.query(User)
+                .filter(User.yanport_username_hash == build_lookup_hash("marine"))
+                .first()
+                .id
+            )
             db.add(Note(user_id=marine_user_id, bien_id="bien-1", note="Note Marine"))
             db.commit()
-        self.client.post("/auth/logout")
+        self.logout()
 
         self.login("alexis")
         response = self.client.get("/biens", params={"zip_code": "62670"})

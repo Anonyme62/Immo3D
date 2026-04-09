@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -9,6 +10,7 @@ from app.config import settings
 from app.db import Base, engine, ensure_sqlite_compatibility_migrations
 from app.models import AppSession, BlacklistItem, CustomMarker, Note, User, YanportSession
 from app.routers.auth import router as auth_router
+from app.routers.billing import router as billing_router
 from app.routers.biens import router as biens_router
 from app.routers.blacklist import router as blacklist_router
 from app.routers.geocoding import router as geocoding_router
@@ -27,11 +29,33 @@ app = FastAPI(title="Immo 3D API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
-    allow_origin_regex=settings.cors_allowed_origin_regex,
+    allow_origin_regex=settings.cors_allowed_origin_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_hosts_list,
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
+    if settings.app_env.lower() == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+    protected_prefixes = ("/auth", "/biens", "/notes", "/markers", "/blacklist", "/billing")
+    if request.url.path.startswith(protected_prefixes):
+        response.headers.setdefault("Cache-Control", "no-store")
+
+    return response
 
 
 @app.get("/health")
@@ -40,6 +64,7 @@ def health():
 
 
 app.include_router(auth_router)
+app.include_router(billing_router)
 app.include_router(notes_router)
 app.include_router(blacklist_router)
 app.include_router(markers_router)
@@ -85,6 +110,7 @@ if FRONTEND_DIST.exists():
             "blacklist",
             "notes",
             "markers",
+            "billing",
             "health",
             "geocoding",
             "docs",

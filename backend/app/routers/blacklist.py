@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_subscribed_user, require_valid_csrf
 from app.models import BlacklistItem, User
 from app.schemas import BlacklistResponse, BlacklistUpsertRequest
 
@@ -14,7 +14,8 @@ router = APIRouter(prefix="/blacklist", tags=["blacklist"])
 def add_to_blacklist(
     payload: BlacklistUpsertRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     existing = (
         db.query(BlacklistItem)
@@ -45,7 +46,8 @@ def add_to_blacklist(
 def remove_from_blacklist(
     bien_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     item = (
         db.query(BlacklistItem)
@@ -64,7 +66,7 @@ def remove_from_blacklist(
 def get_blacklist_item(
     bien_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_subscribed_user),
 ):
     item = (
         db.query(BlacklistItem)

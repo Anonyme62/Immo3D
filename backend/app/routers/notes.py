@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_subscribed_user, get_current_user, require_valid_csrf
 from app.models import Note, User
 from app.schemas import NoteResponse, NoteUpsertRequest
 
@@ -14,7 +14,8 @@ router = APIRouter(prefix="/notes", tags=["notes"])
 def upsert_note(
     payload: NoteUpsertRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     existing = (
         db.query(Note)
@@ -43,7 +44,7 @@ def upsert_note(
 def get_note(
     bien_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_subscribed_user),
 ):
     note = (
         db.query(Note)

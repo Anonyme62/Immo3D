@@ -22,11 +22,21 @@ export default function BiensSidebar({
   mobileMode = "full",
 }) {
   const itemRefs = useRef(new Map());
+  const zoneInputRef = useRef(null);
   const [zoneInputFocused, setZoneInputFocused] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const showControls = !isMobile || mobileMode === "search";
   const showResults = !isMobile || mobileMode === "list";
   const showRecentSearches = showControls && zoneInputFocused && recentSearches.length > 0;
+
+  function handleRecentSearchSelection(recentSearch) {
+    onSelectRecentSearch(recentSearch);
+    setZoneInputFocused(false);
+
+    window.requestAnimationFrame(() => {
+      zoneInputRef.current?.blur();
+    });
+  }
 
   useEffect(() => {
     if (!showResults || !selectedBienId) return;
@@ -77,6 +87,7 @@ export default function BiensSidebar({
             ) : null}
 
             <input
+              ref={zoneInputRef}
               value={zoneRecherche}
               onChange={(event) => onZoneRechercheChange(event.target.value)}
               onFocus={() => setZoneInputFocused(true)}
@@ -101,8 +112,8 @@ export default function BiensSidebar({
                   <button
                     key={recentSearch}
                     type="button"
-                    onMouseDown={() => setZoneInputFocused(true)}
-                    onClick={() => onSelectRecentSearch(recentSearch)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleRecentSearchSelection(recentSearch)}
                     style={{
                       padding: "8px 12px",
                       borderRadius: 999,

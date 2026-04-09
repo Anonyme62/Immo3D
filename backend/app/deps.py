@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
 from app.models import AppSession, User
-from app.security import read_session_value
+from app.security import constant_time_equals, read_session_value
 
 
 def get_current_session(
@@ -46,3 +46,34 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utilisateur introuvable")
 
     return user
+
+
+def get_current_subscribed_user(
+    user: User = Depends(get_current_user),
+) -> User:
+    if settings.billing_required and not user.has_active_subscription:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Abonnement mensuel requis pour acceder a cette fonctionnalite.",
+        )
+
+    return user
+
+
+def require_valid_csrf(
+    app_session: AppSession = Depends(get_current_session),
+    csrf_token: str | None = Header(default=None, alias=settings.csrf_header_name),
+) -> AppSession:
+    if not csrf_token or not app_session.csrf_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Jeton CSRF manquant.",
+        )
+
+    if not constant_time_equals(csrf_token, app_session.csrf_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Jeton CSRF invalide.",
+        )
+
+    return app_session

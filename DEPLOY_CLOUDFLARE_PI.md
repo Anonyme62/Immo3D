@@ -46,6 +46,13 @@ FRONTEND_ORIGINS=https://app.ton-domaine.fr
 SESSION_COOKIE_NAME=immo3d_session
 SESSION_MAX_AGE_SECONDS=604800
 COOKIE_SECURE=true
+ALLOWED_HOSTS=api.ton-domaine.fr
+BILLING_REQUIRED=true
+STRIPE_SECRET_KEY=sk_live_xxx
+STRIPE_PRICE_ID=price_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+BACKUP_DIR=backups
+BACKUP_RETENTION_COUNT=14
 ```
 
 ### Lancement
@@ -99,6 +106,7 @@ Configuration recommandee :
 ## 6. Checklist avant premiere vraie mise en ligne
 
 - faire une sauvegarde de `immo3d.db`
+- tester `python -m app.backup create` puis `python -m app.backup verify <archive.zip>`
 - verifier que le token Cesium est restreint au domaine de prod
 - verifier que `FRONTEND_ORIGINS` ne contient pas les anciennes URLs de dev
 - verifier que le backend redemarre automatiquement apres reboot

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import close_all_sessions, sessionmaker
 
+from app.config import settings
 from app import security
 from app.db import get_db
 from app.main import app
@@ -42,14 +43,19 @@ class BackendApiTestCase(TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        self.csrf_token = ""
+        self._original_billing_required = settings.billing_required
+        settings.billing_required = False
         self._original_login_to_yanport = auth_router.login_to_yanport
         self._original_fetch_properties = biens_router.fetch_properties
         security._login_failures.clear()
         security._login_lockouts.clear()
+        security._request_buckets.clear()
 
     def tearDown(self):
         self.client.close()
         app.dependency_overrides.clear()
+        settings.billing_required = self._original_billing_required
         auth_router.login_to_yanport = self._original_login_to_yanport
         biens_router.fetch_properties = self._original_fetch_properties
         close_all_sessions()
@@ -65,6 +71,7 @@ class BackendApiTestCase(TestCase):
         gc.collect()
         security._login_failures.clear()
         security._login_lockouts.clear()
+        security._request_buckets.clear()
         super().tearDown()
 
     def set_fake_yanport_login(self, login_handler: Callable[[str, str], dict]):
@@ -74,10 +81,22 @@ class BackendApiTestCase(TestCase):
         biens_router.fetch_properties = fetch_handler
 
     def login(self, username: str, password: str = "password"):
-        return self.client.post(
+        response = self.client.post(
             "/auth/login",
             json={
                 "username": username,
                 "password": password,
             },
         )
+        if response.status_code == 200:
+            self.csrf_token = response.json().get("csrf_token", "")
+        return response
+
+    def auth_headers(self):
+        return {"X-CSRF-Token": self.csrf_token} if self.csrf_token else {}
+
+    def logout(self):
+        response = self.client.post("/auth/logout", headers=self.auth_headers())
+        if response.status_code == 200:
+            self.csrf_token = ""
+        return response

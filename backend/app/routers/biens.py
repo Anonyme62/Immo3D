@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_subscribed_user, require_valid_csrf
 from app.models import BienPlacement, BlacklistItem, FavoriteBien, Note, SetAsideBien, User, YanportSession
-from app.security import decrypt_sensitive_value
+from app.security import decrypt_sensitive_value, ensure_rate_limit, normalize_client_ip
 from app.schemas import (
     BienPlacementRequest,
     BienPlacementResponse,
@@ -23,11 +23,14 @@ router = APIRouter(prefix="/biens", tags=["biens"])
 
 @router.get("", response_model=list[BienResponse])
 def get_biens(
+    request: Request,
     zip_code: str | None = None,
     ville: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_subscribed_user),
 ):
+    client_ip = normalize_client_ip(request.headers, request.client.host if request.client else None)
+    ensure_rate_limit("biens-read", client_ip, limit=120, window_seconds=5 * 60)
     yanport_session = db.query(YanportSession).filter(YanportSession.user_id == user.id).first()
     if not yanport_session:
         raise HTTPException(status_code=401, detail="Session Yanport introuvable. Merci de vous reconnecter.")
@@ -77,7 +80,8 @@ def get_biens(
 def add_favorite(
     payload: FavoriteBienRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     favorite = (
         db.query(FavoriteBien)
@@ -99,7 +103,8 @@ def add_favorite(
 def remove_favorite(
     bien_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     favorite = (
         db.query(FavoriteBien)
@@ -118,7 +123,8 @@ def remove_favorite(
 def add_set_aside(
     payload: SetAsideBienRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     set_aside = (
         db.query(SetAsideBien)
@@ -140,7 +146,8 @@ def add_set_aside(
 def remove_set_aside(
     bien_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     set_aside = (
         db.query(SetAsideBien)
@@ -160,7 +167,8 @@ def upsert_bien_placement(
     bien_id: str,
     payload: BienPlacementRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     placement = (
         db.query(BienPlacement)
@@ -188,7 +196,8 @@ def upsert_bien_placement(
 def delete_bien_placement(
     bien_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: object = Depends(require_valid_csrf),
+    user: User = Depends(get_current_subscribed_user),
 ):
     placement = (
         db.query(BienPlacement)

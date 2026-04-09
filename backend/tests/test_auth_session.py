@@ -1,4 +1,5 @@
 from app.models import AppSession, User, YanportSession
+from app.security import build_lookup_hash, decrypt_sensitive_value
 
 from tests.support import BackendApiTestCase
 
@@ -17,17 +18,25 @@ class AuthSessionTests(BackendApiTestCase):
 
         self.assertEqual(login_response.status_code, 200)
         self.assertIn("immo3d_session", self.client.cookies)
+        self.assertTrue(login_response.json()["csrf_token"])
 
         with self.TestSessionLocal() as db:
             self.assertEqual(db.query(User).count(), 1)
             self.assertEqual(db.query(AppSession).count(), 1)
             self.assertEqual(db.query(YanportSession).count(), 1)
+            user = db.query(User).first()
+            yanport_session = db.query(YanportSession).first()
+            self.assertNotEqual(user._yanport_username_encrypted, "alexis")
+            self.assertEqual(user.yanport_username_hash, build_lookup_hash("alexis"))
+            self.assertNotEqual(user._yanport_email_encrypted, "alexis@example.com")
+            self.assertEqual(user.yanport_email, "alexis@example.com")
+            self.assertEqual(decrypt_sensitive_value(yanport_session.access_token), "token-auth-1")
 
         auth_response = self.client.get("/auth/me")
         self.assertEqual(auth_response.status_code, 200)
         self.assertTrue(auth_response.json()["authenticated"])
 
-        logout_response = self.client.post("/auth/logout")
+        logout_response = self.logout()
         self.assertEqual(logout_response.status_code, 200)
 
         after_logout = self.client.get("/auth/me")
@@ -58,8 +67,8 @@ class AuthSessionTests(BackendApiTestCase):
         login_response = self.login("nouveau-login")
 
         self.assertEqual(login_response.status_code, 200)
-        self.assertEqual(login_response.json()["id"], existing_user_id)
-        self.assertEqual(login_response.json()["yanport_username"], "nouveau-login")
+        self.assertEqual(login_response.json()["user"]["id"], existing_user_id)
+        self.assertEqual(login_response.json()["user"]["yanport_username"], "nouveau-login")
 
         with self.TestSessionLocal() as db:
             self.assertEqual(db.query(User).count(), 1)

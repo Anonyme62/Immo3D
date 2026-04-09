@@ -7,9 +7,11 @@
     "dev": "vite",
     "dev:network": "vite --host 0.0.0.0",
     "build": "vite build",
+    "build:preprod": "vite build --mode preprod --configLoader native",
     "test": "node --test",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:preprod": "vite preview --mode preprod --configLoader native"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",

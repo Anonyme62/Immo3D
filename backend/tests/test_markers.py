@@ -18,21 +18,25 @@ class CustomMarkersApiTests(BackendApiTestCase):
         create_response = self.client.post(
             "/markers",
             json={"lat": 50.45, "lon": 2.79, "note": "Visite mercredi"},
+            headers=self.auth_headers(),
         )
         self.assertEqual(create_response.status_code, 200)
         marker_id = create_response.json()["id"]
 
-        self.client.post("/auth/logout")
+        self.logout()
         self.login("bob")
 
         bob_list = self.client.get("/markers")
         self.assertEqual(bob_list.status_code, 200)
         self.assertEqual(bob_list.json(), [])
 
-        delete_response = self.client.delete(f"/markers/{marker_id}")
+        delete_response = self.client.delete(
+            f"/markers/{marker_id}",
+            headers=self.auth_headers(),
+        )
         self.assertEqual(delete_response.status_code, 200)
 
-        self.client.post("/auth/logout")
+        self.logout()
         self.login("alice")
 
         alice_list = self.client.get("/markers")
@@ -45,6 +49,7 @@ class CustomMarkersApiTests(BackendApiTestCase):
         create_response = self.client.post(
             "/markers",
             json={"lat": 50.45, "lon": 2.79, "note": "Visite mercredi"},
+            headers=self.auth_headers(),
         )
         self.assertEqual(create_response.status_code, 200)
         marker_id = create_response.json()["id"]
@@ -52,11 +57,15 @@ class CustomMarkersApiTests(BackendApiTestCase):
         update_response = self.client.patch(
             f"/markers/{marker_id}",
             json={"note": "Visite reportee jeudi"},
+            headers=self.auth_headers(),
         )
         self.assertEqual(update_response.status_code, 200)
         self.assertEqual(update_response.json()["note"], "Visite reportee jeudi")
 
-        delete_response = self.client.delete(f"/markers/{marker_id}")
+        delete_response = self.client.delete(
+            f"/markers/{marker_id}",
+            headers=self.auth_headers(),
+        )
         self.assertEqual(delete_response.status_code, 200)
 
         list_response = self.client.get("/markers")
