@@ -1,0 +1,81 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#0A0908"/>
+  <rect x="0" y="0" width="1440" height="900" fill="url(#goldGlow)" fill-opacity="0.18"/>
+  <defs>
+    <radialGradient id="goldGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1180 120) rotate(132.771) scale(760 594)">
+      <stop stop-color="#D6B36A"/>
+      <stop offset="1" stop-color="#D6B36A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="18" y="18" width="1404" height="864" rx="28" fill="#11100F" stroke="#2B251C"/>
+  <rect x="18" y="18" width="1404" height="864" rx="28" stroke="#6B5833" stroke-opacity="0.25"/>
+
+  <rect x="34" y="34" width="1372" height="56" rx="20" fill="#151311" stroke="#2A241C"/>
+  <circle cx="62" cy="62" r="16" fill="#1E1A16" stroke="#4A3C25"/>
+  <rect x="55" y="56" width="14" height="2" rx="1" fill="#E8D4A6"/>
+  <rect x="55" y="61" width="14" height="2" rx="1" fill="#E8D4A6"/>
+  <rect x="55" y="66" width="14" height="2" rx="1" fill="#E8D4A6"/>
+  <text x="90" y="69" fill="#F4E8D0" font-size="28" font-family="Georgia, serif" font-weight="700">Immo3D</text>
+  <text x="190" y="68" fill="#9F8B68" font-size="14" font-family="Segoe UI, Arial">edition signature</text>
+  <rect x="1296" y="47" width="90" height="30" rx="15" fill="#D1A85D"/>
+  <text x="1323" y="67" fill="#1B160F" font-size="13" font-family="Segoe UI, Arial" font-weight="700">Quitter</text>
+
+  <rect x="34" y="110" width="300" height="754" rx="24" fill="#13110F" stroke="#2A241C"/>
+  <text x="58" y="148" fill="#8F7B59" font-size="12" font-family="Segoe UI, Arial" letter-spacing="2">SECTEUR</text>
+  <rect x="54" y="164" width="260" height="54" rx="16" fill="#191613" stroke="#332B21"/>
+  <text x="76" y="198" fill="#F7ECD6" font-size="24" font-family="Georgia, serif" font-weight="700">62750</text>
+  <rect x="54" y="230" width="260" height="42" rx="14" fill="#171411" stroke="#2B241B"/>
+  <text x="74" y="256" fill="#70614A" font-size="14" font-family="Segoe UI, Arial">Filtrer agence, rue, ID...</text>
+  <rect x="54" y="286" width="260" height="48" rx="24" fill="#D1A85D"/>
+  <text x="116" y="316" fill="#18130D" font-size="16" font-family="Segoe UI, Arial" font-weight="700">Synchroniser</text>
+
+  <text x="58" y="382" fill="#8F7B59" font-size="12" font-family="Segoe UI, Arial" letter-spacing="2">FILTRES</text>
+  <rect x="54" y="398" width="260" height="36" rx="18" fill="#171411" stroke="#2B241B"/>
+  <text x="74" y="421" fill="#F4E8D0" font-size="14" font-family="Segoe UI, Arial">Tous les biens</text>
+  <rect x="54" y="444" width="260" height="36" rx="18" fill="#171411" stroke="#2B241B"/>
+  <text x="74" y="467" fill="#F4E8D0" font-size="14" font-family="Segoe UI, Arial">Favoris</text>
+  <rect x="54" y="490" width="260" height="36" rx="18" fill="#171411" stroke="#2B241B"/>
+  <text x="74" y="513" fill="#F4E8D0" font-size="14" font-family="Segoe UI, Arial">Mettre de côté</text>
+
+  <text x="58" y="572" fill="#8F7B59" font-size="12" font-family="Segoe UI, Arial" letter-spacing="2">BIENS</text>
+  <rect x="54" y="590" width="260" height="138" rx="22" fill="#181512" stroke="#32291F"/>
+  <text x="76" y="628" fill="#F7ECD6" font-size="28" font-family="Georgia, serif" font-weight="700">224 000 EUR</text>
+  <text x="76" y="657" fill="#B8A78C" font-size="15" font-family="Segoe UI, Arial">Rue Victor Hugo</text>
+  <text x="76" y="681" fill="#7F7059" font-size="13" font-family="Segoe UI, Arial">105 m2 • 69 jours</text>
+  <rect x="228" y="608" width="64" height="24" rx="12" fill="#E1BE75"/>
+  <text x="247" y="624" fill="#261E11" font-size="12" font-family="Segoe UI, Arial" font-weight="700">premium</text>
+
+  <rect x="356" y="110" width="728" height="754" rx="24" fill="#12100E" stroke="#2A241C"/>
+  <rect x="380" y="134" width="680" height="706" rx="20" fill="#E2D6B3"/>
+  <path d="M380 236C546 160 776 160 1060 240V840H380V236Z" fill="#E8DEC1"/>
+  <path d="M430 274L560 224L668 280L768 228L882 278L1000 236" stroke="#CAB884" stroke-width="54" stroke-linecap="round"/>
+  <path d="M402 418L530 352L628 404L756 346L864 410L982 356" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <path d="M410 418L530 352L628 404L756 346L864 410L982 356" stroke="#A9715A" stroke-width="28" stroke-linecap="round" stroke-opacity="0.65"/>
+  <circle cx="732" cy="422" r="12" fill="#24C96B" stroke="#FFF7EA" stroke-width="4"/>
+  <circle cx="770" cy="402" r="12" fill="#F3A623" stroke="#FFF7EA" stroke-width="4"/>
+  <circle cx="816" cy="432" r="12" fill="#E44343" stroke="#FFF7EA" stroke-width="4"/>
+  <rect x="912" y="760" width="148" height="42" rx="21" fill="#151311" stroke="#3B3227"/>
+  <text x="949" y="786" fill="#F3E7CE" font-size="15" font-family="Segoe UI, Arial">Vue satellite</text>
+  <rect x="984" y="810" width="76" height="34" rx="17" fill="#151311" stroke="#3B3227"/>
+  <text x="1010" y="832" fill="#F3E7CE" font-size="14" font-family="Segoe UI, Arial">3D</text>
+
+  <rect x="1108" y="110" width="298" height="754" rx="24" fill="#13110F" stroke="#2A241C"/>
+  <text x="1132" y="148" fill="#8F7B59" font-size="12" font-family="Segoe UI, Arial" letter-spacing="2">DETAIL</text>
+  <rect x="1288" y="136" width="90" height="24" rx="12" fill="#A4E0B0"/>
+  <text x="1316" y="152" fill="#15301B" font-size="12" font-family="Segoe UI, Arial" font-weight="700">actif</text>
+  <text x="1132" y="194" fill="#F7ECD6" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Agence :</tspan> SAFTI</text>
+  <text x="1132" y="232" fill="#F7ECD6" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Adresse :</tspan> Rue Victor Hugo</text>
+  <text x="1132" y="270" fill="#F7ECD6" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Prix :</tspan> 224 000 EUR</text>
+  <rect x="1132" y="320" width="96" height="34" rx="17" fill="#1A1713" stroke="#352C21"/>
+  <text x="1158" y="342" fill="#F6E7C9" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Favori</text>
+  <rect x="1240" y="320" width="122" height="34" rx="17" fill="#E4B55F"/>
+  <text x="1263" y="342" fill="#231A0E" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Mettre de coté</text>
+  <rect x="1132" y="368" width="112" height="34" rx="17" fill="#C93333"/>
+  <text x="1157" y="390" fill="#FFF2EF" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Blacklister</text>
+  <rect x="1132" y="420" width="250" height="120" rx="22" fill="#171411" stroke="#2C251C"/>
+  <text x="1154" y="474" fill="#8C7C64" font-size="15" font-family="Segoe UI, Arial">Visite à planifier cette semaine</text>
+  <rect x="1132" y="566" width="250" height="246" rx="22" fill="#201B16"/>
+  <rect x="1154" y="588" width="206" height="92" rx="16" fill="#CDBFA0"/>
+  <rect x="1154" y="694" width="96" height="96" rx="16" fill="#E1D5BC"/>
+  <rect x="1264" y="694" width="96" height="96" rx="16" fill="#BBAA8B"/>
+</svg>

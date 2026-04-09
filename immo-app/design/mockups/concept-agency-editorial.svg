@@ -1,0 +1,76 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#F3EEE4"/>
+  <rect x="0" y="0" width="1440" height="82" fill="#F8F3EA"/>
+  <line x1="0" y1="82.5" x2="1440" y2="82.5" stroke="#D5C8B3"/>
+  <circle cx="40" cy="41" r="18" fill="#221C17"/>
+  <rect x="32" y="35" width="16" height="2" rx="1" fill="#F7F1E8"/>
+  <rect x="32" y="40" width="16" height="2" rx="1" fill="#F7F1E8"/>
+  <rect x="32" y="45" width="16" height="2" rx="1" fill="#F7F1E8"/>
+  <text x="70" y="49" fill="#1C1712" font-size="30" font-family="Georgia, 'Times New Roman', serif" font-weight="700">Immo3D</text>
+  <text x="190" y="48" fill="#877A69" font-size="15" font-family="Segoe UI, Arial">lecture premium du territoire</text>
+  <text x="1124" y="48" fill="#1C1712" font-size="15" font-family="Segoe UI, Arial">Mode sombre</text>
+  <text x="1256" y="48" fill="#1C1712" font-size="15" font-family="Segoe UI, Arial">Export KML</text>
+  <rect x="1330" y="24" width="82" height="34" rx="17" fill="#1C1712"/>
+  <text x="1351" y="46" fill="#F8F3EA" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Quitter</text>
+
+  <rect x="24" y="110" width="304" height="766" rx="26" fill="#FBF7EF" stroke="#D9CCB9"/>
+  <text x="48" y="150" fill="#8E806E" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">SECTEUR</text>
+  <rect x="48" y="166" width="256" height="56" rx="18" fill="#F1E8DA" stroke="#D7C8B0"/>
+  <text x="70" y="201" fill="#1C1712" font-size="24" font-family="Georgia, 'Times New Roman', serif" font-weight="700">62670</text>
+  <rect x="48" y="236" width="256" height="44" rx="14" fill="#FAF6EE" stroke="#D7C8B0"/>
+  <text x="66" y="263" fill="#968978" font-size="15" font-family="Segoe UI, Arial">Filtrer adresse, agence, ID...</text>
+  <rect x="48" y="294" width="256" height="48" rx="24" fill="#1C1712"/>
+  <text x="107" y="324" fill="#F8F3EA" font-size="16" font-family="Segoe UI, Arial" font-weight="700">Synchroniser</text>
+
+  <text x="48" y="386" fill="#8E806E" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">FILTRES</text>
+  <rect x="48" y="404" width="256" height="38" rx="19" fill="#F3EBDD"/>
+  <text x="68" y="429" fill="#2A241D" font-size="14" font-family="Segoe UI, Arial">Tous les biens</text>
+  <rect x="48" y="452" width="256" height="38" rx="19" fill="#F3EBDD"/>
+  <text x="68" y="477" fill="#2A241D" font-size="14" font-family="Segoe UI, Arial">Favoris</text>
+  <rect x="48" y="500" width="256" height="38" rx="19" fill="#F3EBDD"/>
+  <text x="68" y="525" fill="#2A241D" font-size="14" font-family="Segoe UI, Arial">Mettre de côté</text>
+
+  <text x="48" y="582" fill="#8E806E" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">SELECTION</text>
+  <rect x="48" y="600" width="256" height="138" rx="22" fill="#FCFAF5" stroke="#D7C8B0"/>
+  <text x="70" y="638" fill="#1C1712" font-size="28" font-family="Georgia, 'Times New Roman', serif" font-weight="700">233 000 EUR</text>
+  <text x="70" y="670" fill="#4E4439" font-size="16" font-family="Segoe UI, Arial">27 Boulevard Arthur Lamendin</text>
+  <text x="70" y="696" fill="#8D8070" font-size="14" font-family="Segoe UI, Arial">100 m2 • 152 jours</text>
+  <rect x="224" y="620" width="60" height="24" rx="12" fill="#F0E0A2"/>
+  <text x="239" y="636" fill="#4B3910" font-size="12" font-family="Segoe UI, Arial" font-weight="700">nouveau</text>
+
+  <rect x="352" y="110" width="760" height="766" rx="26" fill="#E9E1D4" stroke="#D7C8B0"/>
+  <rect x="378" y="136" width="708" height="714" rx="20" fill="#DCD6C8"/>
+  <path d="M378 246C600 136 878 150 1086 234V850H378V246Z" fill="#E6E1CF"/>
+  <path d="M398 246L562 214L704 260L846 210L984 252L1086 224V334L984 350L846 294L704 344L562 288L398 316V246Z" fill="#BFD3A8"/>
+  <path d="M432 414L510 378L592 432L702 364L814 436L914 380L1026 440" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+  <path d="M432 416L510 378L592 432L702 364L814 436L914 380L1026 440" stroke="#C87A64" stroke-width="30" stroke-linecap="round" stroke-opacity="0.6"/>
+  <circle cx="700" cy="450" r="12" fill="#22C55E" stroke="#FFFFFF" stroke-width="4"/>
+  <circle cx="742" cy="434" r="12" fill="#F59E0B" stroke="#FFFFFF" stroke-width="4"/>
+  <circle cx="788" cy="464" r="12" fill="#EF4444" stroke="#FFFFFF" stroke-width="4"/>
+  <circle cx="846" cy="444" r="12" fill="#EF4444" stroke="#FFFFFF" stroke-width="4"/>
+  <rect x="948" y="770" width="138" height="42" rx="21" fill="#F8F3EA" stroke="#CDBFA9"/>
+  <text x="980" y="797" fill="#1C1712" font-size="15" font-family="Segoe UI, Arial">Vue satellite</text>
+  <rect x="1008" y="818" width="78" height="36" rx="18" fill="#F8F3EA" stroke="#CDBFA9"/>
+  <text x="1034" y="841" fill="#1C1712" font-size="14" font-family="Segoe UI, Arial">3D</text>
+
+  <rect x="1134" y="110" width="282" height="766" rx="26" fill="#FBF7EF" stroke="#D9CCB9"/>
+  <text x="1158" y="150" fill="#8E806E" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">DETAIL</text>
+  <rect x="1304" y="136" width="84" height="24" rx="12" fill="#C9E2C8"/>
+  <text x="1333" y="152" fill="#244124" font-size="12" font-family="Segoe UI, Arial" font-weight="700">actif</text>
+  <text x="1158" y="198" fill="#1C1712" font-size="18" font-family="Georgia, 'Times New Roman', serif"><tspan font-weight="700">Agence :</tspan> SAFTI</text>
+  <text x="1158" y="236" fill="#1C1712" font-size="18" font-family="Georgia, 'Times New Roman', serif"><tspan font-weight="700">Adresse :</tspan> Rue Victor Hugo</text>
+  <text x="1158" y="274" fill="#1C1712" font-size="18" font-family="Georgia, 'Times New Roman', serif"><tspan font-weight="700">Prix :</tspan> 224 000 EUR</text>
+  <text x="1158" y="312" fill="#1C1712" font-size="18" font-family="Georgia, 'Times New Roman', serif"><tspan font-weight="700">Surface :</tspan> 105 m2</text>
+  <rect x="1158" y="352" width="98" height="34" rx="17" fill="#F8F3EA" stroke="#D0C3AE"/>
+  <text x="1184" y="374" fill="#1C1712" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Favori</text>
+  <rect x="1268" y="352" width="110" height="34" rx="17" fill="#E6B85C"/>
+  <text x="1290" y="374" fill="#3C2A08" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Mettre de cote</text>
+  <rect x="1158" y="398" width="110" height="34" rx="17" fill="#C83A32"/>
+  <text x="1183" y="420" fill="#FFF8F5" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Blacklister</text>
+  <rect x="1158" y="458" width="234" height="118" rx="22" fill="#F5EFE5" stroke="#D9CCB9"/>
+  <text x="1178" y="510" fill="#7D705F" font-size="15" font-family="Segoe UI, Arial">Prendre contact mercredi</text>
+  <rect x="1158" y="602" width="234" height="228" rx="24" fill="#DAD4C9"/>
+  <rect x="1178" y="622" width="194" height="88" rx="16" fill="#ECE6DB"/>
+  <rect x="1178" y="720" width="92" height="90" rx="16" fill="#EAE2D5"/>
+  <rect x="1280" y="720" width="92" height="90" rx="16" fill="#CFC4B4"/>
+</svg>

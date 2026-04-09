@@ -11,8 +11,15 @@ export default function SelectedBienPanel({
   noteDraft,
   noteStatus,
   onNoteChange,
+  onAddFavorite,
+  onRemoveFavorite,
+  onAddSetAside,
+  onRemoveSetAside,
   onAddBlacklist,
   onRemoveBlacklist,
+  onStartPlacingBien,
+  onRemovePlacedBienMarker,
+  isPlacingBien = false,
   isMobile = false,
   onBackToList,
 }) {
@@ -26,6 +33,17 @@ export default function SelectedBienPanel({
     selectedBien?.lien_leboncoin ||
     selectedBien?.adresse ||
     "selected-bien";
+
+  const canPlaceBienMarker =
+    Boolean(selectedBien?.sans_adresse) ||
+    Boolean(selectedBien?.placed_manually) ||
+    isPlacingBien;
+
+  const placementButtonLabel = isPlacingBien
+    ? "Annuler placement"
+    : selectedBien?.placed_manually
+      ? "Replacer le repere"
+      : "Placer un repere";
 
   return (
     <div
@@ -122,6 +140,58 @@ export default function SelectedBienPanel({
 
           <div
             style={{
+              marginTop: 12,
+              display: "flex",
+              gap: 10,
+              flexWrap: "nowrap",
+              alignItems: "center",
+            }}
+          >
+            {selectedBien.favorite ? (
+              <button onClick={onRemoveFavorite} style={topActionButtonStyle()}>
+                Retirer favori
+              </button>
+            ) : (
+              <button onClick={onAddFavorite} style={topActionButtonStyle()}>
+                Ajouter favori
+              </button>
+            )}
+
+            {selectedBien.de_cote ? (
+              <button
+                onClick={onRemoveSetAside}
+                style={topActionButtonStyle("#92400e", "#ffffff", "none")}
+              >
+                Retirer de cote
+              </button>
+            ) : (
+              <button
+                onClick={onAddSetAside}
+                style={topActionButtonStyle("#f59e0b", "#111827", "none")}
+              >
+                Mettre de cote
+              </button>
+            )}
+
+            {selectedBien.blackliste ? (
+              <button
+                onClick={onRemoveBlacklist}
+                style={topActionButtonStyle("#065f46", "#ffffff", "none")}
+              >
+                Retirer blacklist
+              </button>
+            ) : (
+              <button
+                onClick={onAddBlacklist}
+                style={topActionButtonStyle("#b91c1c", "#ffffff", "none")}
+              >
+                Blacklister
+              </button>
+            )}
+          </div>
+
+          <div
+            style={{
               marginTop: 18,
               border: "1px solid var(--border-color)",
               borderRadius: 18,
@@ -137,7 +207,45 @@ export default function SelectedBienPanel({
               <strong>Adresse :</strong>{" "}
               {selectedBien.adresse && selectedBien.adresse.trim() !== ""
                 ? selectedBien.adresse
-                : "Non renseignee"}
+                : ""}
+              {canPlaceBienMarker ? (
+                <button
+                  onClick={onStartPlacingBien}
+                  style={{
+                    marginLeft: 6,
+                    padding: "1px 8px",
+                    borderRadius: 999,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--panel-subtle)",
+                    color: "var(--text-primary)",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                  }}
+                >
+                  {placementButtonLabel}
+                </button>
+              ) : null}
+              {selectedBien.placed_manually ? (
+                <button
+                  onClick={onRemovePlacedBienMarker}
+                  style={{
+                    marginLeft: 6,
+                    padding: "1px 8px",
+                    borderRadius: 999,
+                    border: "1px solid #7f1d1d",
+                    background: "#991b1b",
+                    color: "white",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                  }}
+                >
+                  Supprimer le repere
+                </button>
+              ) : null}
             </div>
 
             <div>
@@ -157,7 +265,6 @@ export default function SelectedBienPanel({
           </div>
 
           <div style={{ marginTop: 18 }}>
-            <div style={{ fontWeight: 700, marginBottom: 10 }}>Notes</div>
             <textarea
               value={noteDraft}
               onChange={(event) => onNoteChange(event.target.value)}
@@ -191,8 +298,6 @@ export default function SelectedBienPanel({
           </div>
 
           <div style={{ marginTop: 18 }}>
-            <div style={{ fontWeight: 700, marginBottom: 10 }}>Annonces</div>
-
             {annonceLinks.length === 0 ? (
               <div style={{ color: "var(--text-muted)" }}>Aucune annonce disponible</div>
             ) : (
@@ -229,8 +334,6 @@ export default function SelectedBienPanel({
 
           {photos.length > 0 ? (
             <div style={{ marginTop: 18 }}>
-              <div style={{ fontWeight: 700, marginBottom: 10 }}>Photos</div>
-
               <div
                 key={`photos-${selectedBienKey}`}
                 style={{
@@ -261,45 +364,29 @@ export default function SelectedBienPanel({
             </div>
           ) : null}
 
-          <div style={{ marginTop: 18 }}>
-            {selectedBien.blackliste ? (
-              <button
-                onClick={onRemoveBlacklist}
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  borderRadius: 16,
-                  border: "none",
-                  background: "#065f46",
-                  color: "white",
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
-                Retirer blacklist
-              </button>
-            ) : (
-              <button
-                onClick={onAddBlacklist}
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  borderRadius: 16,
-                  border: "none",
-                  background: "#b91c1c",
-                  color: "white",
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
-                Blacklister
-              </button>
-            )}
-          </div>
         </div>
       )}
     </div>
   );
+}
+
+function topActionButtonStyle(
+  background = "var(--panel-subtle)",
+  color = "var(--text-primary)",
+  border = "1px solid var(--border-color)",
+  compact = false
+) {
+  return {
+    padding: compact ? "4px 14px" : "6px 12px",
+    borderRadius: 999,
+    border,
+    background,
+    color,
+    fontWeight: 700,
+    fontSize: compact ? 13 : 12,
+    lineHeight: compact ? 1.05 : 1.1,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  };
 }

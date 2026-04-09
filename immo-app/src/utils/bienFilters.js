@@ -3,6 +3,10 @@ export function filterBiens(
   {
     search = "",
     showAllBiens = true,
+    showFavorites = false,
+    showSetAside = false,
+    showProfessionnels = false,
+    showParticuliers = false,
     showBlacklist = true,
     showSansAdresse = true,
     showNouveaux = true,
@@ -12,6 +16,15 @@ export function filterBiens(
 
   return biens.filter((bien) => {
     const isBlacklisted = !!bien.blackliste;
+    const isFavorite = !!bien.favorite;
+    const isSetAside = !!bien.de_cote;
+    const annonceurType = String(bien.annonceur_type || "").trim().toLowerCase();
+    const isProfessionnel =
+      annonceurType === "professionnel" ||
+      (annonceurType === "" && !!String(bien.agence || "").trim());
+    const isParticulier =
+      annonceurType === "particulier" ||
+      (annonceurType === "" && !String(bien.agence || "").trim());
     const isSansAdresse = !!bien.sans_adresse;
     const anciennete = bien.anciennete;
     const isNouveau =
@@ -26,10 +39,22 @@ export function filterBiens(
 
     if (!correspondAuTexte) return false;
 
-    if (
-      showAllBiens &&
-      !isBlacklisted
-    ) {
+    if (showProfessionnels || showParticuliers) {
+      return (
+        (showProfessionnels && isProfessionnel) ||
+        (showParticuliers && isParticulier)
+      );
+    }
+
+    if (showAllBiens && !isBlacklisted) {
+      return true;
+    }
+
+    if (showFavorites && isFavorite) {
+      return true;
+    }
+
+    if (showSetAside && isSetAside) {
       return true;
     }
 
@@ -52,6 +77,22 @@ export function filterBiens(
 export function countBienCategories(biens) {
   return {
     allBiens: biens.filter((bien) => !bien.blackliste).length,
+    favorites: biens.filter((bien) => !!bien.favorite).length,
+    setAside: biens.filter((bien) => !!bien.de_cote).length,
+    professionnels: biens.filter((bien) => {
+      const annonceurType = String(bien.annonceur_type || "").trim().toLowerCase();
+      return (
+        annonceurType === "professionnel" ||
+        (annonceurType === "" && !!String(bien.agence || "").trim())
+      );
+    }).length,
+    particuliers: biens.filter((bien) => {
+      const annonceurType = String(bien.annonceur_type || "").trim().toLowerCase();
+      return (
+        annonceurType === "particulier" ||
+        (annonceurType === "" && !String(bien.agence || "").trim())
+      );
+    }).length,
     blacklist: biens.filter((bien) => !!bien.blackliste).length,
     sansAdresse: biens.filter((bien) => !!bien.sans_adresse).length,
     nouveaux: biens.filter(

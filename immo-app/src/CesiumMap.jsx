@@ -6,6 +6,7 @@ import {
   buildLabelGroupAssignments,
   buildMarkerEntityId,
   getMarkerLabelOffset,
+  getMarkerRenderPriority,
   getMarkerVisualState,
 } from "./utils/mapMarkerStyle";
 
@@ -54,6 +55,32 @@ function resolveMode(mapMode) {
   return mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
 }
 
+function truncateMarkerNote(note) {
+  const trimmedNote = (note || "").trim();
+  if (!trimmedNote) return "";
+  return trimmedNote.length <= 10 ? trimmedNote : `${trimmedNote.slice(0, 10)}...`;
+}
+
+function extractBoundaryLines(geometry) {
+  if (!geometry || !geometry.type || !geometry.coordinates) return [];
+
+  if (geometry.type === "Polygon") {
+    return geometry.coordinates.filter(
+      (ring) => Array.isArray(ring) && ring.length >= 2
+    );
+  }
+
+  if (geometry.type === "MultiPolygon") {
+    return geometry.coordinates.flatMap((polygon) =>
+      Array.isArray(polygon)
+        ? polygon.filter((ring) => Array.isArray(ring) && ring.length >= 2)
+        : []
+    );
+  }
+
+  return [];
+}
+
 function optimizeTouchNavigation(viewer) {
   const controller = viewer.scene.screenSpaceCameraController;
   controller.inertiaSpin = 0.65;
@@ -87,6 +114,11 @@ export default function CesiumMap({
   syncVersion = 0,
   focusBienId = null,
   focusBienVersion = 0,
+  onFocusHandled,
+  placingBienId = null,
+  placingBienLabel = "",
+  onPlaceBien,
+  boundaryGeoJson = null,
   mobilePanel = "desktop",
   isMobileMapExpanded = false,
   onToggleMobileMapExpanded,
@@ -98,8 +130,13 @@ export default function CesiumMap({
   const onAddCustomMarkerRef = useRef(onAddCustomMarker);
   const onUpdateCustomMarkerRef = useRef(onUpdateCustomMarker);
   const onDeleteCustomMarkerRef = useRef(onDeleteCustomMarker);
+  const onPlaceBienRef = useRef(onPlaceBien);
+  const onFocusHandledRef = useRef(onFocusHandled);
+  const placingBienIdRef = useRef(placingBienId);
+  const markerTextareaRef = useRef(null);
   const tilesetRef = useRef(null);
   const tilesetPromiseRef = useRef(null);
+  const boundaryDataSourceRef = useRef(null);
   const entitiesRef = useRef([]);
   const markerDataByIdRef = useRef(new Map());
   const modeRef = useRef(null);
@@ -127,6 +164,18 @@ export default function CesiumMap({
   useEffect(() => {
     onDeleteCustomMarkerRef.current = onDeleteCustomMarker;
   }, [onDeleteCustomMarker]);
+
+  useEffect(() => {
+    onPlaceBienRef.current = onPlaceBien;
+  }, [onPlaceBien]);
+
+  useEffect(() => {
+    onFocusHandledRef.current = onFocusHandled;
+  }, [onFocusHandled]);
+
+  useEffect(() => {
+    placingBienIdRef.current = placingBienId;
+  }, [placingBienId]);
 
   function applyEntityVisualState(entity) {
     const bien = entity.bienData;
@@ -296,6 +345,18 @@ export default function CesiumMap({
       if (!cartesian) return;
 
       const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+
+      if (placingBienIdRef.current) {
+        onPlaceBienRef.current?.(
+          placingBienIdRef.current,
+          Cesium.Math.toDegrees(cartographic.latitude),
+          Cesium.Math.toDegrees(cartographic.longitude)
+        );
+        setPendingMarkerPosition(null);
+        setSelectedCustomMarkerId(null);
+        return;
+      }
+
       setSelectedCustomMarkerId(null);
       setPendingMarkerPosition({
         lat: Cesium.Math.toDegrees(cartographic.latitude),
@@ -317,9 +378,57 @@ export default function CesiumMap({
       entitiesRef.current = [];
       tilesetRef.current = null;
       tilesetPromiseRef.current = null;
+      boundaryDataSourceRef.current = null;
       modeRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    function renderBoundary() {
+      if (boundaryDataSourceRef.current) {
+        viewer.dataSources.remove(boundaryDataSourceRef.current, true);
+        boundaryDataSourceRef.current = null;
+      }
+
+      if (!boundaryGeoJson) {
+        viewer.scene.requestRender();
+        return;
+      }
+
+      try {
+        const rings = extractBoundaryLines(boundaryGeoJson);
+        if (rings.length === 0) {
+          viewer.scene.requestRender();
+          return;
+        }
+
+        const dataSource = new Cesium.CustomDataSource("boundary");
+        rings.forEach((ring) => {
+          const flattenedDegrees = ring.flatMap((point) => [point[0], point[1]]);
+          dataSource.entities.add({
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArray(flattenedDegrees),
+              width: 4,
+              material: Cesium.Color.fromCssColorString("#ef4444"),
+              depthFailMaterial: Cesium.Color.fromCssColorString("#ef4444"),
+              clampToGround: true,
+            },
+          });
+        });
+
+        boundaryDataSourceRef.current = dataSource;
+        viewer.dataSources.add(dataSource);
+        viewer.scene.requestRender();
+      } catch (error) {
+        console.error("Erreur affichage bordure :", error);
+      }
+    }
+
+    renderBoundary();
+  }, [boundaryGeoJson]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -425,9 +534,13 @@ export default function CesiumMap({
       entitiesRef.current = [];
       markerDataByIdRef.current = new Map();
 
-      const biensAvecCoordonnees = biens.filter(
-        (bien) => bien.lat != null && bien.lon != null
-      );
+      const biensAvecCoordonnees = biens
+        .filter((bien) => bien.lat != null && bien.lon != null)
+        .sort(
+          (a, b) =>
+            getMarkerRenderPriority(a, selectedBienId) -
+            getMarkerRenderPriority(b, selectedBienId)
+        );
 
       const labelGroupAssignments =
         biensAvecCoordonnees.length > 0
@@ -543,7 +656,7 @@ export default function CesiumMap({
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
           label: {
-            text: marker.note,
+            text: truncateMarkerNote(marker.note),
             font: "15px sans-serif",
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
@@ -632,6 +745,7 @@ export default function CesiumMap({
     if (!bien || bien.lat == null || bien.lon == null) return;
 
     focusOnBien(viewer, bien, 0.9);
+    onFocusHandledRef.current?.();
   }, [focusBienId, focusBienVersion, biens]);
 
   useEffect(() => {
@@ -662,6 +776,20 @@ export default function CesiumMap({
       setMarkerDraftNote("");
     }
   }, [selectedCustomMarker, pendingMarkerPosition]);
+
+  useEffect(() => {
+    if (!pendingMarkerPosition && !selectedCustomMarker) return;
+
+    const focusTimeout = window.setTimeout(() => {
+      markerTextareaRef.current?.focus();
+      markerTextareaRef.current?.setSelectionRange(
+        markerTextareaRef.current.value.length,
+        markerTextareaRef.current.value.length
+      );
+    }, 20);
+
+    return () => window.clearTimeout(focusTimeout);
+  }, [pendingMarkerPosition, selectedCustomMarker]);
 
   async function submitCustomMarker() {
     const note = markerDraftNote.trim();
@@ -717,21 +845,54 @@ export default function CesiumMap({
     const viewer = viewerRef.current;
     if (!viewer) return;
 
-    const newPitch = isTilted
-      ? Cesium.Math.toRadians(-90)
-      : Cesium.Math.toRadians(-45);
+    const selectedBienData = selectedBienId
+      ? markerDataByIdRef.current.get(selectedBienId) || null
+      : null;
+    const canvasCenter = new Cesium.Cartesian2(
+      viewer.canvas.clientWidth / 2,
+      viewer.canvas.clientHeight / 2
+    );
+    const focusPosition =
+      getClickPosition(viewer.scene, canvasCenter) ||
+      (selectedBienData?.lat != null && selectedBienData?.lon != null
+        ? Cesium.Cartesian3.fromDegrees(
+            selectedBienData.lon,
+            selectedBienData.lat,
+            0
+          )
+        : null);
 
-    viewer.camera.flyTo({
-      destination: viewer.camera.position,
-      orientation: {
-        heading: viewer.camera.heading,
-        pitch: newPitch,
-        roll: 0,
-      },
+    if (!focusPosition) return;
+
+    const currentMode = resolveMode(mapMode);
+    const cameraHeight =
+      Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)?.height || 0;
+    const topDownRange = Math.max(
+      cameraHeight,
+      currentMode === "google3d" ? 160 : 850
+    );
+    const obliqueRange = Math.max(
+      topDownRange * (currentMode === "google3d" ? 1.18 : 1.12),
+      currentMode === "google3d" ? 220 : 980
+    );
+    const boundingSphere = new Cesium.BoundingSphere(
+      focusPosition,
+      currentMode === "google3d" ? 55 : 140
+    );
+    const nextTiltedValue = !isTilted;
+
+    viewer.camera.flyToBoundingSphere(boundingSphere, {
+      offset: new Cesium.HeadingPitchRange(
+        viewer.camera.heading,
+        nextTiltedValue
+          ? Cesium.Math.toRadians(-60)
+          : Cesium.Math.toRadians(-90),
+        nextTiltedValue ? obliqueRange : topDownRange
+      ),
       duration: 0.8,
     });
 
-    setIsTilted((value) => !value);
+    setIsTilted(nextTiltedValue);
   };
 
   return (
@@ -751,26 +912,34 @@ export default function CesiumMap({
         </div>
       ) : null}
 
+      {placingBienId ? (
+        <div
+          style={{
+            position: "absolute",
+            top: isMobile ? 64 : 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 7,
+            padding: "10px 14px",
+            borderRadius: 999,
+            border: "1px solid var(--border-color)",
+            background: "var(--panel-bg)",
+            color: "var(--text-primary)",
+            fontWeight: 700,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+            maxWidth: "calc(100% - 32px)",
+            textAlign: "center",
+          }}
+        >
+          Clique sur la carte pour placer le bien {placingBienLabel || ""}
+        </div>
+      ) : null}
+
       {!isMobile ? (
         <button
           onClick={onToggleMapMode}
           disabled={!canUseGoogle3D}
-          style={{
-            position: "absolute",
-            bottom: 84,
-            right: 20,
-            minWidth: 52,
-            height: 52,
-            borderRadius: 999,
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: "white",
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: canUseGoogle3D ? "pointer" : "not-allowed",
-            boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
-            padding: "0 16px",
-            opacity: canUseGoogle3D ? 1 : 0.55,
-          }}
+          style={desktopMapButtonStyle(84, canUseGoogle3D)}
           title={
             canUseGoogle3D
               ? mapMode === "google3d"
@@ -789,6 +958,7 @@ export default function CesiumMap({
             {pendingMarkerPosition ? "Nouveau repere" : "Repere perso"}
           </div>
           <textarea
+            ref={markerTextareaRef}
             value={markerDraftNote}
             onChange={(event) => setMarkerDraftNote(event.target.value)}
             placeholder="Ex : visite mercredi a 14h"
@@ -879,21 +1049,7 @@ export default function CesiumMap({
       ) : (
         <button
           onClick={toggleTilt}
-          style={{
-            position: "absolute",
-            bottom: 20,
-            right: 20,
-            minWidth: 52,
-            height: 52,
-            borderRadius: "50%",
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: "white",
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-            boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
-            padding: "0 12px",
-          }}
+          style={desktopMapButtonStyle(20, true, true)}
           title="Changer l'inclinaison"
         >
           {isTilted ? "2D" : "3D"}
@@ -1009,6 +1165,27 @@ function mobileMapToolbarIconButtonStyle(active) {
     alignItems: "center",
     justifyContent: "center",
     padding: 0,
+  };
+}
+
+function desktopMapButtonStyle(bottom, enabled = true, circular = false) {
+  return {
+    position: "absolute",
+    bottom,
+    right: 20,
+    minWidth: 52,
+    height: 52,
+    borderRadius: circular ? "50%" : 999,
+    border: "1px solid var(--control-border)",
+    background: "var(--control-bg)",
+    color: "var(--text-primary)",
+    fontWeight: 700,
+    fontSize: 14,
+    cursor: enabled ? "pointer" : "not-allowed",
+    boxShadow: "var(--control-shadow)",
+    padding: circular ? "0 12px" : "0 16px",
+    opacity: enabled ? 1 : 0.55,
+    backdropFilter: "blur(10px)",
   };
 }
 

@@ -75,7 +75,7 @@ def login_to_yanport(username: str, password: str) -> dict:
     )
 
     if not token:
-        raise HTTPException(status_code=401, detail="Réponse Yanport invalide")
+        raise HTTPException(status_code=401, detail="Reponse Yanport invalide")
 
     return {
         "token": token,
@@ -105,7 +105,9 @@ def build_properties_url(zip_code: str | None = None, ville: str | None = None) 
     return url
 
 
-def fetch_properties(access_token: str, zip_code: str | None = None, ville: str | None = None) -> list[dict]:
+def fetch_properties(
+    access_token: str, zip_code: str | None = None, ville: str | None = None
+) -> list[dict]:
     url = build_properties_url(zip_code=zip_code, ville=ville)
 
     try:
@@ -122,7 +124,7 @@ def fetch_properties(access_token: str, zip_code: str | None = None, ville: str 
         raise HTTPException(status_code=502, detail=f"Impossible de joindre Yanport: {exc}")
 
     if response.status_code == 401:
-        raise HTTPException(status_code=401, detail="Session Yanport expirée. Merci de vous reconnecter.")
+        raise HTTPException(status_code=401, detail="Session Yanport expiree. Merci de vous reconnecter.")
 
     if response.status_code != 200:
         logger.warning(
@@ -185,7 +187,33 @@ def extract_agence(bien: dict) -> str:
     )
 
 
-def map_property_for_front(bien: dict, blacklist_ids: set[str], notes_map: dict[str, str]) -> dict:
+def extract_annonceur_type(bien: dict) -> str:
+    dealers = bien.get("marketing", {}).get("dealers", [])
+
+    dealer_types = [
+        str(dealer.get("type", "")).strip().upper()
+        for dealer in dealers
+        if str(dealer.get("type", "")).strip()
+    ]
+
+    if "PRIVATE" in dealer_types:
+        return "particulier"
+
+    if "AGENCY" in dealer_types or "PROFESSIONAL" in dealer_types:
+        return "professionnel"
+
+    agency = extract_agence(bien).strip()
+    return "professionnel" if agency else "particulier"
+
+
+def map_property_for_front(
+    bien: dict,
+    blacklist_ids: set[str],
+    notes_map: dict[str, str],
+    favorite_ids: set[str] | None = None,
+    set_aside_ids: set[str] | None = None,
+    placements_map: dict[str, dict] | None = None,
+) -> dict:
     id_bien = str(bien.get("id", ""))
 
     marketing = bien.get("marketing", {})
@@ -197,11 +225,12 @@ def map_property_for_front(bien: dict, blacklist_ids: set[str], notes_map: dict[
 
     prix = marketing.get("price")
     surface = geometry.get("surface")
-    adresse = address.get("formatted", "") or "Adresse non renseignée"
+    adresse = address.get("formatted", "") or ""
     lat = location.get("lat")
     lon = location.get("lon")
     images = visual.get("images", [])
     agence = extract_agence(bien)
+    annonceur_type = extract_annonceur_type(bien)
     date_pub = marketing.get("publicationStartDate")
     anciennete = compute_anciennete(date_pub)
     ads = bien.get("ads", [])
@@ -239,9 +268,22 @@ def map_property_for_front(bien: dict, blacklist_ids: set[str], notes_map: dict[
 
     lien_yanport = f"https://app.yanport.com/properties/{id_bien}"
 
+    placement = (placements_map or {}).get(id_bien)
+    if placement:
+        lat = placement.get("lat", lat)
+        lon = placement.get("lon", lon)
+        if placement.get("manual_address", "").strip():
+            adresse = placement["manual_address"].strip()
+
     blacklisted = id_bien in blacklist_ids
     sans_adresse = lat is None or lon is None
     note = notes_map.get(id_bien, "")
+    favorite = id_bien in (favorite_ids or set())
+    de_cote = id_bien in (set_aside_ids or set())
+    placed_manually = placement is not None
+
+    if sans_adresse:
+        adresse = ""
 
     if blacklisted:
         statut = "blackliste"
@@ -262,6 +304,7 @@ def map_property_for_front(bien: dict, blacklist_ids: set[str], notes_map: dict[
         "lat": lat,
         "lon": lon,
         "agence": agence,
+        "annonceur_type": annonceur_type,
         "photos": images,
         # Yanport expose une galerie unique. On la rattache a Leboncoin
         # uniquement lorsqu'une annonce Leboncoin existe pour ce bien.
@@ -275,4 +318,7 @@ def map_property_for_front(bien: dict, blacklist_ids: set[str], notes_map: dict[
         "lien_logicimmo": lien_logicimmo,
         "lien_figaro": lien_figaro,
         "note": note,
+        "favorite": favorite,
+        "de_cote": de_cote,
+        "placed_manually": placed_manually,
     }

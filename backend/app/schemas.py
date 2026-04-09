@@ -61,6 +61,7 @@ class BienResponse(BaseModel):
     lat: float | None = None
     lon: float | None = None
     agence: str = ""
+    annonceur_type: str = ""
     photos: list[str] = Field(default_factory=list)
     photos_leboncoin: list[str] = Field(default_factory=list)
     lien_annonce: str = ""
@@ -72,11 +73,15 @@ class BienResponse(BaseModel):
     lien_logicimmo: str = ""
     lien_figaro: str = ""
     note: str = ""
+    favorite: bool = False
+    de_cote: bool = False
+    placed_manually: bool = False
 
 
 class CustomMarkerCreateRequest(BaseModel):
     lat: float
     lon: float
+    search_zone: str = Field(default="", max_length=64)
     note: str = Field(default="", min_length=1, max_length=5000)
 
 
@@ -89,6 +94,48 @@ class CustomMarkerResponse(BaseModel):
     user_id: str
     lat: float
     lon: float
+    search_zone: str = ""
     note: str
+
+    model_config = {"from_attributes": True}
+
+
+class FavoriteBienRequest(BaseModel):
+    bien_id: str = Field(min_length=1, max_length=255)
+
+
+class FavoriteBienResponse(BaseModel):
+    id: int
+    user_id: str
+    bien_id: str
+
+    model_config = {"from_attributes": True}
+
+
+class SetAsideBienRequest(BaseModel):
+    bien_id: str = Field(min_length=1, max_length=255)
+
+
+class SetAsideBienResponse(BaseModel):
+    id: int
+    user_id: str
+    bien_id: str
+
+    model_config = {"from_attributes": True}
+
+
+class BienPlacementRequest(BaseModel):
+    lat: float
+    lon: float
+    manual_address: str = Field(default="", max_length=500)
+
+
+class BienPlacementResponse(BaseModel):
+    id: int
+    user_id: str
+    bien_id: str
+    lat: float
+    lon: float
+    manual_address: str
 
     model_config = {"from_attributes": True}

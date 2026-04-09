@@ -1,0 +1,88 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#070B11"/>
+  <rect x="0" y="0" width="1440" height="72" fill="#0D1420"/>
+  <circle cx="36" cy="36" r="18" fill="#141E2D"/>
+  <rect x="28" y="30" width="16" height="2" rx="1" fill="#EAF0FF"/>
+  <rect x="28" y="35" width="16" height="2" rx="1" fill="#EAF0FF"/>
+  <rect x="28" y="40" width="16" height="2" rx="1" fill="#EAF0FF"/>
+  <text x="68" y="42" fill="#F8FAFF" font-size="28" font-family="Segoe UI, Arial" font-weight="700">Immo3D</text>
+  <text x="190" y="42" fill="#7D8CA6" font-size="16" font-family="Segoe UI, Arial">Vue opérationnelle terrain</text>
+  <rect x="1140" y="18" width="120" height="36" rx="18" fill="#111A28"/>
+  <text x="1174" y="41" fill="#F8FAFF" font-size="15" font-family="Segoe UI, Arial">Export</text>
+  <rect x="1274" y="18" width="132" height="36" rx="18" fill="#F97316"/>
+  <text x="1312" y="41" fill="#111111" font-size="15" font-family="Segoe UI, Arial" font-weight="700">Déconnexion</text>
+
+  <rect x="18" y="90" width="292" height="792" rx="24" fill="#0C121C"/>
+  <text x="36" y="130" fill="#AAB7CE" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">RECHERCHE</text>
+  <rect x="32" y="146" width="264" height="56" rx="16" fill="#111A28" stroke="#1B2840"/>
+  <text x="50" y="181" fill="#F8FAFF" font-size="24" font-family="Segoe UI, Arial" font-weight="700">62670</text>
+  <rect x="32" y="214" width="264" height="46" rx="14" fill="#111A28" stroke="#1B2840"/>
+  <text x="48" y="242" fill="#6E7B92" font-size="15" font-family="Segoe UI, Arial">Filtrer : adresse, agence, ID...</text>
+  <rect x="32" y="274" width="264" height="50" rx="18" fill="#EAF0FF"/>
+  <text x="96" y="305" fill="#09101A" font-size="16" font-family="Segoe UI, Arial" font-weight="700">Synchroniser</text>
+
+  <text x="36" y="364" fill="#AAB7CE" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">FILTRES</text>
+  <rect x="32" y="382" width="264" height="40" rx="14" fill="#101A29"/>
+  <text x="48" y="407" fill="#F8FAFF" font-size="14" font-family="Segoe UI, Arial">Tous les biens</text>
+  <text x="250" y="407" fill="#7DE3A1" font-size="14" font-family="Segoe UI, Arial">91</text>
+  <rect x="32" y="432" width="264" height="40" rx="14" fill="#101A29"/>
+  <text x="48" y="457" fill="#F8FAFF" font-size="14" font-family="Segoe UI, Arial">Favoris</text>
+  <text x="250" y="457" fill="#FFD970" font-size="14" font-family="Segoe UI, Arial">12</text>
+  <rect x="32" y="482" width="264" height="40" rx="14" fill="#101A29"/>
+  <text x="48" y="507" fill="#F8FAFF" font-size="14" font-family="Segoe UI, Arial">Mettre de côté</text>
+  <text x="250" y="507" fill="#F5B041" font-size="14" font-family="Segoe UI, Arial">8</text>
+
+  <text x="36" y="560" fill="#AAB7CE" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">BIENS</text>
+  <rect x="32" y="578" width="264" height="130" rx="20" fill="#111B2A" stroke="#26334A"/>
+  <text x="50" y="615" fill="#F8FAFF" font-size="28" font-family="Segoe UI, Arial" font-weight="700">126 000 EUR</text>
+  <text x="50" y="646" fill="#B8C5DB" font-size="16" font-family="Segoe UI, Arial">45 Rue Alphonse Decatoire</text>
+  <text x="50" y="672" fill="#7D8CA6" font-size="14" font-family="Segoe UI, Arial">80 m2 • 152 jours</text>
+  <rect x="220" y="595" width="58" height="24" rx="12" fill="#9BE7B2"/>
+  <text x="236" y="611" fill="#112015" font-size="12" font-family="Segoe UI, Arial" font-weight="700">actif</text>
+  <rect x="32" y="720" width="264" height="130" rx="20" fill="#0F1723"/>
+  <text x="50" y="757" fill="#F8FAFF" font-size="28" font-family="Segoe UI, Arial" font-weight="700">98 000 EUR</text>
+  <text x="50" y="788" fill="#B8C5DB" font-size="16" font-family="Segoe UI, Arial">Sans adresse</text>
+  <text x="50" y="814" fill="#7D8CA6" font-size="14" font-family="Segoe UI, Arial">76 m2 • 1 jour</text>
+  <rect x="214" y="737" width="64" height="24" rx="12" fill="#FFD970"/>
+  <text x="223" y="753" fill="#3B2C05" font-size="12" font-family="Segoe UI, Arial" font-weight="700">nouveau</text>
+
+  <rect x="328" y="90" width="784" height="792" rx="28" fill="#0B1018"/>
+  <rect x="348" y="110" width="744" height="752" rx="24" fill="#1B2434"/>
+  <path d="M348 240C532 164 731 152 1092 224V862H348V240Z" fill="#D8E5BF"/>
+  <path d="M348 390C587 300 800 314 1092 372" stroke="#E9F7D2" stroke-width="10"/>
+  <path d="M376 306L520 250L594 290L660 210L820 254L926 194L1032 242" stroke="#CFD992" stroke-width="52" stroke-linecap="round"/>
+  <path d="M422 410L470 372L536 404L602 336L676 390L748 356L828 406L906 358L990 408L1048 374" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <path d="M408 586L590 512L702 556L796 498L928 544L1020 504" stroke="#E57D6A" stroke-width="32" stroke-linecap="round"/>
+  <path d="M430 586L590 512L702 556L796 498L928 544L1020 504" stroke="#F8FAFF" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="700" cy="404" r="12" fill="#22C55E" stroke="#F8FAFF" stroke-width="4"/>
+  <circle cx="736" cy="434" r="12" fill="#F59E0B" stroke="#F8FAFF" stroke-width="4"/>
+  <circle cx="768" cy="394" r="12" fill="#EF4444" stroke="#F8FAFF" stroke-width="4"/>
+  <circle cx="820" cy="430" r="12" fill="#EF4444" stroke="#F8FAFF" stroke-width="4"/>
+  <circle cx="892" cy="520" r="12" fill="#EF4444" stroke="#F8FAFF" stroke-width="4"/>
+  <rect x="956" y="772" width="136" height="44" rx="22" fill="#111A28"/>
+  <text x="991" y="800" fill="#F8FAFF" font-size="16" font-family="Segoe UI, Arial">Vue satellite</text>
+  <rect x="1006" y="824" width="86" height="38" rx="19" fill="#111A28"/>
+  <text x="1035" y="848" fill="#F8FAFF" font-size="15" font-family="Segoe UI, Arial">3D</text>
+
+  <rect x="1130" y="90" width="292" height="792" rx="24" fill="#0C121C"/>
+  <text x="1154" y="130" fill="#AAB7CE" font-size="13" font-family="Segoe UI, Arial" letter-spacing="2">BIEN SELECTIONNE</text>
+  <rect x="1330" y="114" width="72" height="24" rx="12" fill="#9BE7B2"/>
+  <text x="1347" y="130" fill="#102015" font-size="12" font-family="Segoe UI, Arial" font-weight="700">actif</text>
+  <text x="1154" y="180" fill="#F8FAFF" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Agence :</tspan> Era Immobilier</text>
+  <text x="1154" y="220" fill="#F8FAFF" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Adresse :</tspan> 45 Rue A. Decatoire</text>
+  <text x="1154" y="260" fill="#F8FAFF" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Prix :</tspan> 126 000 EUR</text>
+  <text x="1154" y="300" fill="#F8FAFF" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Surface :</tspan> 80 m2</text>
+  <text x="1154" y="340" fill="#F8FAFF" font-size="17" font-family="Segoe UI, Arial"><tspan font-weight="700">Anciennete :</tspan> 152 jours</text>
+  <rect x="1154" y="384" width="98" height="34" rx="17" fill="#111A28" stroke="#2B3A54"/>
+  <text x="1180" y="406" fill="#F8FAFF" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Favori</text>
+  <rect x="1264" y="384" width="118" height="34" rx="17" fill="#F59E0B"/>
+  <text x="1287" y="406" fill="#171107" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Mettre de cote</text>
+  <rect x="1154" y="434" width="106" height="34" rx="17" fill="#DC2626"/>
+  <text x="1178" y="456" fill="#FFF5F5" font-size="14" font-family="Segoe UI, Arial" font-weight="700">Blacklister</text>
+  <rect x="1154" y="494" width="228" height="112" rx="18" fill="#0F1723" stroke="#26334A"/>
+  <text x="1176" y="542" fill="#56647C" font-size="15" font-family="Segoe UI, Arial">Ajoute une note sur ce bien...</text>
+  <rect x="1154" y="634" width="114" height="92" rx="18" fill="#D5DCE5"/>
+  <rect x="1278" y="634" width="114" height="92" rx="18" fill="#C6D0DB"/>
+  <rect x="1154" y="738" width="114" height="92" rx="18" fill="#B7C6D4"/>
+  <rect x="1278" y="738" width="114" height="92" rx="18" fill="#DCE5EC"/>
+</svg>

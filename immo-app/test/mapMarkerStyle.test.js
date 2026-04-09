@@ -5,6 +5,7 @@ import {
   buildLabelGroupAssignments,
   buildMarkerEntityId,
   getMarkerLabelOffset,
+  getMarkerRenderPriority,
   getMarkerVisualState,
 } from "../src/utils/mapMarkerStyle.js";
 
@@ -39,6 +40,13 @@ test("getMarkerVisualState keeps ageing colors for non selected biens", () => {
     getMarkerVisualState({ id: "3", anciennete: 45 }, "X").color,
     "red"
   );
+});
+
+test("getMarkerRenderPriority keeps green markers above orange and red ones", () => {
+  assert.equal(getMarkerRenderPriority({ id: "r", anciennete: 40 }, null), 1);
+  assert.equal(getMarkerRenderPriority({ id: "o", anciennete: 10 }, null), 2);
+  assert.equal(getMarkerRenderPriority({ id: "g", anciennete: 3 }, null), 3);
+  assert.equal(getMarkerRenderPriority({ id: "s", anciennete: 200 }, "s"), 99);
 });
 
 test("buildLabelGroupAssignments groups same coordinates together", () => {

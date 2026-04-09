@@ -6,16 +6,18 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.db import Base, engine
+from app.db import Base, engine, ensure_sqlite_compatibility_migrations
 from app.models import AppSession, BlacklistItem, CustomMarker, Note, User, YanportSession
 from app.routers.auth import router as auth_router
 from app.routers.biens import router as biens_router
 from app.routers.blacklist import router as blacklist_router
+from app.routers.geocoding import router as geocoding_router
 from app.routers.markers import router as markers_router
 from app.routers.notes import router as notes_router
 
 
 Base.metadata.create_all(bind=engine)
+ensure_sqlite_compatibility_migrations()
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = BACKEND_ROOT / "frontend_dist"
@@ -42,6 +44,7 @@ app.include_router(notes_router)
 app.include_router(blacklist_router)
 app.include_router(markers_router)
 app.include_router(biens_router)
+app.include_router(geocoding_router)
 
 
 if FRONTEND_DIST.exists():
@@ -83,6 +86,7 @@ if FRONTEND_DIST.exists():
             "notes",
             "markers",
             "health",
+            "geocoding",
             "docs",
             "openapi.json",
             "redoc",

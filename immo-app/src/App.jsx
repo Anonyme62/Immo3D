@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   addBlacklist,
+  addSetAside,
+  deleteBienPlacement,
+  addFavorite,
   createCustomMarker,
+  getBoundary,
   deleteCustomMarker,
   getAuthStatus,
   getBiens,
@@ -9,7 +13,10 @@ import {
   loginYanport,
   logoutYanport,
   removeBlacklist,
+  removeFavorite,
+  removeSetAside,
   saveNote,
+  saveBienPlacement,
   updateCustomMarker,
 } from "./api";
 import AppMenu from "./components/AppMenu";
@@ -24,13 +31,25 @@ import { downloadKmlExport } from "./utils/kmlExport";
 function App() {
   const noteTimerRef = useRef(null);
   const isBackgroundRefreshingRef = useRef(false);
+  const DESKTOP_LEFT_WIDTH = 340;
+  const DESKTOP_RIGHT_WIDTH = 380;
+  const DESKTOP_COLLAPSED_HANDLE = 28;
   const LAST_SEARCH_STORAGE_KEY = "immo3d_last_search_zone";
+  const RECENT_SEARCHES_STORAGE_KEY = "immo3d_recent_searches";
   const THEME_STORAGE_KEY = "immo3d_theme_mode";
+  const STYLE_STORAGE_KEY = "immo3d_style_mode";
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 980);
   const [themeMode, setThemeMode] = useState(() => {
     const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
     return savedTheme === "dark" ? "dark" : "light";
+  });
+  const [styleMode, setStyleMode] = useState(() => {
+    const savedStyle = localStorage.getItem(STYLE_STORAGE_KEY);
+    if (savedStyle === "atlas") return "luxury";
+    return ["default", "editorial", "luxury", "heritage", "glass"].includes(savedStyle)
+      ? savedStyle
+      : "default";
   });
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -46,6 +65,8 @@ function App() {
   const [syncError, setSyncError] = useState("");
   const [search, setSearch] = useState("");
   const [zoneRecherche, setZoneRecherche] = useState("");
+  const [activeZoneRecherche, setActiveZoneRecherche] = useState("");
+  const [recentSearches, setRecentSearches] = useState([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteStatus, setNoteStatus] = useState("");
   const [mapMode, setMapMode] = useState("osm");
@@ -54,12 +75,26 @@ function App() {
   const [focusBienVersion, setFocusBienVersion] = useState(0);
   const [mobilePanel, setMobilePanel] = useState("search");
   const [isMapExpandedMobile, setIsMapExpandedMobile] = useState(false);
+  const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [customMarkers, setCustomMarkers] = useState([]);
+  const [showBoundary, setShowBoundary] = useState(true);
+  const [boundaryGeoJson, setBoundaryGeoJson] = useState(null);
+  const [placingBienId, setPlacingBienId] = useState(null);
 
   const [showAllBiens, setShowAllBiens] = useState(true);
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [showSetAside, setShowSetAside] = useState(false);
+  const [showProfessionnels, setShowProfessionnels] = useState(false);
+  const [showParticuliers, setShowParticuliers] = useState(false);
   const [showBlacklist, setShowBlacklist] = useState(true);
   const [showSansAdresse, setShowSansAdresse] = useState(true);
   const [showNouveaux, setShowNouveaux] = useState(true);
+
+  const boundaryQuery = useMemo(
+    () => inferBoundaryQuery(activeZoneRecherche, biens),
+    [activeZoneRecherche, biens]
+  );
 
   function scrollPageToTop(behavior = "auto") {
     window.scrollTo({ top: 0, left: 0, behavior });
@@ -67,19 +102,53 @@ function App() {
     document.body.scrollTop = 0;
   }
 
+  function rememberSearchZone(nextZone) {
+    const trimmedZone = nextZone.trim();
+    if (!trimmedZone) return;
+
+    setRecentSearches((previous) => {
+      const nextRecentSearches = [
+        trimmedZone,
+        ...previous.filter((value) => value !== trimmedZone),
+      ].slice(0, 3);
+
+      localStorage.setItem(
+        RECENT_SEARCHES_STORAGE_KEY,
+        JSON.stringify(nextRecentSearches)
+      );
+      return nextRecentSearches;
+    });
+  }
+
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
 
   useEffect(() => {
+    localStorage.setItem(STYLE_STORAGE_KEY, styleMode);
+  }, [styleMode]);
+
+  useEffect(() => {
     const savedEmail = localStorage.getItem("yanport_email");
     const savedRemember = localStorage.getItem("yanport_remember_me");
     const savedSearchZone = localStorage.getItem(LAST_SEARCH_STORAGE_KEY);
+    const savedRecentSearches = localStorage.getItem(RECENT_SEARCHES_STORAGE_KEY);
+
+    let parsedRecentSearches = [];
+    if (savedRecentSearches) {
+      try {
+        parsedRecentSearches = JSON.parse(savedRecentSearches);
+      } catch {
+        parsedRecentSearches = [];
+      }
+    }
 
     setLoginEmail(savedEmail || "");
     setRememberMe(savedRemember === "true");
     setLoginPassword("");
     setZoneRecherche(savedSearchZone || "");
+    setActiveZoneRecherche(savedSearchZone || "");
+    setRecentSearches(Array.isArray(parsedRecentSearches) ? parsedRecentSearches : []);
   }, []);
 
   useLayoutEffect(() => {
@@ -153,7 +222,7 @@ function App() {
       }
 
       try {
-        const data = await getCustomMarkers();
+        const data = await getCustomMarkers(activeZoneRecherche);
         setCustomMarkers(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Erreur chargement reperes perso :", error);
@@ -161,12 +230,40 @@ function App() {
     }
 
     chargerReperesPersonnels();
-  }, [isLoggedIn]);
+  }, [isLoggedIn, activeZoneRecherche]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function chargerBordure() {
+      if (!showBoundary || !boundaryQuery.trim()) {
+        setBoundaryGeoJson(null);
+        return;
+      }
+
+      try {
+        const data = await getBoundary(boundaryQuery);
+        if (!cancelled) {
+          setBoundaryGeoJson(data?.found ? data.geojson || null : null);
+        }
+      } catch (error) {
+        console.error("Erreur chargement bordure :", error);
+        if (!cancelled) {
+          setBoundaryGeoJson(null);
+        }
+      }
+    }
+
+    chargerBordure();
+    return () => {
+      cancelled = true;
+    };
+  }, [showBoundary, boundaryQuery]);
 
   async function refreshBiensInBackground() {
     if (!isLoggedIn || isBackgroundRefreshingRef.current || loading) return;
 
-    const nextZoneRecherche = zoneRecherche.trim();
+    const nextZoneRecherche = activeZoneRecherche.trim();
     if (!nextZoneRecherche) return;
 
     isBackgroundRefreshingRef.current = true;
@@ -271,12 +368,16 @@ function App() {
     return filterBiens(biens, {
       search,
       showAllBiens,
+      showFavorites,
+      showSetAside,
+      showProfessionnels,
+      showParticuliers,
       showBlacklist,
       showSansAdresse,
       showNouveaux,
       selectedBienId: selectedBien?.id ?? null,
     });
-  }, [biens, search, showAllBiens, showBlacklist, showSansAdresse, showNouveaux, selectedBien?.id]);
+  }, [biens, search, showAllBiens, showFavorites, showSetAside, showProfessionnels, showParticuliers, showBlacklist, showSansAdresse, showNouveaux, selectedBien?.id]);
 
   const counts = useMemo(() => countBienCategories(biens), [biens]);
 
@@ -305,11 +406,20 @@ function App() {
   }, [selectedBien]);
 
   useEffect(() => {
+    if (!selectedBien) {
+      setPlacingBienId(null);
+    }
+  }, [selectedBien]);
+
+  useEffect(() => {
     if (!isMobile) {
       setMobilePanel("search");
       setIsMapExpandedMobile(false);
       return;
     }
+
+    setIsLeftSidebarCollapsed(false);
+    setIsRightPanelCollapsed(false);
 
     if (!selectedBien && mobilePanel === "detail") {
       setMobilePanel("list");
@@ -336,9 +446,12 @@ function App() {
       setSelectedBien(null);
       setSyncError("");
       setSyncVersion((value) => value + 1);
+      setActiveZoneRecherche(nextZoneRecherche);
       localStorage.setItem(LAST_SEARCH_STORAGE_KEY, nextZoneRecherche);
+      rememberSearchZone(nextZoneRecherche);
 
       setFocusBienId(null);
+      setPlacingBienId(null);
 
       if (isMobile) {
         setMobilePanel("list");
@@ -455,6 +568,82 @@ function App() {
     }
   }
 
+  async function ajouterFavori() {
+    if (!selectedBien) return;
+
+    try {
+      await addFavorite(selectedBien.id);
+
+      setBiens((prevBiens) =>
+        prevBiens.map((bien) =>
+          bien.id === selectedBien.id ? { ...bien, favorite: true } : bien
+        )
+      );
+
+      setSelectedBien((prev) => (prev ? { ...prev, favorite: true } : prev));
+    } catch (error) {
+      console.error("Erreur ajout favori :", error);
+      alert(error.message || "Erreur lors de l'ajout aux favoris");
+    }
+  }
+
+  async function retirerFavori() {
+    if (!selectedBien) return;
+
+    try {
+      await removeFavorite(selectedBien.id);
+
+      setBiens((prevBiens) =>
+        prevBiens.map((bien) =>
+          bien.id === selectedBien.id ? { ...bien, favorite: false } : bien
+        )
+      );
+
+      setSelectedBien((prev) => (prev ? { ...prev, favorite: false } : prev));
+    } catch (error) {
+      console.error("Erreur retrait favori :", error);
+      alert(error.message || "Erreur lors du retrait des favoris");
+    }
+  }
+
+  async function ajouterDeCote() {
+    if (!selectedBien) return;
+
+    try {
+      await addSetAside(selectedBien.id);
+
+      setBiens((prevBiens) =>
+        prevBiens.map((bien) =>
+          bien.id === selectedBien.id ? { ...bien, de_cote: true } : bien
+        )
+      );
+
+      setSelectedBien((prev) => (prev ? { ...prev, de_cote: true } : prev));
+    } catch (error) {
+      console.error("Erreur ajout mettre de cote :", error);
+      alert(error.message || "Erreur lors du rangement de ce bien");
+    }
+  }
+
+  async function retirerDeCote() {
+    if (!selectedBien) return;
+
+    try {
+      await removeSetAside(selectedBien.id);
+
+      setBiens((prevBiens) =>
+        prevBiens.map((bien) =>
+          bien.id === selectedBien.id ? { ...bien, de_cote: false } : bien
+        )
+      );
+
+      setSelectedBien((prev) => (prev ? { ...prev, de_cote: false } : prev));
+    } catch (error) {
+      console.error("Erreur retrait mettre de cote :", error);
+      alert(error.message || "Erreur lors du retrait de ce bien");
+    }
+  }
+
   function handleNoteChange(value) {
     if (!selectedBien) return;
 
@@ -486,6 +675,10 @@ function App() {
   function handleFilterChange(key, value) {
     const setters = {
       showAllBiens: setShowAllBiens,
+      showFavorites: setShowFavorites,
+      showSetAside: setShowSetAside,
+      showProfessionnels: setShowProfessionnels,
+      showParticuliers: setShowParticuliers,
       showBlacklist: setShowBlacklist,
       showSansAdresse: setShowSansAdresse,
       showNouveaux: setShowNouveaux,
@@ -501,13 +694,14 @@ function App() {
 
   function handleExportKml() {
     downloadKmlExport({
-      zoneRecherche,
+      zoneRecherche: activeZoneRecherche || zoneRecherche,
       biens: biensFiltres,
       customMarkers,
     });
   }
 
   function handleSidebarSelection(bien) {
+    setPlacingBienId(null);
     setSelectedBien(bien);
     if (bien.lat != null && bien.lon != null) {
       setFocusBienId(bien.id);
@@ -522,7 +716,12 @@ function App() {
   }
 
   async function handleAddCustomMarker(marker) {
-    const created = await createCustomMarker(marker.lat, marker.lon, marker.note);
+    const created = await createCustomMarker(
+      marker.lat,
+      marker.lon,
+      marker.note,
+      activeZoneRecherche
+    );
     setCustomMarkers((prev) => [created, ...prev]);
   }
 
@@ -538,11 +737,99 @@ function App() {
     setCustomMarkers((prev) => prev.filter((marker) => marker.id !== markerId));
   }
 
+  function startPlacingSelectedBien() {
+    if (!selectedBien) return;
+    const canPlaceMarker =
+      selectedBien.sans_adresse || selectedBien.placed_manually;
+    if (!canPlaceMarker) return;
+
+    setPlacingBienId((currentValue) =>
+      currentValue === selectedBien.id ? null : selectedBien.id
+    );
+  }
+
+  async function handlePlaceBienOnMap(bienId, lat, lon) {
+    const savedPlacement = await saveBienPlacement(bienId, lat, lon);
+
+    setBiens((prevBiens) =>
+      prevBiens.map((bien) =>
+        bien.id === bienId
+          ? {
+              ...bien,
+              lat: savedPlacement.lat,
+              lon: savedPlacement.lon,
+              adresse: savedPlacement.manual_address || bien.adresse || "",
+              sans_adresse: false,
+              placed_manually: true,
+            }
+          : bien
+      )
+    );
+
+    setSelectedBien((prev) =>
+      prev && prev.id === bienId
+        ? {
+            ...prev,
+            lat: savedPlacement.lat,
+            lon: savedPlacement.lon,
+            adresse: savedPlacement.manual_address || prev.adresse || "",
+            sans_adresse: false,
+            placed_manually: true,
+          }
+        : prev
+    );
+
+    setPlacingBienId(null);
+    setFocusBienId(bienId);
+    setFocusBienVersion((value) => value + 1);
+  }
+
+  async function handleRemovePlacedBienMarker() {
+    if (!selectedBien?.placed_manually) return;
+
+    await deleteBienPlacement(selectedBien.id);
+
+    setBiens((prevBiens) =>
+      prevBiens.map((bien) =>
+        bien.id === selectedBien.id
+          ? {
+              ...bien,
+              lat: null,
+              lon: null,
+              adresse: "",
+              sans_adresse: true,
+              placed_manually: false,
+            }
+          : bien
+      )
+    );
+
+    setSelectedBien((prev) =>
+      prev
+        ? {
+            ...prev,
+            lat: null,
+            lon: null,
+            adresse: "",
+            sans_adresse: true,
+            placed_manually: false,
+          }
+        : prev
+    );
+
+    setPlacingBienId(null);
+    setFocusBienId(null);
+  }
+
+  function handleMapFocusHandled() {
+    setFocusBienId(null);
+  }
+
   if (!authChecked) {
     return (
       <div
         style={{
-          ...getThemeVariables(themeMode),
+          ...getThemeVariables(themeMode, styleMode),
           height: "100vh",
           display: "flex",
           alignItems: "center",
@@ -577,7 +864,7 @@ function App() {
   return (
       <div
         style={{
-          ...getThemeVariables(themeMode),
+          ...getThemeVariables(themeMode, styleMode),
           height: isMobile ? "auto" : "100vh",
           minHeight: "100svh",
           display: "flex",
@@ -591,38 +878,56 @@ function App() {
         }}
       >
       {!isMobile ? (
-        <BiensSidebar
-          desktopHeader={
-            <AppMenu
-              onLogout={seDeconnecter}
-              onExportKml={handleExportKml}
-              themeMode={themeMode}
-              onToggleTheme={() =>
-                setThemeMode((value) => (value === "dark" ? "light" : "dark"))
-              }
-              compact
-            />
-          }
-          zoneRecherche={zoneRecherche}
-          search={search}
-          loading={loading}
-          syncError={syncError}
-          filteredBiens={biensFiltres}
-          selectedBienId={selectedBien?.id ?? null}
-          counts={counts}
-          filterState={{
-            showAllBiens,
-            showBlacklist,
-            showSansAdresse,
-            showNouveaux,
-          }}
-          onZoneRechercheChange={setZoneRecherche}
-          onSearchChange={setSearch}
-          onSynchronize={chargerBiens}
-          onFilterChange={handleFilterChange}
-          onSelectBien={handleSidebarSelection}
-          isMobile={false}
-        />
+        <DesktopSidePanel
+          side="left"
+          width={DESKTOP_LEFT_WIDTH}
+          collapsedWidth={DESKTOP_COLLAPSED_HANDLE}
+          collapsed={isLeftSidebarCollapsed}
+          onToggle={() => setIsLeftSidebarCollapsed((value) => !value)}
+        >
+          <BiensSidebar
+            desktopHeader={
+              <AppMenu
+                onLogout={seDeconnecter}
+                onExportKml={handleExportKml}
+                showBoundary={showBoundary}
+                onToggleBoundary={() => setShowBoundary((value) => !value)}
+                themeMode={themeMode}
+                onToggleTheme={() =>
+                  setThemeMode((value) => (value === "dark" ? "light" : "dark"))
+                }
+                styleMode={styleMode}
+                onChangeStyle={setStyleMode}
+                compact
+              />
+            }
+            zoneRecherche={zoneRecherche}
+            recentSearches={recentSearches}
+            search={search}
+            loading={loading}
+            syncError={syncError}
+            filteredBiens={biensFiltres}
+            selectedBienId={selectedBien?.id ?? null}
+            counts={counts}
+            filterState={{
+              showAllBiens,
+              showFavorites,
+              showSetAside,
+              showProfessionnels,
+              showParticuliers,
+              showBlacklist,
+              showSansAdresse,
+              showNouveaux,
+            }}
+            onZoneRechercheChange={setZoneRecherche}
+            onSelectRecentSearch={setZoneRecherche}
+            onSearchChange={setSearch}
+            onSynchronize={chargerBiens}
+            onFilterChange={handleFilterChange}
+            onSelectBien={handleSidebarSelection}
+            isMobile={false}
+          />
+        </DesktopSidePanel>
       ) : null}
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -649,6 +954,7 @@ function App() {
                 customMarkers={customMarkers}
                 selectedBienId={selectedBien?.id ?? null}
                 setSelectedBien={(bien) => {
+                  setPlacingBienId(null);
                   setSelectedBien(bien);
                 }}
                 onAddCustomMarker={handleAddCustomMarker}
@@ -656,24 +962,46 @@ function App() {
                 onDeleteCustomMarker={handleDeleteCustomMarker}
                 mapMode={mapMode}
                 canUseGoogle3D={Boolean(CESIUM_ION_TOKEN)}
-              onToggleMapMode={toggleMapMode}
-              isMobile={false}
-              syncVersion={syncVersion}
-              focusBienId={focusBienId}
-              focusBienVersion={focusBienVersion}
-              mobilePanel="desktop"
+                onToggleMapMode={toggleMapMode}
+                isMobile={false}
+                syncVersion={syncVersion}
+                focusBienId={focusBienId}
+                focusBienVersion={focusBienVersion}
+                onFocusHandled={handleMapFocusHandled}
+                mobilePanel="desktop"
+                placingBienId={placingBienId}
+                boundaryGeoJson={boundaryGeoJson}
+                placingBienLabel={
+                  biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
+                }
+                onPlaceBien={handlePlaceBienOnMap}
               />
             </div>
 
-            <SelectedBienPanel
-              selectedBien={selectedBien}
-              noteDraft={noteDraft}
-              noteStatus={noteStatus}
-              onNoteChange={handleNoteChange}
-              onAddBlacklist={blacklisterBien}
-              onRemoveBlacklist={retirerBlacklist}
-              isMobile={false}
-            />
+            <DesktopSidePanel
+              side="right"
+              width={DESKTOP_RIGHT_WIDTH}
+              collapsedWidth={DESKTOP_COLLAPSED_HANDLE}
+              collapsed={isRightPanelCollapsed}
+              onToggle={() => setIsRightPanelCollapsed((value) => !value)}
+            >
+              <SelectedBienPanel
+                selectedBien={selectedBien}
+                noteDraft={noteDraft}
+                noteStatus={noteStatus}
+                onNoteChange={handleNoteChange}
+                onAddBlacklist={blacklisterBien}
+                onRemoveBlacklist={retirerBlacklist}
+                onAddFavorite={ajouterFavori}
+                onRemoveFavorite={retirerFavori}
+                onAddSetAside={ajouterDeCote}
+                onRemoveSetAside={retirerDeCote}
+                onStartPlacingBien={startPlacingSelectedBien}
+                onRemovePlacedBienMarker={handleRemovePlacedBienMarker}
+                isPlacingBien={placingBienId === selectedBien?.id}
+                isMobile={false}
+              />
+            </DesktopSidePanel>
           </div>
         ) : (
           <div
@@ -704,6 +1032,7 @@ function App() {
               customMarkers={customMarkers}
               selectedBienId={selectedBien?.id ?? null}
               setSelectedBien={(bien) => {
+                setPlacingBienId(null);
                 setSelectedBien(bien);
                 setMobilePanel("detail");
               }}
@@ -717,7 +1046,14 @@ function App() {
               syncVersion={syncVersion}
               focusBienId={focusBienId}
               focusBienVersion={focusBienVersion}
+              onFocusHandled={handleMapFocusHandled}
               mobilePanel={mobilePanel}
+              placingBienId={placingBienId}
+              boundaryGeoJson={boundaryGeoJson}
+              placingBienLabel={
+                biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
+              }
+              onPlaceBien={handlePlaceBienOnMap}
               isMobileMapExpanded={isMapExpandedMobile}
               onToggleMobileMapExpanded={() =>
                 setIsMapExpandedMobile((value) => !value)
@@ -726,10 +1062,14 @@ function App() {
                 <AppMenu
                   onLogout={seDeconnecter}
                   onExportKml={handleExportKml}
+                  showBoundary={showBoundary}
+                  onToggleBoundary={() => setShowBoundary((value) => !value)}
                   themeMode={themeMode}
                   onToggleTheme={() =>
                     setThemeMode((value) => (value === "dark" ? "light" : "dark"))
                   }
+                  styleMode={styleMode}
+                  onChangeStyle={setStyleMode}
                   isMobile
                 />
               }
@@ -769,7 +1109,9 @@ function App() {
                 >
                   <div>
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Zone active</div>
-                    <div style={{ fontWeight: 700 }}>{zoneRecherche || "Aucune zone"}</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {activeZoneRecherche || zoneRecherche || "Aucune zone"}
+                    </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Resultats</div>
@@ -797,7 +1139,7 @@ function App() {
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {selectedBien.adresse || "Adresse non renseignee"}
+                      {selectedBien.adresse || ""}
                     </div>
                   </div>
                 ) : null}
@@ -807,6 +1149,7 @@ function App() {
                 {mobilePanel === "search" ? (
                   <BiensSidebar
                     zoneRecherche={zoneRecherche}
+                    recentSearches={recentSearches}
                     search={search}
                     loading={loading}
                     syncError={syncError}
@@ -815,11 +1158,16 @@ function App() {
                     counts={counts}
                     filterState={{
                       showAllBiens,
+                      showFavorites,
+                      showSetAside,
+                      showProfessionnels,
+                      showParticuliers,
                       showBlacklist,
                       showSansAdresse,
                       showNouveaux,
                     }}
                     onZoneRechercheChange={setZoneRecherche}
+                    onSelectRecentSearch={setZoneRecherche}
                     onSearchChange={setSearch}
                     onSynchronize={chargerBiens}
                     onFilterChange={handleFilterChange}
@@ -830,6 +1178,7 @@ function App() {
                 ) : mobilePanel === "list" ? (
                   <BiensSidebar
                     zoneRecherche={zoneRecherche}
+                    recentSearches={recentSearches}
                     search={search}
                     loading={loading}
                     syncError={syncError}
@@ -838,11 +1187,16 @@ function App() {
                     counts={counts}
                     filterState={{
                       showAllBiens,
+                      showFavorites,
+                      showSetAside,
+                      showProfessionnels,
+                      showParticuliers,
                       showBlacklist,
                       showSansAdresse,
                       showNouveaux,
                     }}
                     onZoneRechercheChange={setZoneRecherche}
+                    onSelectRecentSearch={setZoneRecherche}
                     onSearchChange={setSearch}
                     onSynchronize={chargerBiens}
                     onFilterChange={handleFilterChange}
@@ -858,6 +1212,13 @@ function App() {
                     onNoteChange={handleNoteChange}
                     onAddBlacklist={blacklisterBien}
                     onRemoveBlacklist={retirerBlacklist}
+                    onAddFavorite={ajouterFavori}
+                    onRemoveFavorite={retirerFavori}
+                    onAddSetAside={ajouterDeCote}
+                    onRemoveSetAside={retirerDeCote}
+                    onStartPlacingBien={startPlacingSelectedBien}
+                    onRemovePlacedBienMarker={handleRemovePlacedBienMarker}
+                    isPlacingBien={placingBienId === selectedBien?.id}
                     isMobile
                     onBackToList={() => setMobilePanel("list")}
                   />
@@ -879,6 +1240,143 @@ function App() {
       ) : null}
     </div>
   );
+}
+
+function DesktopSidePanel({
+  side,
+  width,
+  collapsedWidth,
+  collapsed,
+  onToggle,
+  children,
+}) {
+  const isLeft = side === "left";
+  const panelWidth = collapsed ? 0 : width;
+  const hiddenOffset = width;
+
+  return (
+    <div
+      style={{
+        width: panelWidth,
+        minWidth: panelWidth,
+        maxWidth: panelWidth,
+        height: "100%",
+        position: "relative",
+        overflow: "visible",
+        transition: "width 220ms ease, min-width 220ms ease, max-width 220ms ease",
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          [isLeft ? "left" : "right"]: 0,
+          width,
+          height: "100%",
+          transform: collapsed
+            ? `translateX(${isLeft ? -hiddenOffset : hiddenOffset}px)`
+            : "translateX(0)",
+          transition: "transform 220ms ease",
+          pointerEvents: collapsed ? "none" : "auto",
+        }}
+      >
+        {children}
+      </div>
+
+      <button
+        onClick={onToggle}
+        title={collapsed ? "Ouvrir le panneau" : "Masquer le panneau"}
+        aria-label={collapsed ? "Ouvrir le panneau" : "Masquer le panneau"}
+        style={{
+          position: "absolute",
+          top: "50%",
+          ...(isLeft
+            ? { [collapsed ? "left" : "right"]: collapsed ? 0 : -collapsedWidth }
+            : { [collapsed ? "right" : "left"]: collapsed ? 0 : -collapsedWidth }),
+          transform: "translateY(-50%)",
+          width: collapsedWidth,
+          height: 84,
+          border: "1px solid var(--border-color)",
+          borderRadius: isLeft ? "0 16px 16px 0" : "16px 0 0 16px",
+          background: "var(--panel-bg)",
+          color: "var(--text-primary)",
+          boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)",
+          cursor: "pointer",
+          zIndex: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+        }}
+      >
+        <ChevronIcon direction={isLeft ? (collapsed ? "right" : "left") : collapsed ? "left" : "right"} />
+      </button>
+    </div>
+  );
+}
+
+function ChevronIcon({ direction }) {
+  const rotation = {
+    left: "rotate(180 12 12)",
+    right: "none",
+  };
+
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M9 6L15 12L9 18"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        transform={rotation[direction]}
+      />
+    </svg>
+  );
+}
+
+function inferBoundaryQuery(zoneRecherche, biens) {
+  const trimmedZone = (zoneRecherche || "").trim();
+  if (!trimmedZone) return "";
+
+  if (!/^\d{5}$/.test(trimmedZone)) {
+    return trimmedZone;
+  }
+
+  const cityCounts = new Map();
+
+  biens.forEach((bien) => {
+    const address = (bien.adresse || "").trim();
+    if (!address) return;
+
+    const match = address.match(/\b\d{5}\s+(.+)$/);
+    if (!match) return;
+
+    const city = match[1].trim();
+    if (!city) return;
+
+    cityCounts.set(city, (cityCounts.get(city) || 0) + 1);
+  });
+
+  let mostLikelyCity = "";
+  let highestCount = 0;
+
+  cityCounts.forEach((count, city) => {
+    if (count > highestCount) {
+      highestCount = count;
+      mostLikelyCity = city;
+    }
+  });
+
+  return mostLikelyCity || trimmedZone;
 }
 
 export default App;
@@ -965,21 +1463,246 @@ function mobileNavButtonStyle(active, themeMode) {
   };
 }
 
-function getThemeVariables(themeMode) {
+function getThemeVariables(themeMode, styleMode = "default") {
   if (themeMode === "dark") {
+    if (styleMode === "editorial") {
+      return {
+        "--app-bg": "#0b0908",
+        "--map-shell-bg": "#080706",
+        "--panel-bg": "#14110f",
+        "--panel-subtle": "#1d1815",
+        "--panel-muted-bg": "#161311",
+        "--border-color": "#312923",
+        "--border-soft": "#221c18",
+        "--text-primary": "#f6f1e7",
+        "--text-secondary": "#ddd1be",
+        "--text-muted": "#a89780",
+        "--input-bg": "#171311",
+        "--overlay-bg": "rgba(20, 17, 15, 0.94)",
+        "--control-bg": "rgba(20, 17, 15, 0.94)",
+        "--control-border": "#443930",
+        "--control-shadow": "0 10px 30px rgba(0,0,0,0.42)",
+        "--scrollbar-track": "#0e0b09",
+        "--scrollbar-thumb": "#443930",
+      };
+    }
+
+    if (styleMode === "luxury") {
+      return {
+        "--app-bg": "#0a0908",
+        "--map-shell-bg": "#080706",
+        "--panel-bg": "#13110f",
+        "--panel-subtle": "#1a1713",
+        "--panel-muted-bg": "#171411",
+        "--border-color": "#2f281f",
+        "--border-soft": "#211c16",
+        "--text-primary": "#f4e8d0",
+        "--text-secondary": "#d0bea0",
+        "--text-muted": "#9f8b68",
+        "--input-bg": "#191613",
+        "--overlay-bg": "rgba(19, 17, 15, 0.94)",
+        "--control-bg": "rgba(21, 19, 17, 0.94)",
+        "--control-border": "#4a3c25",
+        "--control-shadow": "0 12px 32px rgba(0,0,0,0.42)",
+        "--scrollbar-track": "#100e0c",
+        "--scrollbar-thumb": "#4a3c25",
+      };
+    }
+
+    if (styleMode === "heritage") {
+      return {
+        "--app-bg": "#121212",
+        "--map-shell-bg": "#14110f",
+        "--panel-bg": "#161311",
+        "--panel-subtle": "#1e1915",
+        "--panel-muted-bg": "#1a1613",
+        "--border-color": "#322a22",
+        "--border-soft": "#241e19",
+        "--text-primary": "#f8ead7",
+        "--text-secondary": "#d3c0a5",
+        "--text-muted": "#a69072",
+        "--input-bg": "#221d19",
+        "--overlay-bg": "rgba(22, 19, 17, 0.95)",
+        "--control-bg": "rgba(26, 22, 19, 0.95)",
+        "--control-border": "#5a472c",
+        "--control-shadow": "0 12px 32px rgba(0,0,0,0.42)",
+        "--scrollbar-track": "#13100d",
+        "--scrollbar-thumb": "#5a472c",
+      };
+    }
+
+    if (styleMode === "glass") {
+      return {
+        "--app-bg": "#eef6ff",
+        "--map-shell-bg": "#dce8d3",
+        "--panel-bg": "rgba(255,255,255,0.38)",
+        "--panel-subtle": "rgba(255,255,255,0.46)",
+        "--panel-muted-bg": "rgba(255,255,255,0.34)",
+        "--border-color": "rgba(255,255,255,0.72)",
+        "--border-soft": "rgba(255,255,255,0.54)",
+        "--text-primary": "#0f172a",
+        "--text-secondary": "#52627c",
+        "--text-muted": "#5f6e86",
+        "--input-bg": "rgba(255,255,255,0.48)",
+        "--overlay-bg": "rgba(255,255,255,0.36)",
+        "--control-bg": "rgba(255,255,255,0.42)",
+        "--control-border": "rgba(255,255,255,0.76)",
+        "--control-shadow": "0 14px 30px rgba(68, 97, 133, 0.16)",
+        "--scrollbar-track": "#eaf1f8",
+        "--scrollbar-thumb": "#bdd0e8",
+      };
+    }
+
+    if (styleMode === "atlas") {
+      return {
+        "--app-bg": "#060914",
+        "--map-shell-bg": "#040712",
+        "--panel-bg": "#0c1220",
+        "--panel-subtle": "#151e31",
+        "--panel-muted-bg": "#101827",
+        "--border-color": "#243149",
+        "--border-soft": "#182235",
+        "--text-primary": "#eef4ff",
+        "--text-secondary": "#ced8ea",
+        "--text-muted": "#92a2bb",
+        "--input-bg": "#11192a",
+        "--overlay-bg": "rgba(12, 18, 32, 0.94)",
+        "--control-bg": "rgba(12, 18, 32, 0.94)",
+        "--control-border": "#31415f",
+        "--control-shadow": "0 12px 32px rgba(0,0,0,0.42)",
+        "--scrollbar-track": "#09101c",
+        "--scrollbar-thumb": "#31415f",
+      };
+    }
+
     return {
-      "--app-bg": "#0b1220",
-      "--map-shell-bg": "#09101c",
-      "--panel-bg": "#111827",
-      "--panel-subtle": "#182233",
-      "--panel-muted-bg": "#0f172a",
-      "--border-color": "#243042",
-      "--border-soft": "#1b2535",
+      "--app-bg": "#050608",
+      "--map-shell-bg": "#030406",
+      "--panel-bg": "#0b0c0f",
+      "--panel-subtle": "#14161b",
+      "--panel-muted-bg": "#101216",
+      "--border-color": "#22252c",
+      "--border-soft": "#17191e",
       "--text-primary": "#f3f4f6",
       "--text-secondary": "#d1d5db",
-      "--text-muted": "#94a3b8",
-      "--input-bg": "#0f172a",
-      "--overlay-bg": "rgba(17, 24, 39, 0.94)",
+      "--text-muted": "#8b93a1",
+      "--input-bg": "#0f1115",
+      "--overlay-bg": "rgba(10, 11, 14, 0.94)",
+      "--control-bg": "rgba(11, 12, 15, 0.94)",
+      "--control-border": "#2a2f38",
+      "--control-shadow": "0 10px 30px rgba(0,0,0,0.42)",
+      "--scrollbar-track": "#090a0d",
+      "--scrollbar-thumb": "#2a2f38",
+    };
+  }
+
+  if (styleMode === "editorial") {
+    return {
+      "--app-bg": "#f3eee4",
+      "--map-shell-bg": "#e5dccb",
+      "--panel-bg": "#fbf7ef",
+      "--panel-subtle": "#f3ebdd",
+      "--panel-muted-bg": "#f7f1e7",
+      "--border-color": "#d9ccb9",
+      "--border-soft": "#ece3d3",
+      "--text-primary": "#1c1712",
+      "--text-secondary": "#4e4439",
+      "--text-muted": "#8e806e",
+      "--input-bg": "#faf6ee",
+      "--overlay-bg": "rgba(251, 247, 239, 0.96)",
+      "--control-bg": "rgba(248, 243, 234, 0.96)",
+      "--control-border": "rgba(124, 104, 80, 0.22)",
+      "--control-shadow": "0 12px 28px rgba(92, 72, 40, 0.14)",
+      "--scrollbar-track": "#eee6d9",
+      "--scrollbar-thumb": "#cdbfa9",
+    };
+  }
+
+  if (styleMode === "luxury") {
+    return {
+      "--app-bg": "#181411",
+      "--map-shell-bg": "#d9cfb1",
+      "--panel-bg": "#13110f",
+      "--panel-subtle": "#1a1713",
+      "--panel-muted-bg": "#171411",
+      "--border-color": "#3b3227",
+      "--border-soft": "#2a241c",
+      "--text-primary": "#f3e7ce",
+      "--text-secondary": "#cfbd9d",
+      "--text-muted": "#8f7b59",
+      "--input-bg": "#191613",
+      "--overlay-bg": "rgba(19, 17, 15, 0.94)",
+      "--control-bg": "rgba(21, 19, 17, 0.94)",
+      "--control-border": "#4a3c25",
+      "--control-shadow": "0 12px 28px rgba(0,0,0,0.28)",
+      "--scrollbar-track": "#100e0c",
+      "--scrollbar-thumb": "#4a3c25",
+    };
+  }
+
+  if (styleMode === "heritage") {
+    return {
+      "--app-bg": "#171311",
+      "--map-shell-bg": "#201b16",
+      "--panel-bg": "#191512",
+      "--panel-subtle": "#211b16",
+      "--panel-muted-bg": "#1e1915",
+      "--border-color": "#332920",
+      "--border-soft": "#2b241d",
+      "--text-primary": "#f8ead7",
+      "--text-secondary": "#d1bea4",
+      "--text-muted": "#8f7b63",
+      "--input-bg": "#221d19",
+      "--overlay-bg": "rgba(25, 21, 18, 0.95)",
+      "--control-bg": "rgba(26, 22, 19, 0.95)",
+      "--control-border": "#5a472c",
+      "--control-shadow": "0 12px 28px rgba(0,0,0,0.3)",
+      "--scrollbar-track": "#15110e",
+      "--scrollbar-thumb": "#5a472c",
+    };
+  }
+
+  if (styleMode === "glass") {
+    return {
+      "--app-bg": "#eef6ff",
+      "--map-shell-bg": "#eef2d9",
+      "--panel-bg": "rgba(255,255,255,0.32)",
+      "--panel-subtle": "rgba(255,255,255,0.42)",
+      "--panel-muted-bg": "rgba(255,255,255,0.34)",
+      "--border-color": "rgba(255,255,255,0.78)",
+      "--border-soft": "rgba(255,255,255,0.54)",
+      "--text-primary": "#0f172a",
+      "--text-secondary": "#52627c",
+      "--text-muted": "#5f6e86",
+      "--input-bg": "rgba(255,255,255,0.46)",
+      "--overlay-bg": "rgba(255,255,255,0.30)",
+      "--control-bg": "rgba(255,255,255,0.4)",
+      "--control-border": "rgba(255,255,255,0.84)",
+      "--control-shadow": "0 12px 28px rgba(84, 114, 150, 0.14)",
+      "--scrollbar-track": "#eef4fa",
+      "--scrollbar-thumb": "#c6d8ea",
+    };
+  }
+
+  if (styleMode === "atlas") {
+    return {
+      "--app-bg": "#dfe8ef",
+      "--map-shell-bg": "#d4e1d3",
+      "--panel-bg": "rgba(255,255,255,0.74)",
+      "--panel-subtle": "rgba(255,255,255,0.54)",
+      "--panel-muted-bg": "rgba(255,255,255,0.48)",
+      "--border-color": "rgba(126, 148, 176, 0.28)",
+      "--border-soft": "rgba(255,255,255,0.45)",
+      "--text-primary": "#111827",
+      "--text-secondary": "#4f6174",
+      "--text-muted": "#728297",
+      "--input-bg": "rgba(255,255,255,0.72)",
+      "--overlay-bg": "rgba(255,255,255,0.72)",
+      "--control-bg": "rgba(255,255,255,0.82)",
+      "--control-border": "rgba(126, 148, 176, 0.28)",
+      "--control-shadow": "0 14px 30px rgba(61, 89, 122, 0.14)",
+      "--scrollbar-track": "#eef4f8",
+      "--scrollbar-thumb": "#c0cfdd",
     };
   }
 
@@ -996,6 +1719,11 @@ function getThemeVariables(themeMode) {
     "--text-muted": "#6b7280",
     "--input-bg": "#ffffff",
     "--overlay-bg": "rgba(255,255,255,0.96)",
+    "--control-bg": "rgba(255,255,255,0.96)",
+    "--control-border": "rgba(0,0,0,0.16)",
+    "--control-shadow": "0 10px 30px rgba(17, 24, 39, 0.12)",
+    "--scrollbar-track": "#f3f4f6",
+    "--scrollbar-thumb": "#cbd5e1",
   };
 }
 

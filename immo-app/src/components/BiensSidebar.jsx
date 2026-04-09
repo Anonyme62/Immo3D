@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatPrix, formatSurface, getBienBadge } from "../utils/bienFormat";
 
 export default function BiensSidebar({
   desktopHeader = null,
   zoneRecherche,
+  recentSearches = [],
   search,
   loading,
   syncError,
@@ -12,6 +13,7 @@ export default function BiensSidebar({
   counts,
   filterState,
   onZoneRechercheChange,
+  onSelectRecentSearch,
   onSearchChange,
   onSynchronize,
   onFilterChange,
@@ -20,8 +22,11 @@ export default function BiensSidebar({
   mobileMode = "full",
 }) {
   const itemRefs = useRef(new Map());
+  const [zoneInputFocused, setZoneInputFocused] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const showControls = !isMobile || mobileMode === "search";
   const showResults = !isMobile || mobileMode === "list";
+  const showRecentSearches = showControls && zoneInputFocused && recentSearches.length > 0;
 
   useEffect(() => {
     if (!showResults || !selectedBienId) return;
@@ -74,6 +79,8 @@ export default function BiensSidebar({
             <input
               value={zoneRecherche}
               onChange={(event) => onZoneRechercheChange(event.target.value)}
+              onFocus={() => setZoneInputFocused(true)}
+              onBlur={() => window.setTimeout(() => setZoneInputFocused(false), 120)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") onSynchronize();
               }}
@@ -81,13 +88,37 @@ export default function BiensSidebar({
               style={topInputStyle(isMobile)}
             />
 
-            <input
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Filtrer : adresse, ID, agence..."
-              style={{ ...topInputStyle(isMobile), marginTop: 12 }}
-            />
-
+            {showRecentSearches ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                {recentSearches.map((recentSearch) => (
+                  <button
+                    key={recentSearch}
+                    type="button"
+                    onMouseDown={() => setZoneInputFocused(true)}
+                    onClick={() => onSelectRecentSearch(recentSearch)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border-color)",
+                      background: "var(--panel-muted-bg)",
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {recentSearch}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <button onClick={onSynchronize} style={syncButtonStyle(isMobile)}>
               {loading ? "Chargement..." : "Synchroniser Yanport"}
             </button>
@@ -110,41 +141,84 @@ export default function BiensSidebar({
           </div>
 
           <div style={{ padding: isMobile ? "14px 14px 6px 14px" : "16px 20px 8px 20px" }}>
-            <div style={{ fontWeight: 700, marginBottom: 12 }}>Filtres</div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr",
-                gap: isMobile ? 10 : 0,
-              }}
+            <button
+              type="button"
+              onClick={() => setFiltersExpanded((value) => !value)}
+              style={filtersToggleStyle()}
             >
-              <FilterRow
-                label={`Tous les biens (${counts.allBiens})`}
-                checked={filterState.showAllBiens}
-                onChange={(checked) => onFilterChange("showAllBiens", checked)}
-                isMobile={isMobile}
-              />
-              <FilterRow
-                label={`Nouveaux < 7 jours (${counts.nouveaux})`}
-                checked={filterState.showNouveaux}
-                onChange={(checked) => onFilterChange("showNouveaux", checked)}
-                isMobile={isMobile}
-              />
-              <FilterRow
-                label={`Sans adresses (${counts.sansAdresse})`}
-                checked={filterState.showSansAdresse}
-                onChange={(checked) => onFilterChange("showSansAdresse", checked)}
-                isMobile={isMobile}
-              />
-              <FilterRow
-                label={`Afficher les blacklistes (${counts.blacklist})`}
-                checked={filterState.showBlacklist}
-                onChange={(checked) => onFilterChange("showBlacklist", checked)}
-                compact
-                isMobile={isMobile}
-              />
-            </div>
+              <span style={{ fontWeight: 700 }}>Filtres</span>
+              <span
+                style={{
+                  fontSize: 18,
+                  lineHeight: 1,
+                  transform: filtersExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 180ms ease",
+                }}
+              >
+                ›
+              </span>
+            </button>
+
+            {filtersExpanded ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr",
+                  gap: isMobile ? 10 : 0,
+                  marginTop: 12,
+                }}
+              >
+                <FilterRow
+                  label={`Tous les biens (${counts.allBiens})`}
+                  checked={filterState.showAllBiens}
+                  onChange={(checked) => onFilterChange("showAllBiens", checked)}
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Favoris (${counts.favorites})`}
+                  checked={filterState.showFavorites}
+                  onChange={(checked) => onFilterChange("showFavorites", checked)}
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Mettre de cote (${counts.setAside})`}
+                  checked={filterState.showSetAside}
+                  onChange={(checked) => onFilterChange("showSetAside", checked)}
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Nouveaux < 7 jours (${counts.nouveaux})`}
+                  checked={filterState.showNouveaux}
+                  onChange={(checked) => onFilterChange("showNouveaux", checked)}
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Sans adresses (${counts.sansAdresse})`}
+                  checked={filterState.showSansAdresse}
+                  onChange={(checked) => onFilterChange("showSansAdresse", checked)}
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Afficher les blacklistes (${counts.blacklist})`}
+                  checked={filterState.showBlacklist}
+                  onChange={(checked) => onFilterChange("showBlacklist", checked)}
+                  compact
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Professionnels (${counts.professionnels})`}
+                  checked={filterState.showProfessionnels}
+                  onChange={(checked) => onFilterChange("showProfessionnels", checked)}
+                  isMobile={isMobile}
+                />
+                <FilterRow
+                  label={`Particuliers (${counts.particuliers})`}
+                  checked={filterState.showParticuliers}
+                  onChange={(checked) => onFilterChange("showParticuliers", checked)}
+                  isMobile={isMobile}
+                />
+              </div>
+            ) : null}
           </div>
 
           {isMobile ? (
@@ -171,6 +245,19 @@ export default function BiensSidebar({
 
       {showResults ? (
         <>
+          <div
+            style={{
+              padding: isMobile ? "10px 14px 0 14px" : "12px 20px 0 20px",
+            }}
+          >
+            <input
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="Filtrer : agence, adresse, prix..."
+              style={topInputStyle(isMobile)}
+            />
+          </div>
+
           <div
             style={{
               padding: isMobile ? "10px 14px 6px 14px" : "12px 20px 8px 20px",
@@ -246,16 +333,25 @@ export default function BiensSidebar({
                       <div style={{ fontWeight: 700 }}>{formatPrix(bien.prix)}</div>
 
                       <div
-                        style={{
-                          ...badge.style,
-                          padding: "6px 10px",
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          whiteSpace: "nowrap",
-                        }}
+                        style={{ display: "flex", alignItems: "center", gap: 8 }}
                       >
-                        {badge.label}
+                        {bien.favorite ? (
+                          <span style={{ fontSize: 18, lineHeight: 1 }} title="Favori">
+                            ★
+                          </span>
+                        ) : null}
+                        <span
+                          style={{
+                            ...badge.style,
+                            padding: "6px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {badge.label}
+                        </span>
                       </div>
                     </div>
 
@@ -267,7 +363,7 @@ export default function BiensSidebar({
                         lineHeight: 1.45,
                       }}
                     >
-                      {bien.adresse || "Adresse non renseignee"}
+                      {bien.adresse || ""}
                     </div>
 
                     <div
@@ -318,6 +414,21 @@ function FilterRow({ label, checked, onChange, compact = false }) {
       />
     </label>
   );
+}
+
+function filtersToggleStyle() {
+  return {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid var(--border-color)",
+    background: "var(--panel-muted-bg)",
+    color: "var(--text-primary)",
+    cursor: "pointer",
+  };
 }
 
 function topInputStyle(isMobile) {

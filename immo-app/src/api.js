@@ -97,14 +97,60 @@ export function removeBlacklist(bienId) {
   });
 }
 
-export function getCustomMarkers() {
-  return apiFetch("/markers", { method: "GET" });
+export function addFavorite(bienId) {
+  return apiFetch("/biens/favorites", {
+    method: "POST",
+    body: JSON.stringify({ bien_id: bienId }),
+  });
 }
 
-export function createCustomMarker(lat, lon, note) {
+export function removeFavorite(bienId) {
+  return apiFetch(`/biens/favorites/${bienId}`, {
+    method: "DELETE",
+  });
+}
+
+export function addSetAside(bienId) {
+  return apiFetch("/biens/set-aside", {
+    method: "POST",
+    body: JSON.stringify({ bien_id: bienId }),
+  });
+}
+
+export function removeSetAside(bienId) {
+  return apiFetch(`/biens/set-aside/${bienId}`, {
+    method: "DELETE",
+  });
+}
+
+export function saveBienPlacement(bienId, lat, lon, manualAddress = "") {
+  return apiFetch(`/biens/${bienId}/placement`, {
+    method: "PUT",
+    body: JSON.stringify({ lat, lon, manual_address: manualAddress }),
+  });
+}
+
+export function deleteBienPlacement(bienId) {
+  return apiFetch(`/biens/${bienId}/placement`, {
+    method: "DELETE",
+  });
+}
+
+export function getCustomMarkers(searchZone = "") {
+  const params = new URLSearchParams();
+  const normalizedZone = searchZone.trim();
+  if (normalizedZone) {
+    params.append("zone", normalizedZone);
+  }
+
+  const query = params.toString();
+  return apiFetch(`/markers${query ? `?${query}` : ""}`, { method: "GET" });
+}
+
+export function createCustomMarker(lat, lon, note, searchZone = "") {
   return apiFetch("/markers", {
     method: "POST",
-    body: JSON.stringify({ lat, lon, note }),
+    body: JSON.stringify({ lat, lon, note, search_zone: searchZone.trim() }),
   });
 }
 
@@ -119,4 +165,10 @@ export function deleteCustomMarker(markerId) {
   return apiFetch(`/markers/${markerId}`, {
     method: "DELETE",
   });
+}
+
+export function getBoundary(query) {
+  const params = new URLSearchParams();
+  params.append("q", query.trim());
+  return apiFetch(`/geocoding/boundary?${params.toString()}`, { method: "GET" });
 }

@@ -94,8 +94,81 @@ class CustomMarker(Base):
     )
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
+    search_zone: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class FavoriteBien(Base):
+    __tablename__ = "favorite_biens"
+    __table_args__ = (
+        UniqueConstraint("user_id", "bien_id", name="uq_favorite_biens_user_bien"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    bien_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class SetAsideBien(Base):
+    __tablename__ = "set_aside_biens"
+    __table_args__ = (
+        UniqueConstraint("user_id", "bien_id", name="uq_set_aside_biens_user_bien"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    bien_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class BienPlacement(Base):
+    __tablename__ = "bien_placements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "bien_id", name="uq_bien_placements_user_bien"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    bien_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    manual_address: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

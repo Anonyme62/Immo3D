@@ -55,6 +55,13 @@ export function getMarkerVisualState(bien, selectedBienId) {
   };
 }
 
+export function getMarkerRenderPriority(bien, selectedBienId) {
+  if (selectedBienId === bien.id) return 99;
+  if (bien.anciennete != null && bien.anciennete < 7) return 3;
+  if (bien.anciennete != null && bien.anciennete <= 30) return 2;
+  return 1;
+}
+
 function normalizeAddress(address) {
   if (!address || typeof address !== "string") return null;
 

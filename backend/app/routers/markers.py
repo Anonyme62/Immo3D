@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -14,14 +14,23 @@ from app.schemas import (
 router = APIRouter(prefix="/markers", tags=["markers"])
 
 
+def normalize_search_zone(value: str | None) -> str:
+    return (value or "").strip()
+
+
 @router.get("", response_model=list[CustomMarkerResponse])
 def list_markers(
+    zone: str = Query(default=""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    normalized_zone = normalize_search_zone(zone)
     return (
         db.query(CustomMarker)
-        .filter(CustomMarker.user_id == user.id)
+        .filter(
+            CustomMarker.user_id == user.id,
+            CustomMarker.search_zone == normalized_zone,
+        )
         .order_by(CustomMarker.updated_at.desc(), CustomMarker.created_at.desc())
         .all()
     )
@@ -37,6 +46,7 @@ def create_marker(
         user_id=user.id,
         lat=payload.lat,
         lon=payload.lon,
+        search_zone=normalize_search_zone(payload.search_zone),
         note=payload.note.strip(),
     )
     db.add(marker)
