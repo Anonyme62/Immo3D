@@ -22,7 +22,7 @@ BILLING_REQUIRED=true
 STRIPE_SECRET_KEY=sk_test_xxx
 STRIPE_PRICE_ID=price_1TKJ6O7l1fIGphcfTFJaKe8o
 STRIPE_WEBHOOK_SECRET=whsec_xxx
-STRIPE_API_VERSION=2025-06-30.basil
+STRIPE_API_VERSION=2026-03-25.dahlia
 ```
 
 Important :
@@ -122,6 +122,23 @@ https://api.ton-domaine.fr/billing/webhook
 cd backend
 python -m app.backup create
 python -m app.backup verify <chemin-vers-archive.zip>
+```
+
+## 6.bis. Cas Home Assistant OS / Raspberry
+
+Si tu utilises l'app `PigePro` sur Home Assistant OS, active Stripe directement dans la
+configuration de l'app :
+
+- `billing_required`: `true`
+- `stripe_secret_key`: `sk_test_...` ou `sk_live_...`
+- `stripe_price_id`: `price_...`
+- `stripe_webhook_secret`: `whsec_...`
+- `stripe_api_version`: `2026-03-25.dahlia`
+
+Le webhook public a declarer dans Stripe devient alors :
+
+```text
+https://app.pigepro.fr/billing/webhook
 ```
 
 ## 7. Important

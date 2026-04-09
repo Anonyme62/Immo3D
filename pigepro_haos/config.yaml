@@ -1,6 +1,6 @@
 name: "PigePro"
 description: "Heberge l'application PigePro sur Home Assistant OS."
-version: "0.1.0"
+version: "0.2.0"
 slug: "pigepro_haos"
 init: false
 startup: services
@@ -20,6 +20,14 @@ options:
   data_encryption_key: "replace-with-a-second-random-secret-of-at-least-32-characters"
   backup_encryption_key: "replace-with-a-third-random-secret-of-at-least-32-characters"
   session_max_age_seconds: 604800
+  backup_retention_count: 14
+  backup_interval_minutes: 0
+  backup_verify_after_create: true
+  billing_required: false
+  stripe_secret_key: ""
+  stripe_price_id: ""
+  stripe_webhook_secret: ""
+  stripe_api_version: "2026-03-25.dahlia"
 schema:
   public_hostname: str
   allowed_hosts: str
@@ -27,3 +35,11 @@ schema:
   data_encryption_key: str
   backup_encryption_key: str
   session_max_age_seconds: int
+  backup_retention_count: int
+  backup_interval_minutes: int
+  backup_verify_after_create: bool
+  billing_required: bool
+  stripe_secret_key: password
+  stripe_price_id: str
+  stripe_webhook_secret: password
+  stripe_api_version: str

@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     stripe_api_version: str | None = None
     backup_dir: str = "backups"
     backup_retention_count: int = 14
+    backup_interval_minutes: int = 0
+    backup_verify_after_create: bool = True
     backup_encryption_key: str | None = None
 
     @field_validator("app_secret_key")
@@ -61,6 +63,20 @@ class Settings(BaseSettings):
         if len(secret) < 32:
             raise ValueError("BACKUP_ENCRYPTION_KEY doit contenir au moins 32 caracteres.")
         return secret
+
+    @field_validator("backup_retention_count")
+    @classmethod
+    def validate_backup_retention_count(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("BACKUP_RETENTION_COUNT doit etre superieur ou egal a 1.")
+        return value
+
+    @field_validator("backup_interval_minutes")
+    @classmethod
+    def validate_backup_interval_minutes(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("BACKUP_INTERVAL_MINUTES doit etre superieur ou egal a 0.")
+        return value
 
     @field_validator("frontend_origin")
     @classmethod

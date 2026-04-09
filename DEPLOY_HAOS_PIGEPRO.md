@@ -47,12 +47,28 @@ Renseigne au minimum :
 - `app_secret_key`: une cle longue et aleatoire
 - `data_encryption_key`: une deuxieme cle longue et aleatoire
 - `backup_encryption_key`: une troisieme cle longue et aleatoire
+- `backup_retention_count`: nombre d'archives a conserver
+- `backup_interval_minutes`: intervalle entre 2 backups auto (`0` pour desactiver, `60` = 1 heure)
+- `backup_verify_after_create`: verifie automatiquement l'archive creee
+
+Pour re-activer l'abonnement mensuel Stripe dans l'app Home Assistant :
+
+- `billing_required`: `true`
+- `stripe_secret_key`: ta cle Stripe `sk_test_...` ou `sk_live_...`
+- `stripe_price_id`: ton prix mensuel `price_...`
+- `stripe_webhook_secret`: le secret webhook `whsec_...`
+- `stripe_api_version`: `2026-03-25.dahlia`
 
 L'app force :
 
-- `BILLING_REQUIRED=false`
 - `DATABASE_URL=sqlite:////data/immo3d.db`
 - `BACKUP_DIR=/data/backups`
+
+Si `billing_required=true`, le webhook public Stripe doit pointer vers :
+
+```text
+https://app.pigepro.fr/billing/webhook
+```
 
 ## 3. Premier test local
 
