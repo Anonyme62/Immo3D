@@ -1,0 +1,32 @@
+FROM node:20-bookworm-slim AS frontend-build
+
+WORKDIR /app/immo-app
+
+COPY immo-app/package*.json ./
+RUN npm ci
+
+COPY immo-app/ ./
+RUN npm run build
+
+
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+
+COPY backend /app/backend
+COPY --from=frontend-build /app/immo-app/dist /app/backend/frontend_dist
+
+RUN mkdir -p /app/backend/data /app/backend/data/backups
+
+WORKDIR /app/backend
+
+EXPOSE 10000
+
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]

@@ -1,27 +1,32 @@
+.git
+.gitignore
+
 backend/.env
 backend/.env.preprod.local
+backend/immo3d.db
+backend/data/
+backend/backups/
+backend/.backup_tmp/
 backend/__pycache__/
 backend/app/**/__pycache__/
 backend/tests/**/__pycache__/
-*.pyc
-backend/immo3d.db
-backend/data/
-backend/token.txt
-backend/backups/
-backend/.backup_tmp/
 
 immo-app/.env
 immo-app/.env.preprod.local
 immo-app/node_modules/
 immo-app/dist/
 immo-app/dist-ssr/
-immo-app/src/*token*.txt
-immo-app/src/*google*.txt
 
-certs/*.pem
-certs/*.crt
-certs/*.key
-certs/*.p12
-certs/*.pfx
-
+certs/
+Stripe/
+tools/
 Sauvegarde app SATFI/
+
+*.pyc
+*.pyo
+*.pyd
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
