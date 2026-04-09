@@ -1,11 +1,11 @@
 FROM node:20-bookworm-slim AS frontend-build
 
-WORKDIR /build/immo-app
+WORKDIR /src
 
-COPY immo-app/package*.json ./
+COPY . /src
+
+WORKDIR /src/immo-app
 RUN npm ci
-
-COPY immo-app/ ./
 RUN npm run build
 
 
@@ -21,8 +21,8 @@ COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
-COPY --from=frontend-build /build/immo-app/dist /app/backend/frontend_dist
-COPY pigepro_haos/run.sh /run.sh
+COPY --from=frontend-build /src/immo-app/dist /app/backend/frontend_dist
+COPY run.sh /run.sh
 
 RUN chmod +x /run.sh && mkdir -p /data/backups
 
