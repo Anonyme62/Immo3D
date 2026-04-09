@@ -130,6 +130,7 @@ Si tu utilises l'app `PigePro` sur Home Assistant OS, active Stripe directement 
 configuration de l'app :
 
 - `billing_required`: `true`
+- `billing_bypass_identities`: optionnel, pour exempter certains logins/emails Yanport du paiement
 - `stripe_secret_key`: `sk_test_...` ou `sk_live_...`
 - `stripe_price_id`: `price_...`
 - `stripe_webhook_secret`: `whsec_...`

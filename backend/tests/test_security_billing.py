@@ -81,3 +81,30 @@ class SecurityAndBillingTests(BackendApiTestCase):
         self.assertEqual(payload["user"]["subscription_status"], "active")
         self.assertTrue(payload["user"]["has_active_subscription"])
         self.assertTrue(payload["user"]["has_app_access"])
+
+    def test_billing_bypass_identity_allows_named_user_without_subscription(self):
+        settings.billing_required = True
+        settings.billing_bypass_identities = "alexis"
+        self.set_fake_fetch_properties(lambda access_token, zip_code=None, ville=None: [])
+
+        login_response = self.login("alexis")
+        self.assertEqual(login_response.status_code, 200)
+        self.assertTrue(login_response.json()["user"]["has_billing_bypass"])
+        self.assertTrue(login_response.json()["user"]["has_active_subscription"])
+
+        response = self.client.get("/biens", params={"zip_code": "62670"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_billing_bypass_identity_can_match_email(self):
+        settings.billing_required = True
+        settings.billing_bypass_identities = "alexis@example.com,associe@example.com"
+        self.set_fake_fetch_properties(lambda access_token, zip_code=None, ville=None: [])
+
+        login_response = self.login("alexis")
+        self.assertEqual(login_response.status_code, 200)
+        self.assertTrue(login_response.json()["user"]["has_billing_bypass"])
+
+        response = self.client.get("/biens", params={"zip_code": "62670"})
+
+        self.assertEqual(response.status_code, 200)

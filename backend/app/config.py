@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     csrf_header_name: str = "X-CSRF-Token"
     allowed_hosts: str | None = None
     billing_required: bool = False
+    billing_bypass_identities: str | None = None
     data_encryption_key: str | None = None
     stripe_secret_key: str | None = None
     stripe_price_id: str | None = None
@@ -134,6 +135,21 @@ class Settings(BaseSettings):
             return ["*"]
 
         return []
+
+    @field_validator("billing_bypass_identities")
+    @classmethod
+    def normalize_billing_bypass_identities(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        identities = [identity.strip().lower() for identity in value.split(",") if identity.strip()]
+        return ",".join(dict.fromkeys(identities)) if identities else None
+
+    @property
+    def billing_bypass_identity_list(self) -> list[str]:
+        if not self.billing_bypass_identities:
+            return []
+        return [identity for identity in self.billing_bypass_identities.split(",") if identity]
 
     @property
     def stripe_configured(self) -> bool:

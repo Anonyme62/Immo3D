@@ -45,7 +45,9 @@ class BackendApiTestCase(TestCase):
         self.client = TestClient(app)
         self.csrf_token = ""
         self._original_billing_required = settings.billing_required
+        self._original_billing_bypass_identities = settings.billing_bypass_identities
         settings.billing_required = False
+        settings.billing_bypass_identities = None
         self._original_login_to_yanport = auth_router.login_to_yanport
         self._original_fetch_properties = biens_router.fetch_properties
         security._login_failures.clear()
@@ -56,6 +58,7 @@ class BackendApiTestCase(TestCase):
         self.client.close()
         app.dependency_overrides.clear()
         settings.billing_required = self._original_billing_required
+        settings.billing_bypass_identities = self._original_billing_bypass_identities
         auth_router.login_to_yanport = self._original_login_to_yanport
         biens_router.fetch_properties = self._original_fetch_properties
         close_all_sessions()

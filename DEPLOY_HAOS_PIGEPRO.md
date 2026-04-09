@@ -54,10 +54,17 @@ Renseigne au minimum :
 Pour re-activer l'abonnement mensuel Stripe dans l'app Home Assistant :
 
 - `billing_required`: `true`
+- `billing_bypass_identities`: liste separee par des virgules de logins Yanport ou emails autorises sans paiement
 - `stripe_secret_key`: ta cle Stripe `sk_test_...` ou `sk_live_...`
 - `stripe_price_id`: ton prix mensuel `price_...`
 - `stripe_webhook_secret`: le secret webhook `whsec_...`
 - `stripe_api_version`: `2026-03-25.dahlia`
+
+Exemple :
+
+```text
+alexis,alexis@example.com,associe@example.com
+```
 
 L'app force :
 

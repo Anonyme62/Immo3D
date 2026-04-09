@@ -33,8 +33,23 @@ class User(Base):
     )
 
     @property
+    def has_billing_bypass(self) -> bool:
+        if not settings.billing_required:
+            return False
+
+        bypass_identities = set(settings.billing_bypass_identity_list)
+        if not bypass_identities:
+            return False
+
+        username = (self.yanport_username or "").strip().lower()
+        email = (self.yanport_email or "").strip().lower()
+        return username in bypass_identities or (email in bypass_identities if email else False)
+
+    @property
     def has_active_subscription(self) -> bool:
         if not settings.billing_required:
+            return True
+        if self.has_billing_bypass:
             return True
         return (self.subscription_status or "").lower() in {"active", "trialing"}
 

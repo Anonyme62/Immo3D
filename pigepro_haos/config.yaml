@@ -24,6 +24,7 @@ options:
   backup_interval_minutes: 120
   backup_verify_after_create: true
   billing_required: false
+  billing_bypass_identities: ""
   stripe_secret_key: ""
   stripe_price_id: ""
   stripe_webhook_secret: ""
@@ -39,6 +40,7 @@ schema:
   backup_interval_minutes: int
   backup_verify_after_create: bool
   billing_required: bool
+  billing_bypass_identities: str
   stripe_secret_key: password
   stripe_price_id: str
   stripe_webhook_secret: password

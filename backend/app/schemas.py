@@ -19,6 +19,7 @@ class UserResponse(BaseModel):
     has_active_subscription: bool
     has_app_access: bool
     billing_required: bool
+    has_billing_bypass: bool
 
     model_config = {"from_attributes": True}
 

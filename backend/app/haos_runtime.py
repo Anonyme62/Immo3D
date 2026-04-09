@@ -55,6 +55,7 @@ def build_haos_env(options: dict) -> dict[str, str]:
     _set_if_present(env, "STRIPE_PRICE_ID", options.get("stripe_price_id"))
     _set_if_present(env, "STRIPE_WEBHOOK_SECRET", options.get("stripe_webhook_secret"))
     _set_if_present(env, "STRIPE_API_VERSION", options.get("stripe_api_version"))
+    _set_if_present(env, "BILLING_BYPASS_IDENTITIES", options.get("billing_bypass_identities"))
 
     return env
 
