@@ -47,8 +47,8 @@ Renseigne au minimum :
 - `app_secret_key`: une cle longue et aleatoire
 - `data_encryption_key`: une deuxieme cle longue et aleatoire
 - `backup_encryption_key`: une troisieme cle longue et aleatoire
-- `backup_retention_count`: nombre d'archives a conserver
-- `backup_interval_minutes`: intervalle entre 2 backups auto (`0` pour desactiver, `60` = 1 heure)
+- `backup_retention_count`: nombre d'archives a conserver. Pour 1 semaine avec un backup toutes les 2 heures : `84`
+- `backup_interval_minutes`: intervalle entre 2 backups auto (`0` pour desactiver, `120` = 2 heures)
 - `backup_verify_after_create`: verifie automatiquement l'archive creee
 
 Pour re-activer l'abonnement mensuel Stripe dans l'app Home Assistant :
