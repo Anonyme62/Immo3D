@@ -1,0 +1,1 @@
+window.__IMMO3D_RUNTIME_CONFIG__ = window.__IMMO3D_RUNTIME_CONFIG__ || {};

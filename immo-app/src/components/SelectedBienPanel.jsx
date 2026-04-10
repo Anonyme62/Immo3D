@@ -21,7 +21,6 @@ export default function SelectedBienPanel({
   onRemovePlacedBienMarker,
   isPlacingBien = false,
   isMobile = false,
-  onBackToList,
 }) {
   const photos = getSelectedBienPhotos(selectedBien);
   const annonceLinks = getAnnonceLinks(selectedBien);
@@ -63,45 +62,6 @@ export default function SelectedBienPanel({
         <div style={{ color: "var(--text-muted)" }}>Selectionne un bien</div>
       ) : (
         <div key={selectedBienKey}>
-          {isMobile ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 14,
-                gap: 10,
-              }}
-            >
-              <button
-                onClick={onBackToList}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 999,
-                  border: "1px solid var(--border-color)",
-                  background: "var(--panel-bg)",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Retour liste
-              </button>
-
-              <div
-                style={{
-                  ...getBienBadge(selectedBien).style,
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {getBienBadge(selectedBien).label}
-              </div>
-            </div>
-          ) : null}
-
           <div
             style={{
               display: "flex",
@@ -142,17 +102,24 @@ export default function SelectedBienPanel({
             style={{
               marginTop: 12,
               display: "flex",
-              gap: 10,
-              flexWrap: "nowrap",
-              alignItems: "center",
+              gap: isMobile ? 12 : 10,
+              flexWrap: isMobile ? "wrap" : "nowrap",
+              flexDirection: isMobile ? "column" : "row",
+              alignItems: isMobile ? "stretch" : "center",
             }}
           >
             {selectedBien.favorite ? (
-              <button onClick={onRemoveFavorite} style={topActionButtonStyle()}>
+              <button
+                onClick={onRemoveFavorite}
+                style={topActionButtonStyle(undefined, undefined, undefined, false, isMobile)}
+              >
                 Retirer favori
               </button>
             ) : (
-              <button onClick={onAddFavorite} style={topActionButtonStyle()}>
+              <button
+                onClick={onAddFavorite}
+                style={topActionButtonStyle(undefined, undefined, undefined, false, isMobile)}
+              >
                 Ajouter favori
               </button>
             )}
@@ -160,14 +127,14 @@ export default function SelectedBienPanel({
             {selectedBien.de_cote ? (
               <button
                 onClick={onRemoveSetAside}
-                style={topActionButtonStyle("#92400e", "#ffffff", "none")}
+                style={topActionButtonStyle("#92400e", "#ffffff", "none", false, isMobile)}
               >
                 Retirer de cote
               </button>
             ) : (
               <button
                 onClick={onAddSetAside}
-                style={topActionButtonStyle("#f59e0b", "#111827", "none")}
+                style={topActionButtonStyle("#f59e0b", "#111827", "none", false, isMobile)}
               >
                 Mettre de cote
               </button>
@@ -176,14 +143,14 @@ export default function SelectedBienPanel({
             {selectedBien.blackliste ? (
               <button
                 onClick={onRemoveBlacklist}
-                style={topActionButtonStyle("#065f46", "#ffffff", "none")}
+                style={topActionButtonStyle("#065f46", "#ffffff", "none", false, isMobile)}
               >
                 Retirer blacklist
               </button>
             ) : (
               <button
                 onClick={onAddBlacklist}
-                style={topActionButtonStyle("#b91c1c", "#ffffff", "none")}
+                style={topActionButtonStyle("#b91c1c", "#ffffff", "none", false, isMobile)}
               >
                 Blacklister
               </button>
@@ -374,19 +341,22 @@ function topActionButtonStyle(
   background = "var(--panel-subtle)",
   color = "var(--text-primary)",
   border = "1px solid var(--border-color)",
-  compact = false
+  compact = false,
+  isMobile = false
 ) {
   return {
-    padding: compact ? "4px 14px" : "6px 12px",
+    width: isMobile ? "100%" : "auto",
+    padding: isMobile ? "12px 14px" : compact ? "4px 14px" : "6px 12px",
     borderRadius: 999,
     border,
     background,
     color,
     fontWeight: 700,
-    fontSize: compact ? 13 : 12,
+    fontSize: isMobile ? 14 : compact ? 13 : 12,
     lineHeight: compact ? 1.05 : 1.1,
     cursor: "pointer",
-    whiteSpace: "nowrap",
+    whiteSpace: isMobile ? "normal" : "nowrap",
     flexShrink: 0,
+    textAlign: "center",
   };
 }

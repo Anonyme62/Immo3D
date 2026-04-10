@@ -20,6 +20,9 @@ if (!CESIUM_ION_TOKEN) {
 
 Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
+const MODE_TRANSITION_MIN_DURATION_MS = 220;
+const GOOGLE_TILESET_READY_TIMEOUT_MS = 1400;
+
 function captureCamera(viewer) {
   return {
     destination: Cesium.Cartesian3.clone(viewer.camera.position),
@@ -42,7 +45,7 @@ function restoreCamera(viewer, cameraState) {
   });
 }
 
-  function refreshViewer(viewer) {
+function refreshViewer(viewer) {
   if (!viewer || viewer.isDestroyed()) return;
 
   const cameraState = captureCamera(viewer);
@@ -53,6 +56,37 @@ function restoreCamera(viewer, cameraState) {
 
 function resolveMode(mapMode) {
   return mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
+}
+
+function wait(duration) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, duration);
+  });
+}
+
+function waitForGoogleTilesetReady(tileset) {
+  if (!tileset || tileset.tilesLoaded) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let finished = false;
+
+    function complete() {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timeoutId);
+      tileset.initialTilesLoaded.removeEventListener(complete);
+      resolve();
+    }
+
+    const timeoutId = window.setTimeout(
+      complete,
+      GOOGLE_TILESET_READY_TIMEOUT_MS
+    );
+
+    tileset.initialTilesLoaded.addEventListener(complete);
+  });
 }
 
 function truncateMarkerNote(note) {
@@ -136,10 +170,12 @@ export default function CesiumMap({
   const markerTextareaRef = useRef(null);
   const tilesetRef = useRef(null);
   const tilesetPromiseRef = useRef(null);
+  const osmImageryLayerRef = useRef(null);
   const boundaryDataSourceRef = useRef(null);
   const entitiesRef = useRef([]);
   const markerDataByIdRef = useRef(new Map());
   const modeRef = useRef(null);
+  const modeTransitionTimeoutRef = useRef(null);
   const hasInitialFlyRef = useRef(false);
   const [isTilted, setIsTilted] = useState(false);
   const [selectedCustomMarkerId, setSelectedCustomMarkerId] = useState(null);
@@ -148,6 +184,10 @@ export default function CesiumMap({
   const [markerError, setMarkerError] = useState("");
   const [markerSaving, setMarkerSaving] = useState(false);
   const [tilesReadyVersion, setTilesReadyVersion] = useState(0);
+  const [modeTransition, setModeTransition] = useState({
+    active: false,
+    target: null,
+  });
 
   useEffect(() => {
     onSelectBienRef.current = setSelectedBien;
@@ -176,6 +216,40 @@ export default function CesiumMap({
   useEffect(() => {
     placingBienIdRef.current = placingBienId;
   }, [placingBienId]);
+
+  useEffect(() => {
+    return () => {
+      if (modeTransitionTimeoutRef.current) {
+        window.clearTimeout(modeTransitionTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function startModeTransition(targetMode) {
+    if (modeTransitionTimeoutRef.current) {
+      window.clearTimeout(modeTransitionTimeoutRef.current);
+      modeTransitionTimeoutRef.current = null;
+    }
+
+    setModeTransition({
+      active: true,
+      target: targetMode,
+    });
+  }
+
+  function finishModeTransition() {
+    if (modeTransitionTimeoutRef.current) {
+      window.clearTimeout(modeTransitionTimeoutRef.current);
+    }
+
+    modeTransitionTimeoutRef.current = window.setTimeout(() => {
+      setModeTransition({
+        active: false,
+        target: null,
+      });
+      modeTransitionTimeoutRef.current = null;
+    }, 180);
+  }
 
   function applyEntityVisualState(entity) {
     const bien = entity.bienData;
@@ -311,11 +385,12 @@ export default function CesiumMap({
       Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK
     );
     viewer.imageryLayers.removeAll();
-    viewer.imageryLayers.addImageryProvider(
+    osmImageryLayerRef.current = viewer.imageryLayers.addImageryProvider(
       new Cesium.OpenStreetMapImageryProvider({
         url: "https://tile.openstreetmap.org/",
       })
     );
+    modeRef.current = "osm";
 
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction((click) => {
@@ -378,6 +453,7 @@ export default function CesiumMap({
       entitiesRef.current = [];
       tilesetRef.current = null;
       tilesetPromiseRef.current = null;
+      osmImageryLayerRef.current = null;
       boundaryDataSourceRef.current = null;
       modeRef.current = null;
     };
@@ -470,12 +546,12 @@ export default function CesiumMap({
       viewer.scene.globe.show = true;
       viewer.scene.skyBox.show = false;
       viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
-      viewer.imageryLayers.removeAll();
-      viewer.imageryLayers.addImageryProvider(
-        new Cesium.OpenStreetMapImageryProvider({
-          url: "https://tile.openstreetmap.org/",
-        })
-      );
+
+      if (osmImageryLayerRef.current) {
+        osmImageryLayerRef.current.show = true;
+        osmImageryLayerRef.current.alpha = 1;
+      }
+
       modeRef.current = "osm";
       setTilesReadyVersion((value) => value + 1);
     }
@@ -487,8 +563,21 @@ export default function CesiumMap({
       viewer.scene.globe.show = true;
       viewer.scene.skyBox.show = false;
       viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
-      viewer.imageryLayers.removeAll();
+
+      if (osmImageryLayerRef.current) {
+        osmImageryLayerRef.current.show = true;
+        osmImageryLayerRef.current.alpha = 1;
+      }
+
       tileset.show = true;
+      viewer.scene.requestRender();
+      await Promise.all([
+        waitForGoogleTilesetReady(tileset),
+        wait(MODE_TRANSITION_MIN_DURATION_MS),
+      ]);
+
+      if (cancelled) return;
+
       modeRef.current = "google3d";
       setTilesReadyVersion((value) => value + 1);
     }
@@ -498,6 +587,12 @@ export default function CesiumMap({
       if (modeRef.current === requestedMode) return;
 
       const cameraState = captureCamera(viewer);
+      if (requestedMode !== "google3d") {
+        cameraState.pitch = Cesium.Math.toRadians(-90);
+        cameraState.roll = 0;
+        setIsTilted(false);
+      }
+      startModeTransition(requestedMode);
 
       try {
         if (requestedMode === "google3d") {
@@ -512,6 +607,7 @@ export default function CesiumMap({
         if (!cancelled) {
           restoreCamera(viewer, cameraState);
           viewer.scene.requestRender();
+          finishModeTransition();
         }
       }
     }
@@ -895,9 +991,59 @@ export default function CesiumMap({
     setIsTilted(nextTiltedValue);
   };
 
+  const isMapModeTransitioning = modeTransition.active;
+  const currentResolvedMode = resolveMode(mapMode);
+  const canTiltCurrentView = currentResolvedMode === "google3d";
+  const modeTransitionLabel =
+    modeTransition.target === "google3d"
+      ? "Passage a la vue satellite..."
+      : "Passage a la vue plan...";
+
+  function handleToggleMapMode() {
+    if (isMapModeTransitioning || !canUseGoogle3D) return;
+    onToggleMapMode?.();
+  }
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 4,
+          pointerEvents: "none",
+          opacity: isMapModeTransitioning ? 1 : 0,
+          transition: "opacity 220ms ease",
+          background:
+            "linear-gradient(180deg, rgba(8, 15, 28, 0.16) 0%, rgba(8, 15, 28, 0.28) 100%)",
+          backdropFilter: isMapModeTransitioning ? "blur(3px)" : "blur(0px)",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: isMobile ? 68 : 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "10px 14px",
+            borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.34)",
+            background: "rgba(15, 23, 42, 0.72)",
+            color: "#f8fafc",
+            fontWeight: 700,
+            fontSize: 13,
+            letterSpacing: "0.01em",
+            boxShadow: "0 12px 30px rgba(15, 23, 42, 0.18)",
+            opacity: isMapModeTransitioning ? 1 : 0,
+            transition: "opacity 180ms ease",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {modeTransitionLabel}
+        </div>
+      </div>
 
       {topLeftOverlay ? (
         <div
@@ -937,9 +1083,12 @@ export default function CesiumMap({
 
       {!isMobile ? (
         <button
-          onClick={onToggleMapMode}
-          disabled={!canUseGoogle3D}
-          style={desktopMapButtonStyle(84, canUseGoogle3D)}
+          onClick={handleToggleMapMode}
+          disabled={!canUseGoogle3D || isMapModeTransitioning}
+          style={desktopMapButtonStyle(
+            84,
+            canUseGoogle3D && !isMapModeTransitioning
+          )}
           title={
             canUseGoogle3D
               ? mapMode === "google3d"
@@ -1013,11 +1162,11 @@ export default function CesiumMap({
       {isMobile ? (
         <div style={mobileMapToolbarStyle()}>
           <button
-            onClick={onToggleMapMode}
-            disabled={!canUseGoogle3D}
+            onClick={handleToggleMapMode}
+            disabled={!canUseGoogle3D || isMapModeTransitioning}
             style={mobileMapToolbarButtonStyle(
               mapMode === "google3d",
-              !canUseGoogle3D
+              !canUseGoogle3D || isMapModeTransitioning
             )}
             title={
               canUseGoogle3D
@@ -1030,13 +1179,15 @@ export default function CesiumMap({
             {mapMode === "google3d" ? "Plan" : "Satellite"}
           </button>
 
-          <button
-            onClick={toggleTilt}
-            style={mobileMapToolbarButtonStyle(isTilted)}
-            title="Changer l'inclinaison"
-          >
-            {isTilted ? "2D" : "3D"}
-          </button>
+          {canTiltCurrentView ? (
+            <button
+              onClick={toggleTilt}
+              style={mobileMapToolbarButtonStyle(isTilted)}
+              title="Changer l'inclinaison"
+            >
+              {isTilted ? "2D" : "3D"}
+            </button>
+          ) : null}
 
           <button
             onClick={onToggleMobileMapExpanded}
@@ -1047,13 +1198,15 @@ export default function CesiumMap({
           </button>
         </div>
       ) : (
-        <button
-          onClick={toggleTilt}
-          style={desktopMapButtonStyle(20, true, true)}
-          title="Changer l'inclinaison"
-        >
-          {isTilted ? "2D" : "3D"}
-        </button>
+        canTiltCurrentView ? (
+          <button
+            onClick={toggleTilt}
+            style={desktopMapButtonStyle(20, true, true)}
+            title="Changer l'inclinaison"
+          >
+            {isTilted ? "2D" : "3D"}
+          </button>
+        ) : null
       )}
     </div>
   );
@@ -1118,7 +1271,7 @@ function mobileMapToolbarStyle() {
     position: "absolute",
     left: 12,
     right: 12,
-    bottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
+    bottom: "max(10px, env(safe-area-inset-bottom, 0px))",
     display: "flex",
     gap: 8,
     padding: 8,
@@ -1127,6 +1280,10 @@ function mobileMapToolbarStyle() {
     borderRadius: 20,
     boxShadow: "0 10px 30px rgba(17, 24, 39, 0.12)",
     backdropFilter: "blur(10px)",
+    WebkitBackdropFilter: "blur(10px)",
+    transform: "translate3d(0, 0, 0)",
+    willChange: "transform",
+    backfaceVisibility: "hidden",
     zIndex: 5,
   };
 }

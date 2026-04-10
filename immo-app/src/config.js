@@ -1,3 +1,16 @@
+const bundledTokenModules = import.meta.glob("./*token*.txt", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+const bundledCesiumIonToken = Object.values(bundledTokenModules).find(
+  (value) => typeof value === "string" && value.trim()
+) || "";
+
+const runtimeCesiumIonToken =
+  window.__IMMO3D_RUNTIME_CONFIG__?.cesiumIonToken || "";
+
 function normalizeBaseUrl(value) {
   return (value || "").replace(/\/+$/, "");
 }
@@ -18,4 +31,9 @@ export const API_BASE_URL = normalizeBaseUrl(
   import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl()
 );
 
-export const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || "";
+export const CESIUM_ION_TOKEN = (
+  runtimeCesiumIonToken ||
+  import.meta.env.VITE_CESIUM_ION_TOKEN ||
+  bundledCesiumIonToken ||
+  ""
+).trim();

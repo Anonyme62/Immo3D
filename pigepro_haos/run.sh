@@ -15,6 +15,16 @@ from app.haos_runtime import build_haos_env, write_env_file
 
 options = json.loads(Path("/data/options.json").read_text(encoding="utf-8"))
 write_env_file(Path(os.environ["APP_SETTINGS_FILE"]), build_haos_env(options))
+runtime_config_path = Path("/app/backend/frontend_dist/runtime-config.js")
+runtime_config = {
+    "cesiumIonToken": str(options.get("cesium_ion_token", "")).strip(),
+}
+runtime_config_path.write_text(
+    "window.__IMMO3D_RUNTIME_CONFIG__ = "
+    + json.dumps(runtime_config, ensure_ascii=False)
+    + ";\n",
+    encoding="utf-8",
+)
 PY
 
 scheduler_pid=""

@@ -35,6 +35,7 @@ import { downloadKmlExport } from "./utils/kmlExport";
 function App() {
   const noteTimerRef = useRef(null);
   const isBackgroundRefreshingRef = useRef(false);
+  const previousVisibleViewRef = useRef(null);
   const DESKTOP_LEFT_WIDTH = 340;
   const DESKTOP_RIGHT_WIDTH = 380;
   const DESKTOP_COLLAPSED_HANDLE = 28;
@@ -105,6 +106,7 @@ function App() {
   );
   const hasAppAccess = currentUser?.has_app_access ?? true;
   const canUseApp = isLoggedIn && hasAppAccess;
+  const visibleView = !authChecked ? "loading" : canUseApp ? "app" : isLoggedIn ? "billing" : "login";
 
   function scrollPageToTop(behavior = "auto") {
     window.scrollTo({ top: 0, left: 0, behavior });
@@ -283,6 +285,38 @@ function App() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (visibleView === "loading") {
+      previousVisibleViewRef.current = visibleView;
+      return;
+    }
+
+    if (previousVisibleViewRef.current === null) {
+      previousVisibleViewRef.current = visibleView;
+      return;
+    }
+
+    if (previousVisibleViewRef.current !== visibleView) {
+      scrollPageToTop("auto");
+
+      const animationFrame = window.requestAnimationFrame(() => {
+        scrollPageToTop("auto");
+      });
+
+      const timeout = window.setTimeout(() => {
+        scrollPageToTop("auto");
+      }, 120);
+
+      previousVisibleViewRef.current = visibleView;
+      return () => {
+        window.cancelAnimationFrame(animationFrame);
+        window.clearTimeout(timeout);
+      };
+    }
+
+    previousVisibleViewRef.current = visibleView;
+  }, [visibleView]);
 
   useEffect(() => {
     async function chargerReperesPersonnels() {
@@ -1264,58 +1298,60 @@ function App() {
                 overflow: "hidden",
               }}
             >
-              <div
-                style={{
-                  padding: "12px 14px 6px 14px",
-                  borderBottom: "1px solid var(--border-soft)",
-                  background: "var(--panel-bg)",
-                }}
-              >
+              {mobilePanel === "search" ? (
                 <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
+                    padding: "12px 14px 6px 14px",
+                    borderBottom: "1px solid var(--border-soft)",
+                    background: "var(--panel-bg)",
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Zone active</div>
-                    <div style={{ fontWeight: 700 }}>
-                      {activeZoneRecherche || zoneRecherche || "Aucune zone"}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Resultats</div>
-                    <div style={{ fontWeight: 700 }}>{biensFiltres.length} biens</div>
-                  </div>
-                </div>
-
-                {selectedBien ? (
                   <div
                     style={{
-                      marginTop: 10,
-                      padding: "10px 12px",
-                      background: "var(--panel-subtle)",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: 14,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
                     }}
                   >
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Bien selectionne</div>
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        marginTop: 2,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {selectedBien.adresse || ""}
+                    <div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Zone active</div>
+                      <div style={{ fontWeight: 700 }}>
+                        {activeZoneRecherche || zoneRecherche || "Aucune zone"}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Resultats</div>
+                      <div style={{ fontWeight: 700 }}>{biensFiltres.length} biens</div>
                     </div>
                   </div>
-                ) : null}
-              </div>
+
+                  {selectedBien ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: "10px 12px",
+                        background: "var(--panel-subtle)",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: 14,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Bien selectionne</div>
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          marginTop: 2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {selectedBien.adresse || ""}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div style={{ minHeight: 0, paddingBottom: 10 }}>
                 {mobilePanel === "search" ? (
@@ -1392,7 +1428,6 @@ function App() {
                     onRemovePlacedBienMarker={handleRemovePlacedBienMarker}
                     isPlacingBien={placingBienId === selectedBien?.id}
                     isMobile
-                    onBackToList={() => setMobilePanel("list")}
                   />
                 )}
               </div>

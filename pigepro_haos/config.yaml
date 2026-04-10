@@ -1,6 +1,6 @@
 name: "PigePro"
 description: "Heberge l'application PigePro sur Home Assistant OS."
-version: "0.2.1"
+version: "0.2.2"
 slug: "pigepro_haos"
 init: false
 startup: services
@@ -23,6 +23,7 @@ options:
   backup_retention_count: 84
   backup_interval_minutes: 120
   backup_verify_after_create: true
+  cesium_ion_token: ""
   billing_required: false
   billing_bypass_identities: ""
   stripe_secret_key: ""
@@ -39,6 +40,7 @@ schema:
   backup_retention_count: int
   backup_interval_minutes: int
   backup_verify_after_create: bool
+  cesium_ion_token: password
   billing_required: bool
   billing_bypass_identities: str
   stripe_secret_key: password

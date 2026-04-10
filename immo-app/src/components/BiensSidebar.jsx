@@ -28,6 +28,7 @@ export default function BiensSidebar({
   const showControls = !isMobile || mobileMode === "search";
   const showResults = !isMobile || mobileMode === "list";
   const showRecentSearches = showControls && zoneInputFocused && recentSearches.length > 0;
+  const showFilters = isMobile || filtersExpanded;
 
   function handleRecentSearchSelection(recentSearch) {
     onSelectRecentSearch(recentSearch);
@@ -39,7 +40,7 @@ export default function BiensSidebar({
   }
 
   useEffect(() => {
-    if (!showResults || !selectedBienId) return;
+    if (isMobile || !showResults || !selectedBienId) return;
 
     const node = itemRefs.current.get(selectedBienId);
     if (node) {
@@ -48,7 +49,7 @@ export default function BiensSidebar({
         behavior: "smooth",
       });
     }
-  }, [selectedBienId, showResults]);
+  }, [isMobile, selectedBienId, showResults]);
 
   return (
     <div
@@ -155,7 +156,7 @@ export default function BiensSidebar({
             <button
               type="button"
               onClick={() => setFiltersExpanded((value) => !value)}
-              style={filtersToggleStyle()}
+              style={{ ...filtersToggleStyle(), display: isMobile ? "none" : "flex" }}
             >
               <span style={{ fontWeight: 700 }}>Filtres</span>
               <span
@@ -170,7 +171,7 @@ export default function BiensSidebar({
               </span>
             </button>
 
-            {filtersExpanded ? (
+            {showFilters ? (
               <div
                 style={{
                   display: "grid",
