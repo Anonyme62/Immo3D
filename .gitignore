@@ -23,5 +23,8 @@ certs/*.crt
 certs/*.key
 certs/*.p12
 certs/*.pfx
+Stripe/
+tools/
+immo-app/nslookup
 
 Sauvegarde app SATFI/

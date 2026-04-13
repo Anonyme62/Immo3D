@@ -32,6 +32,37 @@ export default function SelectedBienPanel({
     selectedBien?.lien_leboncoin ||
     selectedBien?.adresse ||
     "selected-bien";
+  const photosBlock = photos.length > 0 ? (
+    <div style={{ marginTop: 16 }}>
+      <div
+        key={`photos-${selectedBienKey}`}
+        style={{
+          display: "flex",
+          gap: 10,
+          flexDirection: isMobile ? "row" : "column",
+          overflowX: isMobile ? "auto" : "visible",
+          paddingBottom: isMobile ? 4 : 0,
+        }}
+      >
+        {photos.map((photo, index) => (
+          <img
+            key={`${selectedBienKey}-${photo}-${index}`}
+            src={photo}
+            alt={`Photo ${index + 1}`}
+            style={{
+              width: isMobile ? 260 : "100%",
+              minWidth: isMobile ? 260 : "auto",
+              borderRadius: 18,
+              display: "block",
+              border: "1px solid var(--border-color)",
+              marginBottom: isMobile ? 0 : 10,
+              objectFit: "cover",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   const canPlaceBienMarker =
     Boolean(selectedBien?.sans_adresse) ||
@@ -100,37 +131,7 @@ export default function SelectedBienPanel({
             )}
           </div>
 
-          {photos.length > 0 ? (
-            <div style={{ marginTop: 16 }}>
-              <div
-                key={`photos-${selectedBienKey}`}
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  flexDirection: isMobile ? "row" : "column",
-                  overflowX: isMobile ? "auto" : "visible",
-                  paddingBottom: isMobile ? 4 : 0,
-                }}
-              >
-                {photos.map((photo, index) => (
-                  <img
-                    key={`${selectedBienKey}-${photo}-${index}`}
-                    src={photo}
-                    alt={`Photo ${index + 1}`}
-                    style={{
-                      width: isMobile ? 260 : "100%",
-                      minWidth: isMobile ? 260 : "auto",
-                      borderRadius: 18,
-                      display: "block",
-                      border: "1px solid var(--border-color)",
-                      marginBottom: isMobile ? 0 : 10,
-                      objectFit: "cover",
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : null}
+          {isMobile ? photosBlock : null}
 
           <div
             style={{
@@ -338,6 +339,8 @@ export default function SelectedBienPanel({
               </div>
             )}
           </div>
+
+          {!isMobile ? photosBlock : null}
 
         </div>
       )}

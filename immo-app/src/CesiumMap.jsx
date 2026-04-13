@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
+import {
+  getPostcodeFromCoordinates,
+  getStreetSuggestions,
+} from "./api";
 import { CESIUM_ION_TOKEN } from "./config";
 import { TOUCH_NAV_TUNING } from "./config/touchNavigationTuning";
 import { formatMarkerPrix } from "./utils/bienFormat";
@@ -26,13 +30,38 @@ Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
 const GOOGLE_TILESET_READY_TIMEOUT_MS = 1400;
 const GOOGLE_TILESET_SWITCH_TIMEOUT_MS = 4800;
-const GOOGLE_TILESET_FAST_SSE = 56;
-const GOOGLE_TILESET_PREMIUM_SSE = 14;
-const GOOGLE_TILESET_FAST_PHASE_MS = 900;
+const GOOGLE_TILESET_FAST_SSE = 14;
+const GOOGLE_TILESET_PREMIUM_SSE = 6;
+const GOOGLE_TILESET_ULTRA_SSE = 2.5;
+const GOOGLE_TILESET_FAST_PHASE_MS = 420;
+const GOOGLE_TILESET_ULTRA_PHASE_MS = 2600;
+const GOOGLE_WARMUP_START_DELAY_MS = 220;
+const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
+const DESKTOP_RESOLUTION_SCALE = 1.22;
+const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
+const MOBILE_RESOLUTION_SCALE = 1;
+const DESKTOP_MSAA_SAMPLES = 4;
+const DESKTOP_ULTRA_MSAA_SAMPLES = 8;
+const MOBILE_MSAA_SAMPLES = 4;
+const GOOGLE_TILESET_DESKTOP_CACHE_BYTES = 805_306_368; // 768 MB
+const GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES = 402_653_184; // +384 MB
+const GOOGLE_TILESET_MOBILE_CACHE_BYTES = 603_979_776; // 576 MB
+const GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES = 268_435_456; // +256 MB
+const GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION = 0.55;
+const GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY = false;
+const OSM_IMAGERY_MAX_LEVEL = 20;
+const GLOBE_TILE_CACHE_SIZE_DESKTOP = 2600;
+const GLOBE_TILE_CACHE_SIZE_MOBILE = 1400;
+const GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP = 1200;
+const GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE = 600;
+const SATELLITE_CLAMP_TIMEOUT_MS = 900;
+const SATELLITE_CLAMP_MAX_POSITIONS = 260;
 const PLAN_PAN_SPEED_MULTIPLIER = 0.605; // additional -20% from 0.756
 const SATELLITE_MIN_GROUND_CLEARANCE_METERS = 40; // hard floor at 40m above ground
-const SATELLITE_MARKER_HEIGHT_OFFSET_METERS = 4;
+const SATELLITE_MARKER_HEIGHT_OFFSET_METERS = 1.7;
 const SATELLITE_MARKER_FALLBACK_HEIGHT_METERS = 40;
+const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = false;
+const SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE = Number.POSITIVE_INFINITY;
 const GOOGLE_EARTH_TOUCH_PROFILE = {
   google3dOrbitGainMultiplier: 1.28,
 };
@@ -49,6 +78,12 @@ const MAX_MARKER_PHOTOS = 8;
 const MAX_MARKER_PHOTO_DATA_URL_LENGTH = 1_100_000;
 const MARKER_PHOTO_MAX_DIMENSION_STEPS = [1920, 1600, 1280, 1024, 800, 640];
 const MARKER_PHOTO_QUALITY_STEPS = [0.86, 0.78, 0.7, 0.62, 0.54, 0.46];
+const MARKER_ADDRESS_DEBOUNCE_MS = 260;
+const POSTCODE_PATTERN = /\b\d{5}\b/;
+const MAP_ZONE_CACHE_STORAGE_KEY = "immo3d_map_zone_cache_v1";
+const MAP_ZONE_CACHE_MAX_ENTRIES = 20;
+const MAP_ZONE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+const SATELLITE_ZONE_LIMIT_PADDING_DEGREES = 0.002;
 let markerPhotoMimeTypeCache = null;
 const MARKER_LABEL_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1200,
@@ -96,6 +131,221 @@ function refreshViewer(viewer) {
 
 function resolveMode(mapMode) {
   return mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
+}
+
+function getPreferredResolutionScale(isMobile) {
+  if (isMobile) return MOBILE_RESOLUTION_SCALE;
+  if (typeof window === "undefined") return DESKTOP_RESOLUTION_SCALE;
+  const devicePixelRatio = Number(window.devicePixelRatio) || 1;
+  const qualityScale = Math.max(
+    1.06,
+    Math.min(DESKTOP_RESOLUTION_SCALE, devicePixelRatio * 0.9)
+  );
+  return qualityScale;
+}
+
+function getUltraResolutionScale() {
+  if (typeof window === "undefined") return DESKTOP_ULTRA_RESOLUTION_SCALE;
+  const devicePixelRatio = Number(window.devicePixelRatio) || 1;
+  return Math.max(
+    DESKTOP_RESOLUTION_SCALE,
+    Math.min(DESKTOP_ULTRA_RESOLUTION_SCALE, devicePixelRatio * 1.02)
+  );
+}
+
+function tuneImageryLayer(imageryLayer, mode = "satellite") {
+  if (!imageryLayer) return;
+
+  if (mode === "satellite") {
+    imageryLayer.brightness = 1.04;
+    imageryLayer.contrast = 1.1;
+    imageryLayer.gamma = 1.02;
+    imageryLayer.saturation = 1.08;
+    return;
+  }
+
+  imageryLayer.brightness = 1;
+  imageryLayer.contrast = 1;
+  imageryLayer.gamma = 1;
+  imageryLayer.saturation = 1;
+}
+
+function buildZoneCacheKey(searchZone) {
+  const trimmed = String(searchZone || "").trim().toLowerCase();
+  if (!trimmed) return "";
+  const postcodeMatch = trimmed.match(POSTCODE_PATTERN);
+  return postcodeMatch ? `cp:${postcodeMatch[0]}` : `zone:${trimmed}`;
+}
+
+function readMapZoneCacheStore() {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(MAP_ZONE_CACHE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeMapZoneCacheStore(nextStore) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      MAP_ZONE_CACHE_STORAGE_KEY,
+      JSON.stringify(nextStore)
+    );
+  } catch {
+    // Ignore storage quota/runtime issues.
+  }
+}
+
+function compactMapZoneCacheStore(store) {
+  const entries = Object.entries(store || {}).filter(([, value]) => {
+    const updatedAt = Number(value?.updatedAt) || 0;
+    return updatedAt > 0 && Date.now() - updatedAt <= MAP_ZONE_CACHE_TTL_MS;
+  });
+  entries.sort(
+    (a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0)
+  );
+  return Object.fromEntries(entries.slice(0, MAP_ZONE_CACHE_MAX_ENTRIES));
+}
+
+function readZoneCacheEntry(zoneCacheKey) {
+  if (!zoneCacheKey) return null;
+  const store = compactMapZoneCacheStore(readMapZoneCacheStore());
+  writeMapZoneCacheStore(store);
+  const entry = store[zoneCacheKey];
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+function updateZoneCacheEntry(zoneCacheKey, updater) {
+  if (!zoneCacheKey) return;
+  const store = compactMapZoneCacheStore(readMapZoneCacheStore());
+  const previousEntry =
+    store[zoneCacheKey] && typeof store[zoneCacheKey] === "object"
+      ? store[zoneCacheKey]
+      : {};
+  const nextEntry = updater(previousEntry) || previousEntry;
+  store[zoneCacheKey] = {
+    ...nextEntry,
+    updatedAt: Date.now(),
+  };
+  writeMapZoneCacheStore(compactMapZoneCacheStore(store));
+}
+
+function captureSerializableCameraState(viewer) {
+  const cartographic = viewer?.camera?.positionCartographic;
+  if (!cartographic) return null;
+  const longitude = Cesium.Math.toDegrees(cartographic.longitude);
+  const latitude = Cesium.Math.toDegrees(cartographic.latitude);
+  const height = Number(cartographic.height);
+  if (
+    !Number.isFinite(longitude) ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+  return {
+    longitude,
+    latitude,
+    height,
+    heading: Number(viewer.camera.heading) || 0,
+    pitch: Number(viewer.camera.pitch) || Cesium.Math.toRadians(-90),
+    roll: Number(viewer.camera.roll) || 0,
+  };
+}
+
+function restoreSerializableCameraState(viewer, cameraState) {
+  if (!viewer || !cameraState) return false;
+  const longitude = Number(cameraState.longitude);
+  const latitude = Number(cameraState.latitude);
+  const height = Number(cameraState.height);
+  if (
+    !Number.isFinite(longitude) ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(height)
+  ) {
+    return false;
+  }
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, height),
+    orientation: {
+      heading: Number(cameraState.heading) || 0,
+      pitch: Number(cameraState.pitch) || Cesium.Math.toRadians(-90),
+      roll: Number(cameraState.roll) || 0,
+    },
+  });
+  return true;
+}
+
+function rectangleFromLonLatPoints(points, paddingDegrees = 0) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  let west = Number.POSITIVE_INFINITY;
+  let east = Number.NEGATIVE_INFINITY;
+  let south = Number.POSITIVE_INFINITY;
+  let north = Number.NEGATIVE_INFINITY;
+
+  points.forEach((point) => {
+    const lon = Number(point?.lon);
+    const lat = Number(point?.lat);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+    west = Math.min(west, lon);
+    east = Math.max(east, lon);
+    south = Math.min(south, lat);
+    north = Math.max(north, lat);
+  });
+
+  if (
+    !Number.isFinite(west) ||
+    !Number.isFinite(east) ||
+    !Number.isFinite(south) ||
+    !Number.isFinite(north)
+  ) {
+    return null;
+  }
+
+  return Cesium.Rectangle.fromDegrees(
+    west - paddingDegrees,
+    south - paddingDegrees,
+    east + paddingDegrees,
+    north + paddingDegrees
+  );
+}
+
+function serializeRectangleDegrees(rectangle) {
+  if (!rectangle) return null;
+  const west = Cesium.Math.toDegrees(rectangle.west);
+  const south = Cesium.Math.toDegrees(rectangle.south);
+  const east = Cesium.Math.toDegrees(rectangle.east);
+  const north = Cesium.Math.toDegrees(rectangle.north);
+  if (
+    !Number.isFinite(west) ||
+    !Number.isFinite(south) ||
+    !Number.isFinite(east) ||
+    !Number.isFinite(north)
+  ) {
+    return null;
+  }
+  return { west, south, east, north };
+}
+
+function deserializeRectangleDegrees(serializedRectangle) {
+  const west = Number(serializedRectangle?.west);
+  const south = Number(serializedRectangle?.south);
+  const east = Number(serializedRectangle?.east);
+  const north = Number(serializedRectangle?.north);
+  if (
+    !Number.isFinite(west) ||
+    !Number.isFinite(south) ||
+    !Number.isFinite(east) ||
+    !Number.isFinite(north)
+  ) {
+    return null;
+  }
+  return Cesium.Rectangle.fromDegrees(west, south, east, north);
 }
 
 function waitForGoogleTilesetReady(tileset) {
@@ -207,6 +457,46 @@ function optimizeTouchNavigation(
   controller.lookEventTypes = [];
   controller.tiltEventTypes = [];
   controller.rotateEventTypes = [];
+  controller.zoomEventTypes = [
+    Cesium.CameraEventType.WHEEL,
+    Cesium.CameraEventType.PINCH,
+  ];
+  controller.translateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
+  controller.maximumTiltAngle = undefined;
+}
+
+function optimizeDesktopNavigation(
+  viewer,
+  tuning = TOUCH_NAV_TUNING,
+  mapMode = "osm"
+) {
+  const controller = viewer.scene.screenSpaceCameraController;
+  const resolvedMode = resolveMode(mapMode);
+  const satelliteMinimumZoomDistance = getSatelliteMinimumZoomDistance(tuning);
+
+  controller.enableInputs = true;
+  controller.inertiaSpin = tuning.controller.inertiaSpin;
+  controller.inertiaTranslate = tuning.controller.inertiaTranslate;
+  controller.inertiaZoom =
+    resolvedMode === "google3d" ? 0 : tuning.controller.inertiaZoom;
+  controller.maximumMovementRatio = tuning.controller.maximumMovementRatio;
+  controller.bounceAnimationTime =
+    resolvedMode === "google3d" ? 0 : tuning.controller.bounceAnimationTime;
+  controller.enableCollisionDetection = resolvedMode !== "google3d";
+  controller.zoomFactor = tuning.controller.zoomFactor;
+  controller.minimumZoomDistance =
+    resolvedMode === "google3d"
+      ? satelliteMinimumZoomDistance
+      : tuning.zoomLimits.planMinHeight;
+  controller.maximumZoomDistance = Number.POSITIVE_INFINITY;
+  controller.enableLook = false;
+  controller.enableTilt = false;
+  controller.enableRotate = true;
+  controller.enableTranslate = true;
+  controller.enableZoom = true;
+  controller.lookEventTypes = [];
+  controller.tiltEventTypes = [];
+  controller.rotateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
   controller.zoomEventTypes = [
     Cesium.CameraEventType.WHEEL,
     Cesium.CameraEventType.PINCH,
@@ -419,6 +709,7 @@ function computeEffectivePanSpeed({
 export default function CesiumMap({
   biens,
   allBiens = [],
+  searchZone = "",
   customMarkers = [],
   selectedBienId,
   setSelectedBien,
@@ -461,15 +752,30 @@ export default function CesiumMap({
   const markerAddressInputRef = useRef(null);
   const tilesetRef = useRef(null);
   const tilesetPromiseRef = useRef(null);
+  const satelliteWarmupPromiseRef = useRef(null);
+  const satelliteWarmupBlockTimeoutRef = useRef(null);
+  const worldTerrainProviderRef = useRef(null);
+  const ellipsoidTerrainProviderRef = useRef(
+    new Cesium.EllipsoidTerrainProvider()
+  );
   const osmImageryLayerRef = useRef(null);
   const boundaryDataSourceRef = useRef(null);
+  const placementGhostDataSourceRef = useRef(null);
+  const placementGhostEntityRef = useRef(null);
   const entitiesRef = useRef([]);
   const markerDataByIdRef = useRef(new Map());
   const modeRef = useRef(null);
   const modeTransitionTimeoutRef = useRef(null);
   const googleQualityTimeoutRef = useRef(null);
+  const googleUltraQualityTimeoutRef = useRef(null);
+  const appBootTimestampRef = useRef(Date.now());
+  const tiltToggleBaseRangeRef = useRef(null);
+  const activeZoneCacheKeyRef = useRef(buildZoneCacheKey(searchZone));
+  const satelliteViewLimitRectangleRef = useRef(null);
+  const zoneCameraRestoreDoneRef = useRef(false);
   const hasInitialFlyRef = useRef(false);
   const mapModeRef = useRef(mapMode);
+  const componentMountedRef = useRef(true);
   const touchNavTuningRef = useRef(touchNavTuning || TOUCH_NAV_TUNING);
   const isTiltedRef = useRef(false);
   const ignoreNextClickRef = useRef(false);
@@ -512,6 +818,9 @@ export default function CesiumMap({
   const [pendingMarkerPosition, setPendingMarkerPosition] = useState(null);
   const [markerDraftNote, setMarkerDraftNote] = useState("");
   const [markerDraftAddress, setMarkerDraftAddress] = useState("");
+  const [markerAddressPostcode, setMarkerAddressPostcode] = useState("");
+  const [markerAddressCandidates, setMarkerAddressCandidates] = useState([]);
+  const [markerAddressLoading, setMarkerAddressLoading] = useState(false);
   const [markerDraftPhotos, setMarkerDraftPhotos] = useState([]);
   const [markerError, setMarkerError] = useState("");
   const [markerSaving, setMarkerSaving] = useState(false);
@@ -520,6 +829,9 @@ export default function CesiumMap({
   const [isAwaitingMarkerPlacement, setIsAwaitingMarkerPlacement] = useState(false);
   const [stackedMarkerOptions, setStackedMarkerOptions] = useState([]);
   const [tilesReadyVersion, setTilesReadyVersion] = useState(0);
+  const [isSatelliteReady, setIsSatelliteReady] = useState(false);
+  const [isSatelliteWarmupBlockExpired, setIsSatelliteWarmupBlockExpired] =
+    useState(false);
   const [modeTransition, setModeTransition] = useState({
     active: false,
     target: null,
@@ -570,11 +882,41 @@ export default function CesiumMap({
   }, [touchNavTuning]);
 
   useEffect(() => {
+    const zoneCacheKey = buildZoneCacheKey(searchZone);
+    activeZoneCacheKeyRef.current = zoneCacheKey;
+    zoneCameraRestoreDoneRef.current = false;
+  }, [searchZone]);
+
+  useEffect(() => {
+    const zoneCacheKey = activeZoneCacheKeyRef.current;
+    const computedRectangle = getSatelliteViewLimitRectangle();
+    if (computedRectangle) {
+      satelliteViewLimitRectangleRef.current = computedRectangle;
+      const serializedRectangle = serializeRectangleDegrees(computedRectangle);
+      if (zoneCacheKey && serializedRectangle) {
+        updateZoneCacheEntry(zoneCacheKey, (previousEntry) => ({
+          ...previousEntry,
+          zoneRectangle: serializedRectangle,
+        }));
+      }
+      return;
+    }
+
+    const cachedRectangle = deserializeRectangleDegrees(
+      readZoneCacheEntry(zoneCacheKey)?.zoneRectangle
+    );
+    satelliteViewLimitRectangleRef.current = cachedRectangle;
+  }, [boundaryGeoJson, biens, searchZone]);
+
+  useEffect(() => {
     isTiltedRef.current = isTilted;
   }, [isTilted]);
 
   useEffect(() => {
     isAwaitingMarkerPlacementRef.current = isAwaitingMarkerPlacement;
+    if (!isAwaitingMarkerPlacement) {
+      hidePlacementGhost();
+    }
   }, [isAwaitingMarkerPlacement]);
 
   useEffect(() => {
@@ -587,11 +929,18 @@ export default function CesiumMap({
 
   useEffect(() => {
     return () => {
+      componentMountedRef.current = false;
       if (modeTransitionTimeoutRef.current) {
         window.clearTimeout(modeTransitionTimeoutRef.current);
       }
+      if (satelliteWarmupBlockTimeoutRef.current) {
+        window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
+      }
       if (googleQualityTimeoutRef.current) {
         window.clearTimeout(googleQualityTimeoutRef.current);
+      }
+      if (googleUltraQualityTimeoutRef.current) {
+        window.clearTimeout(googleUltraQualityTimeoutRef.current);
       }
       if (longPressTimerRef.current) {
         window.clearTimeout(longPressTimerRef.current);
@@ -623,6 +972,26 @@ export default function CesiumMap({
       });
       modeTransitionTimeoutRef.current = null;
     }, 180);
+  }
+
+  function setSatelliteReadySafely(nextReadyValue) {
+    if (!componentMountedRef.current) return;
+    setIsSatelliteReady((previousValue) => {
+      if (previousValue === nextReadyValue) {
+        return previousValue;
+      }
+      return nextReadyValue;
+    });
+  }
+
+  function setSatelliteWarmupBlockExpiredSafely(nextValue) {
+    if (!componentMountedRef.current) return;
+    setIsSatelliteWarmupBlockExpired((previousValue) => {
+      if (previousValue === nextValue) {
+        return previousValue;
+      }
+      return nextValue;
+    });
   }
 
   function applyEntityVisualState(entity) {
@@ -657,29 +1026,54 @@ export default function CesiumMap({
     return String(value || "").trim().toLowerCase();
   }
 
-  function getMarkerAddressCandidates() {
+  function extractPostcode(value) {
+    const match = String(value || "").match(POSTCODE_PATTERN);
+    return match ? match[0] : "";
+  }
+
+  function getDefaultPostcodeFromBiens() {
     const sourceBiens = Array.isArray(allBiens) && allBiens.length > 0 ? allBiens : biens;
-    const uniqueCandidates = new Map();
+    const postcodeSet = new Set();
 
     sourceBiens.forEach((bien) => {
-      if (bien.lat == null || bien.lon == null) return;
       const address = String(bien.adresse || "").trim();
       if (!address) return;
-      const normalizedAddress = normalizeAddressValue(address);
-      if (!normalizedAddress) return;
-      if (!uniqueCandidates.has(normalizedAddress)) {
-        uniqueCandidates.set(normalizedAddress, {
-          label: address,
-          lat: bien.lat,
-          lon: bien.lon,
-        });
-      }
+      const postcode = extractPostcode(address);
+      if (postcode) postcodeSet.add(postcode);
     });
 
-    return [...uniqueCandidates.entries()].map(([key, candidate]) => ({
-      key,
-      ...candidate,
-    }));
+    if (postcodeSet.size === 1) {
+      return [...postcodeSet][0];
+    }
+    return "";
+  }
+
+  async function resolveMarkerAddressPostcode() {
+    const fromSearchZone = extractPostcode(searchZone);
+    if (fromSearchZone) return fromSearchZone;
+
+    const fromDraftAddress = extractPostcode(markerDraftAddress);
+    if (fromDraftAddress) return fromDraftAddress;
+
+    if (selectedCustomMarker?.address) {
+      const fromMarkerAddress = extractPostcode(selectedCustomMarker.address);
+      if (fromMarkerAddress) return fromMarkerAddress;
+    }
+
+    if (pendingMarkerPosition?.lat != null && pendingMarkerPosition?.lon != null) {
+      try {
+        const data = await getPostcodeFromCoordinates(
+          pendingMarkerPosition.lat,
+          pendingMarkerPosition.lon
+        );
+        const fromCoordinates = extractPostcode(data?.postcode);
+        if (fromCoordinates) return fromCoordinates;
+      } catch (error) {
+        console.warn("Impossible de recuperer le code postal du repere :", error);
+      }
+    }
+
+    return getDefaultPostcodeFromBiens();
   }
 
   function closeMarkerEditor(clearPending = true) {
@@ -689,23 +1083,56 @@ export default function CesiumMap({
     setSelectedCustomMarkerId(null);
     setMarkerDraftNote("");
     setMarkerDraftAddress("");
+    setMarkerAddressPostcode("");
+    setMarkerAddressCandidates([]);
+    setMarkerAddressLoading(false);
     setMarkerDraftPhotos([]);
     setMarkerError("");
     setMarkerEditorMode("map");
     setMarkerEditorOpen(false);
     setIsAwaitingMarkerPlacement(false);
+    hidePlacementGhost();
   }
 
-  function openMarkerEditorAtPosition(position) {
+function openMarkerEditorAtPosition(position) {
     setPendingMarkerPosition(position);
     setSelectedCustomMarkerId(null);
     setMarkerDraftNote("");
     setMarkerDraftAddress("");
+    setMarkerAddressPostcode("");
+    setMarkerAddressCandidates([]);
+    setMarkerAddressLoading(false);
     setMarkerDraftPhotos([]);
     setMarkerError("");
     setMarkerEditorMode("map");
     setMarkerEditorOpen(true);
     setIsAwaitingMarkerPlacement(false);
+  }
+
+  function applyMarkerPlacementPosition(position) {
+    setPendingMarkerPosition(position);
+    setIsAwaitingMarkerPlacement(false);
+    setMarkerEditorMode("map");
+    setMarkerEditorOpen(true);
+    setMarkerError("");
+    hidePlacementGhost();
+  }
+
+  function hidePlacementGhost() {
+    const ghostEntity = placementGhostEntityRef.current;
+    if (!ghostEntity) return;
+    ghostEntity.show = false;
+  }
+
+  function updatePlacementGhost(positionCartesian) {
+    const ghostEntity = placementGhostEntityRef.current;
+    if (!ghostEntity) return;
+    if (!positionCartesian) {
+      ghostEntity.show = false;
+      return;
+    }
+    ghostEntity.position = positionCartesian;
+    ghostEntity.show = true;
   }
 
   function convertFileToDataUrl(file) {
@@ -939,6 +1366,91 @@ function findPickedInteractiveData(
     );
   }
 
+  function getSatelliteViewLimitRectangle() {
+    const boundaryLines = extractBoundaryLines(boundaryGeoJson);
+    if (boundaryLines.length > 0) {
+      const points = boundaryLines.flatMap((ring) =>
+        ring.map((point) => ({
+          lon: Number(point?.[0]),
+          lat: Number(point?.[1]),
+        }))
+      );
+      const boundaryRectangle = rectangleFromLonLatPoints(
+        points,
+        SATELLITE_ZONE_LIMIT_PADDING_DEGREES
+      );
+      if (boundaryRectangle) return boundaryRectangle;
+    }
+
+    const fallbackPoints = biens
+      .filter((bien) => bien.lat != null && bien.lon != null)
+      .map((bien) => ({ lon: bien.lon, lat: bien.lat }));
+    return rectangleFromLonLatPoints(
+      fallbackPoints,
+      SATELLITE_ZONE_LIMIT_PADDING_DEGREES
+    );
+  }
+
+  function persistCurrentCameraInZoneCache(viewer) {
+    const zoneCacheKey = activeZoneCacheKeyRef.current;
+    if (!zoneCacheKey) return;
+    const cameraState = captureSerializableCameraState(viewer);
+    if (!cameraState) return;
+    updateZoneCacheEntry(zoneCacheKey, (previousEntry) => ({
+      ...previousEntry,
+      camera: cameraState,
+      lastMode: resolveMode(mapModeRef.current),
+    }));
+  }
+
+  function restoreCameraFromZoneCache(viewer) {
+    const zoneCacheKey = activeZoneCacheKeyRef.current;
+    if (!zoneCacheKey) return false;
+    const entry = readZoneCacheEntry(zoneCacheKey);
+    const restored = restoreSerializableCameraState(viewer, entry?.camera);
+    if (restored) {
+      zoneCameraRestoreDoneRef.current = true;
+      viewer.scene.requestRender();
+    }
+    return restored;
+  }
+
+  function clampSatelliteCameraToZoneRectangle(viewer) {
+    if (resolveMode(mapModeRef.current) !== "google3d") return;
+    const rectangle = satelliteViewLimitRectangleRef.current;
+    if (!rectangle) return;
+
+    const cartographic = viewer.camera.positionCartographic;
+    if (!cartographic) return;
+    const clampedLongitude = Cesium.Math.clamp(
+      cartographic.longitude,
+      rectangle.west,
+      rectangle.east
+    );
+    const clampedLatitude = Cesium.Math.clamp(
+      cartographic.latitude,
+      rectangle.south,
+      rectangle.north
+    );
+    const movedLongitude = Math.abs(clampedLongitude - cartographic.longitude);
+    const movedLatitude = Math.abs(clampedLatitude - cartographic.latitude);
+    if (movedLongitude < 1e-10 && movedLatitude < 1e-10) return;
+
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromRadians(
+        clampedLongitude,
+        clampedLatitude,
+        cartographic.height
+      ),
+      orientation: {
+        heading: viewer.camera.heading,
+        pitch: viewer.camera.pitch,
+        roll: viewer.camera.roll,
+      },
+    });
+    viewer.scene.requestRender();
+  }
+
   function focusOnBien(viewer, bien, duration = 1, onComplete = null) {
     if (!viewer || !bien || bien.lat == null || bien.lon == null) return;
 
@@ -964,12 +1476,13 @@ function findPickedInteractiveData(
 
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
+    let disposed = false;
 
     containerRef.current.style.touchAction = "none";
     containerRef.current.style.overscrollBehavior = "none";
 
     const viewer = new Cesium.Viewer(containerRef.current, {
-        baseLayerPicker: false,
+      baseLayerPicker: false,
       geocoder: false,
       homeButton: false,
       navigationHelpButton: false,
@@ -980,6 +1493,13 @@ function findPickedInteractiveData(
       animation: false,
       infoBox: false,
       selectionIndicator: false,
+      contextOptions: {
+        webgl: {
+          antialias: true,
+          powerPreference: "high-performance",
+        },
+      },
+      msaaSamples: isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES,
     });
 
     viewerRef.current = viewer;
@@ -993,19 +1513,47 @@ function findPickedInteractiveData(
         event.preventDefault();
       }
     };
+    const preventContextMenu = (event) => {
+      event.preventDefault();
+    };
     viewer.container.addEventListener("wheel", preventBrowserZoom, {
       passive: false,
     });
+    viewer.container.addEventListener("contextmenu", preventContextMenu);
     viewer.selectedEntity = undefined;
     viewer.scene.globe.depthTestAgainstTerrain = false;
+    viewer.scene.globe.maximumScreenSpaceError = isMobile ? 1.6 : 1.05;
+    viewer.scene.globe.preloadAncestors = true;
+    viewer.scene.globe.preloadSiblings = true;
+    viewer.scene.globe.tileCacheSize = isMobile
+      ? GLOBE_TILE_CACHE_SIZE_MOBILE
+      : GLOBE_TILE_CACHE_SIZE_DESKTOP;
+    viewer.scene.globe.loadingDescendantLimit = isMobile
+      ? GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE
+      : GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP;
+    viewer.scene.globe.showGroundAtmosphere = false;
     viewer.scene.skyAtmosphere.show = true;
     viewer.scene.skyBox.show = false;
+    viewer.scene.fog.enabled = false;
+    viewer.scene.highDynamicRange = true;
     viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
+    viewer.scene.fxaa = false;
+    if (viewer.scene.postProcessStages?.fxaa) {
+      viewer.scene.postProcessStages.fxaa.enabled = false;
+    }
+    viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
     viewer.targetFrameRate = 60;
     viewer.useBrowserRecommendedResolution = false;
-    viewer.resolutionScale = 1;
+    viewer.resolutionScale = getPreferredResolutionScale(isMobile);
+    viewer.scene.msaaSamples = isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES;
     if (isMobile) {
       optimizeTouchNavigation(
+        viewer,
+        touchNavTuningRef.current,
+        mapModeRef.current
+      );
+    } else {
+      optimizeDesktopNavigation(
         viewer,
         touchNavTuningRef.current,
         mapModeRef.current
@@ -1036,9 +1584,17 @@ function findPickedInteractiveData(
         },
       });
     };
+    const enforceSatelliteZoneLimit = () => {
+      clampSatelliteCameraToZoneRectangle(viewer);
+    };
+    const saveCameraStateOnMoveEnd = () => {
+      persistCurrentCameraInZoneCache(viewer);
+    };
     if (isMobile) {
       viewer.scene.postRender.addEventListener(enforceSatelliteZoomFloor);
     }
+    viewer.scene.postRender.addEventListener(enforceSatelliteZoneLimit);
+    viewer.camera.moveEnd.addEventListener(saveCameraStateOnMoveEnd);
     viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(
       Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK
     );
@@ -1046,9 +1602,49 @@ function findPickedInteractiveData(
     osmImageryLayerRef.current = viewer.imageryLayers.addImageryProvider(
       new Cesium.OpenStreetMapImageryProvider({
         url: "https://tile.openstreetmap.org/",
+        maximumLevel: OSM_IMAGERY_MAX_LEVEL,
+        enablePickFeatures: false,
       })
     );
+    tuneImageryLayer(osmImageryLayerRef.current, "plan");
     modeRef.current = "osm";
+
+    const ghostDataSource = new Cesium.CustomDataSource("note-placement-ghost");
+    viewer.dataSources.add(ghostDataSource);
+    placementGhostDataSourceRef.current = ghostDataSource;
+    placementGhostEntityRef.current = ghostDataSource.entities.add({
+      position: undefined,
+      point: {
+        pixelSize: 13,
+        color: Cesium.Color.WHITE.withAlpha(0.42),
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.NONE,
+      },
+      show: false,
+    });
+
+    if (CESIUM_ION_TOKEN) {
+      Cesium.createWorldTerrainAsync({
+        requestVertexNormals: true,
+        requestWaterMask: true,
+      })
+        .then((terrainProvider) => {
+          if (disposed || viewer.isDestroyed()) return;
+          worldTerrainProviderRef.current = terrainProvider;
+          if (modeRef.current === "google3d") {
+            viewer.terrainProvider = terrainProvider;
+            viewer.scene.globe.maximumScreenSpaceError = isMobile ? 1.35 : 0.85;
+          }
+          viewer.scene.requestRender();
+        })
+        .catch((error) => {
+          console.warn(
+            "Impossible de charger Cesium World Terrain, terrain ellipsoidal conserve.",
+            error
+          );
+        });
+    }
 
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction((click) => {
@@ -1074,6 +1670,20 @@ function findPickedInteractiveData(
         );
         setPendingMarkerPosition(null);
         setSelectedCustomMarkerId(null);
+        return;
+      }
+
+      if (isAwaitingMarkerPlacementRef.current) {
+        const cartesian = getClickPosition(viewer.scene, click.position);
+        if (!cartesian) return;
+
+        const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+        const position = {
+          lat: Cesium.Math.toDegrees(cartographic.latitude),
+          lon: Cesium.Math.toDegrees(cartographic.longitude),
+        };
+        applyMarkerPlacementPosition(position);
+        triggerHapticFeedback("light");
         return;
       }
 
@@ -1124,18 +1734,55 @@ function findPickedInteractiveData(
         lon: Cesium.Math.toDegrees(cartographic.longitude),
       };
 
-      if (isAwaitingMarkerPlacementRef.current) {
-        openMarkerEditorAtPosition(position);
-        triggerHapticFeedback("light");
-        return;
-      }
-
       if (isMobile) {
         return;
       }
 
       openMarkerEditorAtPosition(position);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+    handler.setInputAction((click) => {
+      if (isMobile || !click?.position) return;
+      if (placingBienIdRef.current) return;
+
+      const cartesian = getClickPosition(viewer.scene, click.position);
+      if (!cartesian) return;
+
+      const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+      const position = {
+        lat: Cesium.Math.toDegrees(cartographic.latitude),
+        lon: Cesium.Math.toDegrees(cartographic.longitude),
+      };
+
+      if (isAwaitingMarkerPlacementRef.current) {
+        applyMarkerPlacementPosition(position);
+        triggerHapticFeedback("light");
+        return;
+      }
+
+      setStackedMarkerOptions([]);
+      setMarkerError("");
+      setSelectedCustomMarkerId(null);
+      openMarkerEditorAtPosition(position);
+      triggerHapticFeedback("light");
+    }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+    handler.setInputAction((movement) => {
+      if (isMobile || !isAwaitingMarkerPlacementRef.current) {
+        hidePlacementGhost();
+        return;
+      }
+
+      const pointerPosition = movement?.endPosition;
+      if (!pointerPosition) {
+        hidePlacementGhost();
+        return;
+      }
+
+      const cartesian = getClickPosition(viewer.scene, pointerPosition);
+      updatePlacementGhost(cartesian || null);
+      viewer.scene.requestRender();
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
     const touchCanvas = viewer.scene.canvas;
     const enableCustomTouchGestures = isMobile && hasTouchInput();
@@ -1336,58 +1983,8 @@ function findPickedInteractiveData(
       longPressStartRef.current.active = false;
     };
 
-    const startLongPressTimer = (touch) => {
-      if (
-        !isMobile ||
-        selectedCustomMarkerIdRef.current ||
-        markerEditorOpenRef.current ||
-        placingBienIdRef.current
-      ) {
-        return;
-      }
-
-      const canvasRect = touchCanvas.getBoundingClientRect();
-      const clickPosition = new Cesium.Cartesian2(
-        touch.clientX - canvasRect.left,
-        touch.clientY - canvasRect.top
-      );
-      const pickedInteractive = findPickedInteractiveData(
-        viewer,
-        clickPosition,
-        selectedBienIdRef.current,
-        true
-      );
-
-      if (pickedInteractive.customMarker || pickedInteractive.bien) {
-        return;
-      }
-
-      clearLongPressTimer();
-      longPressStartRef.current = {
-        x: touch.clientX,
-        y: touch.clientY,
-        active: true,
-      };
-      longPressTimerRef.current = window.setTimeout(() => {
-        longPressTimerRef.current = null;
-        longPressStartRef.current.active = false;
-        const latestRect = touchCanvas.getBoundingClientRect();
-        const longPressPoint = new Cesium.Cartesian2(
-          touch.clientX - latestRect.left,
-          touch.clientY - latestRect.top
-        );
-        const cartesian = getClickPosition(viewer.scene, longPressPoint);
-        if (!cartesian) return;
-
-        const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-        const markerPosition = {
-          lat: Cesium.Math.toDegrees(cartographic.latitude),
-          lon: Cesium.Math.toDegrees(cartographic.longitude),
-        };
-        openMarkerEditorAtPosition(markerPosition);
-        ignoreNextClickRef.current = true;
-        triggerHapticFeedback("success");
-      }, 1000);
+    const startLongPressTimer = () => {
+      // Marker creation on mobile is now exclusively done through the "+" button.
     };
 
     const handleTouchStart = (event) => {
@@ -1676,7 +2273,9 @@ function findPickedInteractiveData(
     }
 
     return () => {
+      disposed = true;
       viewer.container.removeEventListener("wheel", preventBrowserZoom);
+      viewer.container.removeEventListener("contextmenu", preventContextMenu);
       if (enableCustomTouchGestures) {
         touchCanvas.removeEventListener("touchstart", handleTouchStart);
         touchCanvas.removeEventListener("touchmove", handleTouchMove);
@@ -1688,6 +2287,8 @@ function findPickedInteractiveData(
       if (isMobile) {
         viewer.scene.postRender.removeEventListener(enforceSatelliteZoomFloor);
       }
+      viewer.scene.postRender.removeEventListener(enforceSatelliteZoneLimit);
+      viewer.camera.moveEnd.removeEventListener(saveCameraStateOnMoveEnd);
 
       if (!handler.isDestroyed()) {
         handler.destroy();
@@ -1701,8 +2302,12 @@ function findPickedInteractiveData(
       entitiesRef.current = [];
       tilesetRef.current = null;
       tilesetPromiseRef.current = null;
+      satelliteWarmupPromiseRef.current = null;
+      worldTerrainProviderRef.current = null;
       osmImageryLayerRef.current = null;
       boundaryDataSourceRef.current = null;
+      placementGhostEntityRef.current = null;
+      placementGhostDataSourceRef.current = null;
       modeRef.current = null;
     };
   }, []);
@@ -1759,28 +2364,73 @@ function findPickedInteractiveData(
     if (!viewer) return;
 
     let cancelled = false;
+    let warmupTimerId = null;
+
+    if (CESIUM_ION_TOKEN) {
+      setSatelliteReadySafely(Boolean(tilesetRef.current));
+      setSatelliteWarmupBlockExpiredSafely(false);
+    } else {
+      setSatelliteReadySafely(false);
+      setSatelliteWarmupBlockExpiredSafely(false);
+    }
 
     const clearGoogleQualityTimeout = () => {
       if (googleQualityTimeoutRef.current) {
         window.clearTimeout(googleQualityTimeoutRef.current);
         googleQualityTimeoutRef.current = null;
       }
+      if (googleUltraQualityTimeoutRef.current) {
+        window.clearTimeout(googleUltraQualityTimeoutRef.current);
+        googleUltraQualityTimeoutRef.current = null;
+      }
+    };
+
+    const applyBalancedViewerQuality = () => {
+      if (isMobile) return;
+      viewer.scene.msaaSamples = DESKTOP_MSAA_SAMPLES;
+      viewer.resolutionScale = getPreferredResolutionScale(false);
+      viewer.scene.requestRender();
+    };
+
+    const applyUltraViewerQuality = () => {
+      if (isMobile) return;
+      viewer.scene.msaaSamples = DESKTOP_ULTRA_MSAA_SAMPLES;
+      viewer.resolutionScale = getUltraResolutionScale();
+      viewer.scene.requestRender();
     };
 
     const applyFastThenPremiumGoogleQuality = (tileset) => {
       if (!tileset) return;
       clearGoogleQualityTimeout();
+      applyBalancedViewerQuality();
       tileset.maximumScreenSpaceError = GOOGLE_TILESET_FAST_SSE;
+      tileset.dynamicScreenSpaceError = false;
+      tileset.foveatedScreenSpaceError = false;
       viewer.scene.requestRender();
       googleQualityTimeoutRef.current = window.setTimeout(() => {
         if (cancelled || !tilesetRef.current) return;
         tilesetRef.current.maximumScreenSpaceError = GOOGLE_TILESET_PREMIUM_SSE;
+        tilesetRef.current.dynamicScreenSpaceError = false;
+        tilesetRef.current.foveatedScreenSpaceError = false;
         viewer.scene.requestRender();
       }, GOOGLE_TILESET_FAST_PHASE_MS);
+
+      // Defer ultra quality a bit so initial view and mode switch stay responsive.
+      const sinceBootMs = Date.now() - appBootTimestampRef.current;
+      const ultraDelayMs = Math.max(900, GOOGLE_TILESET_ULTRA_PHASE_MS - sinceBootMs);
+      googleUltraQualityTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled || !tilesetRef.current || modeRef.current !== "google3d") return;
+        tilesetRef.current.maximumScreenSpaceError = GOOGLE_TILESET_ULTRA_SSE;
+        tilesetRef.current.dynamicScreenSpaceError = false;
+        tilesetRef.current.foveatedScreenSpaceError = false;
+        applyUltraViewerQuality();
+        viewer.scene.requestRender();
+      }, ultraDelayMs);
     };
 
     async function ensureGoogleTileset() {
       if (tilesetRef.current) {
+        setSatelliteReadySafely(true);
         return tilesetRef.current;
       }
 
@@ -1791,24 +2441,54 @@ function findPickedInteractiveData(
             showCreditsOnScreen: true,
             preloadWhenHidden: true,
             preloadFlightDestinations: true,
-            skipLevelOfDetail: true,
-            dynamicScreenSpaceError: true,
+            skipLevelOfDetail: false,
+            dynamicScreenSpaceError: false,
+            cullRequestsWhileMoving: false,
             cullWithChildrenBounds: true,
+            preferLeaves: true,
+            foveatedScreenSpaceError: false,
+            progressiveResolutionHeightFraction:
+              GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION,
+            immediatelyLoadDesiredLevelOfDetail:
+              GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY,
+            cacheBytes: isMobile
+              ? GOOGLE_TILESET_MOBILE_CACHE_BYTES
+              : GOOGLE_TILESET_DESKTOP_CACHE_BYTES,
+            maximumCacheOverflowBytes: isMobile
+              ? GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES
+              : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES,
             maximumScreenSpaceError: GOOGLE_TILESET_PREMIUM_SSE,
           }
         )
           .then((tileset) => {
             tileset.preloadWhenHidden = true;
             tileset.preloadFlightDestinations = true;
-            tileset.skipLevelOfDetail = true;
-            tileset.dynamicScreenSpaceError = true;
+            tileset.skipLevelOfDetail = false;
+            tileset.dynamicScreenSpaceError = false;
+            tileset.cullRequestsWhileMoving = false;
+            tileset.preferLeaves = true;
+            tileset.foveatedScreenSpaceError = false;
+            tileset.progressiveResolutionHeightFraction =
+              GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
+            tileset.immediatelyLoadDesiredLevelOfDetail =
+              GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY;
+            tileset.cacheBytes = isMobile
+              ? GOOGLE_TILESET_MOBILE_CACHE_BYTES
+              : GOOGLE_TILESET_DESKTOP_CACHE_BYTES;
+            tileset.maximumCacheOverflowBytes = isMobile
+              ? GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES
+              : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES;
             tileset.maximumScreenSpaceError = GOOGLE_TILESET_PREMIUM_SSE;
             tilesetRef.current = tileset;
+            setSatelliteReadySafely(true);
             if (!viewer.scene.primitives.contains(tileset)) {
               viewer.scene.primitives.add(tileset);
             }
             tileset.show = false;
             viewer.scene.requestRender();
+            if (tileset.tilesLoaded) {
+              setSatelliteReadySafely(true);
+            }
             return tileset;
           })
           .catch((error) => {
@@ -1820,8 +2500,56 @@ function findPickedInteractiveData(
       return tilesetPromiseRef.current;
     }
 
+    async function warmupGoogleUntilReady() {
+      if (!CESIUM_ION_TOKEN) return;
+      if (tilesetRef.current) {
+        setSatelliteReadySafely(true);
+        setSatelliteWarmupBlockExpiredSafely(false);
+        return;
+      }
+
+      if (!satelliteWarmupPromiseRef.current) {
+        if (satelliteWarmupBlockTimeoutRef.current) {
+          window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
+          satelliteWarmupBlockTimeoutRef.current = null;
+        }
+        setSatelliteWarmupBlockExpiredSafely(false);
+        satelliteWarmupBlockTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled) return;
+          setSatelliteWarmupBlockExpiredSafely(true);
+          satelliteWarmupBlockTimeoutRef.current = null;
+        }, SATELLITE_WARMUP_MAX_BLOCK_MS);
+
+        satelliteWarmupPromiseRef.current = ensureGoogleTileset()
+          .then((tileset) => {
+            setSatelliteReadySafely(true);
+            return waitForGoogleTilesetReady(tileset).then(() => {
+              setSatelliteReadySafely(true);
+              setTilesReadyVersion((value) => value + 1);
+              viewer.scene.requestRender();
+              return tileset;
+            });
+          })
+          .catch((error) => {
+            setSatelliteReadySafely(false);
+            throw error;
+          })
+          .finally(() => {
+            if (satelliteWarmupBlockTimeoutRef.current) {
+              window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
+              satelliteWarmupBlockTimeoutRef.current = null;
+            }
+            satelliteWarmupPromiseRef.current = null;
+          });
+      }
+
+      return satelliteWarmupPromiseRef.current;
+    }
+
     function enableOsm() {
       clearGoogleQualityTimeout();
+      applyBalancedViewerQuality();
+      viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
       if (tilesetRef.current) {
         tilesetRef.current.show = false;
       }
@@ -1835,6 +2563,8 @@ function findPickedInteractiveData(
         osmImageryLayerRef.current.alpha = 1;
       }
 
+      setIsTilted(false);
+      tiltToggleBaseRangeRef.current = null;
       modeRef.current = "osm";
       setTilesReadyVersion((value) => value + 1);
     }
@@ -1843,7 +2573,7 @@ function findPickedInteractiveData(
       const tileset = await withPromiseTimeout(
         ensureGoogleTileset(),
         GOOGLE_TILESET_SWITCH_TIMEOUT_MS,
-        "Le chargement initial de la vue satellite est trop long.",
+        "Le chargement initial de la vue satellite 3D est trop long.",
         "GOOGLE_TILESET_TIMEOUT"
       );
       if (cancelled) return;
@@ -1856,20 +2586,33 @@ function findPickedInteractiveData(
         osmImageryLayerRef.current.show = true;
         osmImageryLayerRef.current.alpha = 1;
       }
+      if (worldTerrainProviderRef.current) {
+        viewer.terrainProvider = worldTerrainProviderRef.current;
+      }
 
       tileset.show = true;
       applyFastThenPremiumGoogleQuality(tileset);
       viewer.scene.requestRender();
 
       modeRef.current = "google3d";
+      const zoneCacheKey = activeZoneCacheKeyRef.current;
+      if (zoneCacheKey) {
+        updateZoneCacheEntry(zoneCacheKey, (previousEntry) => ({
+          ...previousEntry,
+          google3dWarmAt: Date.now(),
+        }));
+      }
       setTilesReadyVersion((value) => value + 1);
 
       // Do not block the mode switch on initial tile loading. When tiles become
       // ready, trigger one more refresh so markers can settle on detailed mesh.
       waitForGoogleTilesetReady(tileset).then(() => {
-        if (cancelled || modeRef.current !== "google3d") return;
-        setTilesReadyVersion((value) => value + 1);
-        viewer.scene.requestRender();
+        if (cancelled) return;
+        setSatelliteReadySafely(true);
+        if (modeRef.current === "google3d") {
+          setTilesReadyVersion((value) => value + 1);
+          viewer.scene.requestRender();
+        }
       });
     }
 
@@ -1889,6 +2632,7 @@ function findPickedInteractiveData(
           }
           tilesetPromiseRef.current = null;
           tilesetRef.current = null;
+          setSatelliteReadySafely(false);
           if (attempt >= maxAttempts) {
             throw lastError;
           }
@@ -1905,6 +2649,7 @@ function findPickedInteractiveData(
         cameraState.pitch = Cesium.Math.toRadians(-90);
         cameraState.roll = 0;
         setIsTilted(false);
+        tiltToggleBaseRangeRef.current = null;
       }
       startModeTransition(requestedMode);
 
@@ -1929,11 +2674,14 @@ function findPickedInteractiveData(
       }
     }
 
-    // Warm up Google tiles in the background so first switch feels instant.
+    // Warm up Google tiles in the background after first paint so reload stays snappy.
     if (CESIUM_ION_TOKEN) {
-      ensureGoogleTileset().catch((error) => {
-        console.error("Erreur prechargement Google 3D :", error);
-      });
+      warmupTimerId = window.setTimeout(() => {
+        if (cancelled) return;
+        warmupGoogleUntilReady().catch((error) => {
+          console.error("Erreur prechargement Google 3D :", error);
+        });
+      }, GOOGLE_WARMUP_START_DELAY_MS);
     }
 
     applyMode();
@@ -1941,6 +2689,21 @@ function findPickedInteractiveData(
     return () => {
       cancelled = true;
       clearGoogleQualityTimeout();
+      if (modeTransitionTimeoutRef.current) {
+        window.clearTimeout(modeTransitionTimeoutRef.current);
+        modeTransitionTimeoutRef.current = null;
+      }
+      if (warmupTimerId) {
+        window.clearTimeout(warmupTimerId);
+      }
+      if (satelliteWarmupBlockTimeoutRef.current) {
+        window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
+        satelliteWarmupBlockTimeoutRef.current = null;
+      }
+      setModeTransition({
+        active: false,
+        target: null,
+      });
     };
   }, [mapMode]);
 
@@ -2031,37 +2794,83 @@ function findPickedInteractiveData(
       let finalBienPositions = rawBienPositions;
       let finalCustomPositions = rawCustomPositions;
 
-      if (!isOsmMode && tilesetRef.current?.tilesLoaded) {
+      // In satellite mode, place markers above the current globe surface immediately
+      // so they remain visible before high-detail 3D tiles finish loading.
+      if (!isOsmMode) {
+        finalBienPositions = biensAvecCoordonnees.map((bien) =>
+          buildFallbackSatellitePosition(bien.lon, bien.lat)
+        );
+        finalCustomPositions = customMarkers.map((marker) =>
+          buildFallbackSatellitePosition(marker.lon, marker.lat)
+        );
+      }
+
+      if (
+        !isOsmMode &&
+        SATELLITE_USE_MESH_CLAMP_FOR_MARKERS &&
+        tilesetRef.current?.tilesLoaded
+      ) {
         try {
           if (rawBienPositions.length > 0) {
-            const clampedBiens = await viewer.scene.clampToHeightMostDetailed(
-              rawBienPositions
+            const sampleBienPositions = rawBienPositions.slice(
+              0,
+              SATELLITE_CLAMP_MAX_POSITIONS
+            );
+            const clampedBiens = await withPromiseTimeout(
+              viewer.scene.clampToHeightMostDetailed(sampleBienPositions),
+              SATELLITE_CLAMP_TIMEOUT_MS,
+              "CLAMP_TIMEOUT_BIENS",
+              "CLAMP_TIMEOUT_BIENS"
             );
             if (!cancelled && Array.isArray(clampedBiens)) {
-              finalBienPositions = clampedBiens.map((position, index) => {
+              clampedBiens.forEach((position, index) => {
                 const elevated = elevateCartesianPosition(position);
-                if (elevated) return elevated;
+                if (elevated) {
+                  finalBienPositions[index] = elevated;
+                  return;
+                }
                 const bien = biensAvecCoordonnees[index];
-                return buildFallbackSatellitePosition(bien.lon, bien.lat);
+                finalBienPositions[index] = buildFallbackSatellitePosition(
+                  bien.lon,
+                  bien.lat
+                );
               });
             }
           }
 
           if (rawCustomPositions.length > 0) {
-            const clampedCustomMarkers = await viewer.scene.clampToHeightMostDetailed(
-              rawCustomPositions
+            const sampleCustomPositions = rawCustomPositions.slice(
+              0,
+              SATELLITE_CLAMP_MAX_POSITIONS
+            );
+            const clampedCustomMarkers = await withPromiseTimeout(
+              viewer.scene.clampToHeightMostDetailed(sampleCustomPositions),
+              SATELLITE_CLAMP_TIMEOUT_MS,
+              "CLAMP_TIMEOUT_CUSTOM",
+              "CLAMP_TIMEOUT_CUSTOM"
             );
             if (!cancelled && Array.isArray(clampedCustomMarkers)) {
-              finalCustomPositions = clampedCustomMarkers.map((position, index) => {
+              clampedCustomMarkers.forEach((position, index) => {
                 const elevated = elevateCartesianPosition(position);
-                if (elevated) return elevated;
+                if (elevated) {
+                  finalCustomPositions[index] = elevated;
+                  return;
+                }
                 const marker = customMarkers[index];
-                return buildFallbackSatellitePosition(marker.lon, marker.lat);
+                finalCustomPositions[index] = buildFallbackSatellitePosition(
+                  marker.lon,
+                  marker.lat
+                );
               });
             }
           }
         } catch (error) {
-          console.error("Erreur clamp reperes satellite :", error);
+          if (
+            error?.code !== "CLAMP_TIMEOUT_BIENS" &&
+            error?.code !== "CLAMP_TIMEOUT_CUSTOM"
+          ) {
+            console.error("Erreur clamp reperes satellite :", error);
+          }
           finalBienPositions = biensAvecCoordonnees.map((bien) =>
             buildFallbackSatellitePosition(bien.lon, bien.lat)
           );
@@ -2113,6 +2922,9 @@ function findPickedInteractiveData(
             heightReference: isOsmMode
               ? Cesium.HeightReference.CLAMP_TO_GROUND
               : Cesium.HeightReference.NONE,
+            disableDepthTestDistance: isOsmMode
+              ? 0
+              : SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE,
           },
           label: {
             text: formatMarkerPrix(bien.prix),
@@ -2130,6 +2942,9 @@ function findPickedInteractiveData(
             heightReference: isOsmMode
               ? Cesium.HeightReference.CLAMP_TO_GROUND
               : Cesium.HeightReference.NONE,
+            disableDepthTestDistance: isOsmMode
+              ? 0
+              : SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE,
           },
         });
 
@@ -2140,10 +2955,10 @@ function findPickedInteractiveData(
         markerDataByIdRef.current.set(bien.id, bien);
       });
 
-      customMarkers.forEach((marker) => {
+      customMarkers.forEach((marker, markerIndex) => {
         const entity = viewer.entities.add({
           id: marker.id,
-          position: finalCustomPositions[customMarkers.indexOf(marker)] || rawCustomPositions[customMarkers.indexOf(marker)],
+          position: finalCustomPositions[markerIndex] || rawCustomPositions[markerIndex],
           point: {
             pixelSize: 12,
             color: Cesium.Color.WHITE,
@@ -2152,6 +2967,9 @@ function findPickedInteractiveData(
             heightReference: isOsmMode
               ? Cesium.HeightReference.CLAMP_TO_GROUND
               : Cesium.HeightReference.NONE,
+            disableDepthTestDistance: isOsmMode
+              ? 0
+              : SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE,
           },
           label: {
             text: truncateMarkerNote(marker.note),
@@ -2167,6 +2985,9 @@ function findPickedInteractiveData(
             heightReference: isOsmMode
               ? Cesium.HeightReference.CLAMP_TO_GROUND
               : Cesium.HeightReference.NONE,
+            disableDepthTestDistance: isOsmMode
+              ? 0
+              : SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE,
           },
         });
 
@@ -2230,6 +3051,18 @@ function findPickedInteractiveData(
       }, delayMs);
     };
 
+    if (!zoneCameraRestoreDoneRef.current) {
+      zoneCameraRestoreDoneRef.current = true;
+      if (restoreCameraFromZoneCache(viewer)) {
+        rememberSyncPanHeightForCurrentMode(viewer);
+        return () => {
+          if (captureTimeoutId) {
+            window.clearTimeout(captureTimeoutId);
+          }
+        };
+      }
+    }
+
     const bounds = getBiensBounds();
     if (bounds) {
       viewer.camera.flyTo({
@@ -2270,13 +3103,17 @@ function findPickedInteractiveData(
 
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !isMobile) return;
+    if (!viewer) return;
 
-    optimizeTouchNavigation(viewer, touchNavTuningRef.current, mapMode);
-    const resolvedMode = resolveMode(mapMode);
-    const modeKey = getModeKey(resolvedMode);
-    if (!Number.isFinite(syncPanHeightRef.current[modeKey])) {
-      rememberSyncPanHeightForMode(viewer, resolvedMode);
+    if (isMobile) {
+      optimizeTouchNavigation(viewer, touchNavTuningRef.current, mapMode);
+      const resolvedMode = resolveMode(mapMode);
+      const modeKey = getModeKey(resolvedMode);
+      if (!Number.isFinite(syncPanHeightRef.current[modeKey])) {
+        rememberSyncPanHeightForMode(viewer, resolvedMode);
+      }
+    } else {
+      optimizeDesktopNavigation(viewer, touchNavTuningRef.current, mapMode);
     }
     viewer.scene.requestRender();
   }, [isMobile, mapMode, isTilted, touchNavTuning]);
@@ -2306,13 +3143,66 @@ function findPickedInteractiveData(
     if (selectedCustomMarker) {
       setMarkerDraftNote(selectedCustomMarker.note || "");
       setMarkerDraftAddress(selectedCustomMarker.address || "");
+      setMarkerAddressPostcode(extractPostcode(selectedCustomMarker.address || ""));
       setMarkerDraftPhotos(Array.isArray(selectedCustomMarker.photos) ? selectedCustomMarker.photos : []);
     } else if (!pendingMarkerPosition) {
       setMarkerDraftNote("");
       setMarkerDraftAddress("");
+      setMarkerAddressPostcode("");
+      setMarkerAddressCandidates([]);
       setMarkerDraftPhotos([]);
     }
   }, [selectedCustomMarker, pendingMarkerPosition]);
+
+  useEffect(() => {
+    if (markerEditorMode !== "address") {
+      setMarkerAddressLoading(false);
+      setMarkerAddressCandidates([]);
+      return;
+    }
+
+    const query = markerDraftAddress.trim();
+    if (!markerAddressPostcode || query.length < 2) {
+      setMarkerAddressLoading(false);
+      setMarkerAddressCandidates([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      setMarkerAddressLoading(true);
+      try {
+        const response = await getStreetSuggestions(
+          markerAddressPostcode,
+          query,
+          12
+        );
+        if (cancelled) return;
+        const streets = Array.isArray(response?.streets) ? response.streets : [];
+        setMarkerAddressCandidates(
+          streets.map((street) => ({
+            key: normalizeAddressValue(street.label),
+            label: street.label,
+            lat: street.lat,
+            lon: street.lon,
+          }))
+        );
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Erreur suggestions d'adresses :", error);
+        setMarkerAddressCandidates([]);
+      } finally {
+        if (!cancelled) {
+          setMarkerAddressLoading(false);
+        }
+      }
+    }, MARKER_ADDRESS_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [markerEditorMode, markerDraftAddress, markerAddressPostcode]);
 
   async function submitCustomMarker() {
     const note = markerDraftNote.trim();
@@ -2325,18 +3215,38 @@ function findPickedInteractiveData(
     setMarkerError("");
 
     try {
-      const addressCandidates = getMarkerAddressCandidates();
       let targetPosition = pendingMarkerPosition;
       let targetAddress = markerDraftAddress.trim();
 
       if (markerEditorMode === "address") {
-        const selectedAddressCandidate = addressCandidates.find(
-          (candidate) =>
-            normalizeAddressValue(candidate.label) === normalizeAddressValue(targetAddress)
+        if (!markerAddressPostcode) {
+          setMarkerError("Code postal introuvable. Place un repere ou lance une recherche par code postal.");
+          setMarkerSaving(false);
+          return;
+        }
+
+        let selectedAddressCandidate = markerAddressCandidates.find(
+          (candidate) => normalizeAddressValue(candidate.label) === normalizeAddressValue(targetAddress)
         );
 
+        if (!selectedAddressCandidate && targetAddress.length >= 2) {
+          const fallbackResponse = await getStreetSuggestions(
+            markerAddressPostcode,
+            targetAddress,
+            6
+          );
+          const fallbackCandidates = Array.isArray(fallbackResponse?.streets)
+            ? fallbackResponse.streets
+            : [];
+          selectedAddressCandidate =
+            fallbackCandidates.find(
+              (candidate) =>
+                normalizeAddressValue(candidate.label) === normalizeAddressValue(targetAddress)
+            ) || fallbackCandidates[0];
+        }
+
         if (!selectedAddressCandidate) {
-          setMarkerError("Choisis une adresse du code postal actuellement charge.");
+          setMarkerError("Choisis une rue proposee pour ce code postal.");
           setMarkerSaving(false);
           return;
         }
@@ -2451,14 +3361,35 @@ function findPickedInteractiveData(
     setMarkerEditorMode("map");
     setIsAwaitingMarkerPlacement(true);
     setMarkerEditorOpen(false);
-    setSelectedCustomMarkerId(null);
-    setPendingMarkerPosition(null);
     setMarkerError("");
+    hidePlacementGhost();
     triggerHapticFeedback("light");
   }
 
+  async function handleStartAddressMarkerPlacement() {
+    setMarkerEditorMode("address");
+    setIsAwaitingMarkerPlacement(false);
+    setMarkerAddressCandidates([]);
+    setMarkerAddressLoading(false);
+    setMarkerError("");
+    hidePlacementGhost();
+
+    const resolvedPostcode = await resolveMarkerAddressPostcode();
+    if (!resolvedPostcode) {
+      setMarkerAddressPostcode("");
+      setMarkerError("Impossible de trouver un code postal. Lance d'abord une recherche par code postal ou place un repere.");
+      markerAddressInputRef.current?.focus();
+      return;
+    }
+
+    setMarkerAddressPostcode(resolvedPostcode);
+    markerAddressInputRef.current?.focus();
+  }
+
   function selectStackedMarkerOption(bien) {
-    setStackedMarkerOptions([]);
+    if (isMobile) {
+      setStackedMarkerOptions([]);
+    }
     onSelectBienRef.current?.(bien);
     triggerHapticFeedback("light");
   }
@@ -2489,10 +3420,22 @@ function findPickedInteractiveData(
     const currentMode = resolveMode(mapMode);
     const cameraHeight =
       Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)?.height || 0;
-    const topDownRange = Math.max(
-      cameraHeight,
-      currentMode === "google3d" ? 160 : 850
-    );
+    const minimumTopDownRange = currentMode === "google3d" ? 160 : 850;
+    let topDownRange;
+
+    if (!isTilted) {
+      // Entering 3D: lock a base range so repeated 2D<->3D toggles don't drift upward.
+      topDownRange = Math.max(cameraHeight, minimumTopDownRange);
+      tiltToggleBaseRangeRef.current = topDownRange;
+    } else {
+      // Returning to 2D: reuse the same base range captured when we entered 3D.
+      const stableRange = Number(tiltToggleBaseRangeRef.current);
+      topDownRange = Math.max(
+        Number.isFinite(stableRange) ? stableRange : cameraHeight,
+        minimumTopDownRange
+      );
+    }
+
     const obliqueRange = Math.max(
       topDownRange * (currentMode === "google3d" ? 1.18 : 1.12),
       currentMode === "google3d" ? 220 : 980
@@ -2520,19 +3463,67 @@ function findPickedInteractiveData(
   const isMapModeTransitioning = modeTransition.active;
   const currentResolvedMode = resolveMode(mapMode);
   const canTiltCurrentView = currentResolvedMode === "google3d";
+  const desktopPlusBottom = canTiltCurrentView ? 148 : 84;
   const modeTransitionLabel =
     modeTransition.target === "google3d"
       ? "Passage a la vue satellite..."
       : "Passage a la vue plan...";
-  const markerAddressCandidates = getMarkerAddressCandidates();
+  const isSatelliteTogglePending =
+    canUseGoogle3D &&
+    currentResolvedMode !== "google3d" &&
+    !isSatelliteReady &&
+    !isSatelliteWarmupBlockExpired;
+  const isMapModeToggleDisabled =
+    !canUseGoogle3D || isMapModeTransitioning || isSatelliteTogglePending;
+  const mapModeButtonLabel =
+    currentResolvedMode === "google3d"
+      ? "Vue plan"
+      : isSatelliteTogglePending
+        ? "Satellite..."
+        : "Vue satellite";
+  const mapModeButtonTitle = !canUseGoogle3D
+    ? "Ajoute un token Cesium ion pour activer Google 3D"
+    : currentResolvedMode === "google3d"
+      ? "Passer a la vue plan"
+      : isSatelliteTogglePending
+        ? "Vue satellite en cours de chargement..."
+        : !isSatelliteReady
+          ? "Prechargement long detecte. Premier basculement possible mais peut prendre quelques secondes."
+        : "Passer a la vue satellite";
 
   function handleToggleMapMode() {
-    if (isMapModeTransitioning || !canUseGoogle3D) return;
+    if (!canUseGoogle3D) return;
+    if (isMapModeTransitioning) return;
+    if (
+      currentResolvedMode !== "google3d" &&
+      !isSatelliteReady &&
+      !isSatelliteWarmupBlockExpired
+    ) {
+      return;
+    }
     onToggleMapMode?.();
   }
 
+  function handleStartMarkerCreation() {
+    setStackedMarkerOptions([]);
+    setSelectedCustomMarkerId(null);
+    setPendingMarkerPosition(null);
+    setMarkerDraftNote("");
+    setMarkerDraftAddress("");
+    setMarkerDraftPhotos([]);
+    setMarkerAddressPostcode("");
+    setMarkerAddressCandidates([]);
+    setMarkerAddressLoading(false);
+    setMarkerError("");
+    setMarkerEditorOpen(false);
+    handleStartMapMarkerPlacement();
+  }
+
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+    <div
+      onContextMenu={(event) => event.preventDefault()}
+      style={{ width: "100%", height: "100%", position: "relative" }}
+    >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
       <div
@@ -2632,30 +3623,48 @@ function findPickedInteractiveData(
       ) : null}
 
       {!isMobile ? (
-        <button
-          onClick={handleToggleMapMode}
-          disabled={!canUseGoogle3D || isMapModeTransitioning}
-          style={desktopMapButtonStyle(
-            20,
-            canUseGoogle3D && !isMapModeTransitioning
-          )}
-          title={
-            canUseGoogle3D
-              ? mapMode === "google3d"
-                ? "Revenir a la vue plan"
-                : "Passer a la vue satellite"
-              : "Ajoute un token Cesium ion pour activer Google 3D"
-          }
-        >
-          {mapMode === "google3d" ? "Vue plan" : "Vue satellite"}
-        </button>
+        <>
+          <button
+            onClick={handleStartMarkerCreation}
+            style={desktopMapButtonStyle(desktopPlusBottom, true, true)}
+            title="Ajouter une note"
+          >
+            +
+          </button>
+          <button
+            onClick={handleToggleMapMode}
+            disabled={isMapModeToggleDisabled}
+            style={desktopMapButtonStyle(
+              20,
+              !isMapModeToggleDisabled
+            )}
+            title={mapModeButtonTitle}
+          >
+            {mapModeButtonLabel}
+          </button>
+        </>
       ) : null}
 
       {stackedMarkerOptions.length > 1 ? (
         <div style={stackedMarkerPopupContainerStyle()}>
           <div style={stackedMarkerPopupStyle()}>
-            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>
-              Plusieurs annonces ici
+            <div style={stackedMarkerPopupHeaderStyle()}>
+              <div style={{ display: "grid", gap: 2 }}>
+                <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>
+                  Plusieurs annonces ici
+                </div>
+                <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+                  {stackedMarkerOptions.length} annonces a cette adresse
+                </div>
+              </div>
+              <button
+                onClick={() => setStackedMarkerOptions([])}
+                style={stackedMarkerCloseButtonStyle()}
+                title="Fermer"
+                aria-label="Fermer"
+              >
+                x
+              </button>
             </div>
             <div style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 10 }}>
               Choisis l'annonce a ouvrir pour cette adresse.
@@ -2674,12 +3683,6 @@ function findPickedInteractiveData(
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => setStackedMarkerOptions([])}
-              style={{ ...markerActionButtonStyle("var(--panel-bg)", "var(--text-primary)", "var(--border-color)"), marginTop: 10 }}
-            >
-              Fermer
-            </button>
           </div>
         </div>
       ) : null}
@@ -2710,18 +3713,20 @@ function findPickedInteractiveData(
             </div>
 
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={markerPlacementStatusStyle(Boolean(pendingMarkerPosition))}>
+                <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.25 }}>
+                  {pendingMarkerPosition
+                    ? "Position carte selectionnee"
+                    : "Position carte non selectionnee"}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.3 }}>
+                  {pendingMarkerPosition
+                    ? "Enregistre pour creer le repere a cette position."
+                    : "Clique sur + puis sur la carte pour choisir la position."}
+                </div>
+              </div>
               <button
-                onClick={handleStartMapMarkerPlacement}
-                style={markerModeButtonStyle(markerEditorMode === "map")}
-              >
-                Placer sur la carte
-              </button>
-              <button
-                onClick={() => {
-                  setMarkerEditorMode("address");
-                  setIsAwaitingMarkerPlacement(false);
-                  markerAddressInputRef.current?.focus();
-                }}
+                onClick={handleStartAddressMarkerPlacement}
                 style={markerModeButtonStyle(markerEditorMode === "address")}
               >
                 Renseigner une adresse
@@ -2730,12 +3735,15 @@ function findPickedInteractiveData(
 
             {markerEditorMode === "address" ? (
               <div style={{ marginBottom: 10 }}>
+                <div style={{ color: "var(--text-secondary)", fontSize: 12, marginBottom: 6 }}>
+                  Code postal cible : {markerAddressPostcode || "non trouve"}
+                </div>
                 <input
                   ref={markerAddressInputRef}
                   list="marker-address-candidates"
                   value={markerDraftAddress}
                   onChange={(event) => setMarkerDraftAddress(event.target.value)}
-                  placeholder="Adresse du code postal en cours"
+                  placeholder="Saisis une rue de ce code postal"
                   style={markerInputStyle()}
                 />
                 <datalist id="marker-address-candidates">
@@ -2743,6 +3751,11 @@ function findPickedInteractiveData(
                     <option key={candidate.key} value={candidate.label} />
                   ))}
                 </datalist>
+                {markerAddressLoading ? (
+                  <div style={{ color: "var(--text-secondary)", fontSize: 12, marginTop: 6 }}>
+                    Recherche des rues...
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -2849,6 +3862,14 @@ function findPickedInteractiveData(
 
       {isMobile ? (
         <div style={mobileFloatingControlsStyle()}>
+          <button
+            onClick={handleStartMarkerCreation}
+            style={mobileFloatingCircleButtonStyle(false)}
+            title="Ajouter une note"
+          >
+            +
+          </button>
+
           {canTiltCurrentView ? (
             <button
               onClick={toggleTilt}
@@ -2871,19 +3892,13 @@ function findPickedInteractiveData(
 
           <button
             onClick={handleToggleMapMode}
-            disabled={!canUseGoogle3D || isMapModeTransitioning}
+            disabled={isMapModeToggleDisabled}
             style={mobileFloatingPillButtonStyle(
-              !canUseGoogle3D || isMapModeTransitioning
+              isMapModeToggleDisabled
             )}
-            title={
-              canUseGoogle3D
-                ? mapMode === "google3d"
-                  ? "Revenir a la vue plan"
-                  : "Passer a la vue satellite"
-                : "Ajoute un token Cesium ion pour activer Google 3D"
-            }
+            title={mapModeButtonTitle}
           >
-            {mapMode === "google3d" ? "Vue plan" : "Vue satellite"}
+            {mapModeButtonLabel}
           </button>
         </div>
       ) : (
@@ -2965,6 +3980,31 @@ function stackedMarkerPopupStyle() {
   };
 }
 
+function stackedMarkerPopupHeaderStyle() {
+  return {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 8,
+  };
+}
+
+function stackedMarkerCloseButtonStyle() {
+  return {
+    width: 30,
+    minWidth: 30,
+    height: 30,
+    borderRadius: 10,
+    border: "1px solid var(--border-color)",
+    background: "var(--panel-muted-bg)",
+    color: "var(--text-primary)",
+    fontWeight: 700,
+    cursor: "pointer",
+    lineHeight: 1,
+  };
+}
+
 function stackedMarkerChoiceButtonStyle() {
   return {
     width: "100%",
@@ -3033,6 +4073,22 @@ function markerModeButtonStyle(active) {
     fontWeight: 700,
     cursor: "pointer",
     padding: "0 10px",
+  };
+}
+
+function markerPlacementStatusStyle(hasPosition) {
+  return {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 12,
+    border: hasPosition ? "1px solid #16a34a" : "1px solid var(--border-color)",
+    background: hasPosition ? "rgba(22, 163, 74, 0.10)" : "var(--panel-muted-bg)",
+    color: "var(--text-primary)",
+    padding: "8px 10px",
+    display: "grid",
+    alignContent: "center",
+    gap: 2,
+    boxSizing: "border-box",
   };
 }
 

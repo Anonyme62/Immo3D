@@ -329,8 +329,11 @@ function overlayStyle() {
 }
 
 function drawerStyle(isMobile) {
+  const desktopWidth = 340;
+  const mobileWidth = "50vw";
+
   return {
-    width: isMobile ? "min(43vw, 160px)" : 160,
+    width: isMobile ? mobileWidth : desktopWidth,
     height: "100%",
     background: "var(--panel-bg)",
     boxShadow: "18px 0 48px rgba(17, 24, 39, 0.18)",

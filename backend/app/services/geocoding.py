@@ -1,4 +1,5 @@
 import logging
+import re
 
 import requests
 
@@ -7,7 +8,40 @@ logger = logging.getLogger(__name__)
 
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+BAN_SEARCH_URL = "https://api-adresse.data.gouv.fr/search/"
 GEOCODING_USER_AGENT = "Immo3D-AlexisRamez/1.0 (alexisramezdu62@gmail.com)"
+POSTCODE_PATTERN = re.compile(r"\b\d{5}\b")
+
+
+def _request_json(url: str, *, params: dict, timeout: int, log_context: str) -> dict | list | None:
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            headers={
+                "User-Agent": GEOCODING_USER_AGENT,
+                "Accept-Language": "fr",
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as error:
+        logger.warning("%s failed for params=%s: %s", log_context, params, error)
+        return None
+    except ValueError:
+        logger.warning("%s returned invalid JSON for params=%s", log_context, params)
+        return None
+
+    if isinstance(payload, (dict, list)):
+        return payload
+
+    return None
+
+
+def extract_postcode(value: str | None) -> str:
+    match = POSTCODE_PATTERN.search(str(value or ""))
+    return match.group(0) if match else ""
 
 
 def _build_manual_address(address: dict) -> str:
@@ -35,31 +69,26 @@ def _build_manual_address(address: dict) -> str:
     return ""
 
 
+def _reverse_geocode_payload(lat: float, lon: float) -> dict:
+    payload = _request_json(
+        NOMINATIM_REVERSE_URL,
+        params={
+            "lat": lat,
+            "lon": lon,
+            "format": "jsonv2",
+            "addressdetails": 1,
+            "zoom": 18,
+            "accept-language": "fr",
+        },
+        timeout=10,
+        log_context="Reverse geocoding",
+    )
+    return payload if isinstance(payload, dict) else {}
+
+
 def reverse_geocode_address(lat: float, lon: float) -> str:
-    try:
-        response = requests.get(
-            NOMINATIM_REVERSE_URL,
-            params={
-                "lat": lat,
-                "lon": lon,
-                "format": "jsonv2",
-                "addressdetails": 1,
-                "zoom": 18,
-                "accept-language": "fr",
-            },
-            headers={
-                "User-Agent": GEOCODING_USER_AGENT,
-                "Accept-Language": "fr",
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except requests.RequestException as error:
-        logger.warning("Reverse geocoding failed for lat=%s lon=%s: %s", lat, lon, error)
-        return ""
-    except ValueError:
-        logger.warning("Reverse geocoding returned invalid JSON for lat=%s lon=%s", lat, lon)
+    payload = _reverse_geocode_payload(lat, lon)
+    if not payload:
         return ""
 
     address = payload.get("address") or {}
@@ -74,63 +103,57 @@ def reverse_geocode_address(lat: float, lon: float) -> str:
     return ""
 
 
+def reverse_geocode_postcode(lat: float, lon: float) -> str:
+    payload = _reverse_geocode_payload(lat, lon)
+    if not payload:
+        return ""
+
+    address = payload.get("address") or {}
+    postcode = extract_postcode(address.get("postcode"))
+    if postcode:
+        return postcode
+
+    display_name = payload.get("display_name") or ""
+    return extract_postcode(display_name)
+
+
 def _search_nominatim(query: str) -> list[dict]:
-    try:
-        response = requests.get(
-            NOMINATIM_SEARCH_URL,
-            params={
-                "q": query,
-                "format": "jsonv2",
-                "limit": 12,
-                "polygon_geojson": 1,
-                "addressdetails": 1,
-                "accept-language": "fr",
-                "countrycodes": "fr",
-            },
-            headers={
-                "User-Agent": GEOCODING_USER_AGENT,
-                "Accept-Language": "fr",
-            },
-            timeout=12,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except requests.RequestException as error:
-        logger.warning("Nominatim search failed for query=%s: %s", query, error)
-        return []
-    except ValueError:
-        logger.warning("Nominatim search returned invalid JSON for query=%s", query)
+    payload = _request_json(
+        NOMINATIM_SEARCH_URL,
+        params={
+            "q": query,
+            "format": "jsonv2",
+            "limit": 12,
+            "polygon_geojson": 1,
+            "addressdetails": 1,
+            "accept-language": "fr",
+            "countrycodes": "fr",
+        },
+        timeout=12,
+        log_context="Nominatim search",
+    )
+    if payload is None:
         return []
 
     return payload if isinstance(payload, list) else []
 
 
 def _search_nominatim_structured(**structured_params: str) -> list[dict]:
-    try:
-        response = requests.get(
-            NOMINATIM_SEARCH_URL,
-            params={
-                **structured_params,
-                "format": "jsonv2",
-                "limit": 8,
-                "polygon_geojson": 1,
-                "addressdetails": 1,
-                "accept-language": "fr",
-                "countrycodes": "fr",
-            },
-            headers={
-                "User-Agent": GEOCODING_USER_AGENT,
-                "Accept-Language": "fr",
-            },
-            timeout=12,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except requests.RequestException as error:
-        logger.warning("Structured Nominatim search failed for params=%s: %s", structured_params, error)
-        return []
-    except ValueError:
-        logger.warning("Structured Nominatim search returned invalid JSON for params=%s", structured_params)
+    payload = _request_json(
+        NOMINATIM_SEARCH_URL,
+        params={
+            **structured_params,
+            "format": "jsonv2",
+            "limit": 8,
+            "polygon_geojson": 1,
+            "addressdetails": 1,
+            "accept-language": "fr",
+            "countrycodes": "fr",
+        },
+        timeout=12,
+        log_context="Structured Nominatim search",
+    )
+    if payload is None:
         return []
 
     return payload if isinstance(payload, list) else []
@@ -204,3 +227,73 @@ def search_boundary(query: str) -> dict | None:
             }
 
     return None
+
+
+def search_streets_by_postcode(postcode: str, query: str, limit: int = 12) -> list[dict]:
+    normalized_postcode = extract_postcode(postcode)
+    trimmed_query = (query or "").strip()
+    if not normalized_postcode or len(trimmed_query) < 2:
+        return []
+
+    payload = _request_json(
+        BAN_SEARCH_URL,
+        params={
+            "q": trimmed_query,
+            "postcode": normalized_postcode,
+            "type": "street",
+            "limit": max(1, min(limit, 20)),
+            "autocomplete": 1,
+        },
+        timeout=10,
+        log_context="BAN street search",
+    )
+    if not isinstance(payload, dict):
+        return []
+
+    features = payload.get("features")
+    if not isinstance(features, list):
+        return []
+
+    suggestions: list[dict] = []
+    unique_labels: set[str] = set()
+    for feature in features:
+        properties = feature.get("properties") if isinstance(feature, dict) else None
+        geometry = feature.get("geometry") if isinstance(feature, dict) else None
+        if not isinstance(properties, dict) or not isinstance(geometry, dict):
+            continue
+
+        coordinates = geometry.get("coordinates")
+        if not (isinstance(coordinates, list) and len(coordinates) >= 2):
+            continue
+
+        lon, lat = coordinates[0], coordinates[1]
+        if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+            continue
+
+        result_postcode = extract_postcode(properties.get("postcode"))
+        if result_postcode and result_postcode != normalized_postcode:
+            continue
+
+        label = str(properties.get("label") or "").strip()
+        if not label:
+            street = str(properties.get("name") or "").strip()
+            city = str(properties.get("city") or "").strip()
+            if not street:
+                continue
+            city_part = f" {city}" if city else ""
+            label = f"{street}, {normalized_postcode}{city_part}"
+
+        normalized_label = label.lower()
+        if normalized_label in unique_labels:
+            continue
+
+        unique_labels.add(normalized_label)
+        suggestions.append(
+            {
+                "label": label,
+                "lat": float(lat),
+                "lon": float(lon),
+            }
+        )
+
+    return suggestions

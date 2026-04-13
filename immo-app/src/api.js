@@ -240,6 +240,21 @@ export function getBoundary(query) {
   return apiFetch(`/geocoding/boundary?${params.toString()}`, { method: "GET" });
 }
 
+export function getPostcodeFromCoordinates(lat, lon) {
+  const params = new URLSearchParams();
+  params.append("lat", String(lat));
+  params.append("lon", String(lon));
+  return apiFetch(`/geocoding/postcode?${params.toString()}`, { method: "GET" });
+}
+
+export function getStreetSuggestions(postcode, query, limit = 12) {
+  const params = new URLSearchParams();
+  params.append("postcode", String(postcode || "").trim());
+  params.append("q", String(query || "").trim());
+  params.append("limit", String(limit));
+  return apiFetch(`/geocoding/streets?${params.toString()}`, { method: "GET" });
+}
+
 export function createBillingCheckoutSession() {
   return apiFetch("/billing/checkout-session", { method: "POST" });
 }

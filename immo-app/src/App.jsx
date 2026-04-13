@@ -50,7 +50,6 @@ function App() {
   const STYLE_STORAGE_KEY = "immo3d_style_mode";
   const HAPTICS_STORAGE_KEY = "immo3d_haptics_enabled";
   const FILTERS_BY_ZONE_STORAGE_KEY = "immo3d_filters_by_zone";
-  const TOUCH_NAV_TUNING_STORAGE_KEY = "immo3d_touch_nav_tuning";
   const MAP_MODE_STORAGE_KEY = "immo3d_map_mode";
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 980);
@@ -87,13 +86,7 @@ function App() {
   const [recentSearches, setRecentSearches] = useState([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteStatus, setNoteStatus] = useState("");
-  const [mapMode, setMapMode] = useState(() => {
-    const savedMode = localStorage.getItem(MAP_MODE_STORAGE_KEY);
-    if (savedMode === "google3d" && CESIUM_ION_TOKEN) {
-      return "google3d";
-    }
-    return "osm";
-  });
+  const [mapMode, setMapMode] = useState("osm");
   const [syncVersion, setSyncVersion] = useState(0);
   const [focusBienId, setFocusBienId] = useState(null);
   const [focusBienVersion, setFocusBienVersion] = useState(0);
@@ -113,16 +106,10 @@ function App() {
     if (storedValue === null) return true;
     return storedValue !== "false";
   });
-  const [touchNavTuning, setTouchNavTuning] = useState(() => {
-    const storedValue = localStorage.getItem(TOUCH_NAV_TUNING_STORAGE_KEY);
-    if (!storedValue) return mergeTouchNavTuning(TOUCH_NAV_TUNING);
-    try {
-      const parsed = JSON.parse(storedValue);
-      return mergeTouchNavTuning(parsed);
-    } catch {
-      return mergeTouchNavTuning(TOUCH_NAV_TUNING);
-    }
-  });
+  const touchNavTuning = useMemo(
+    () => mergeTouchNavTuning(TOUCH_NAV_TUNING),
+    []
+  );
   const [filtersByZone, setFiltersByZone] = useState(() => {
     const storedValue = localStorage.getItem(FILTERS_BY_ZONE_STORAGE_KEY);
     if (!storedValue) return {};
@@ -249,11 +236,8 @@ function App() {
   }, [mapMode]);
 
   useEffect(() => {
-    localStorage.setItem(
-      TOUCH_NAV_TUNING_STORAGE_KEY,
-      JSON.stringify(touchNavTuning)
-    );
-  }, [touchNavTuning]);
+    localStorage.removeItem("immo3d_touch_nav_tuning");
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1194,18 +1178,6 @@ function App() {
     });
   }
 
-  function handleResetTouchNavTuning() {
-    setTouchNavTuning(mergeTouchNavTuning(TOUCH_NAV_TUNING));
-  }
-
-  function handleTouchNavTuningChange(updater) {
-    setTouchNavTuning((currentValue) => {
-      const nextValue =
-        typeof updater === "function" ? updater(currentValue) : updater;
-      return mergeTouchNavTuning(nextValue);
-    });
-  }
-
   if (!authChecked) {
     return (
       <div
@@ -1299,8 +1271,6 @@ function App() {
                 hapticsEnabled={hapticsEnabled}
                 onToggleHaptics={handleToggleHaptics}
                 touchNavTuning={touchNavTuning}
-                onTouchNavTuningChange={handleTouchNavTuningChange}
-                onTouchNavTuningReset={handleResetTouchNavTuning}
                 compact
               />
             }
@@ -1370,6 +1340,7 @@ function App() {
                 onSetMapMode={setMapMode}
                 hapticsEnabled={hapticsEnabled}
                 allBiens={biens}
+                searchZone={activeZoneRecherche}
                 touchNavTuning={touchNavTuning}
                 isMobile={false}
                 syncVersion={syncVersion}
@@ -1448,6 +1419,7 @@ function App() {
                 onSetMapMode={setMapMode}
                 hapticsEnabled={hapticsEnabled}
                 allBiens={biens}
+                searchZone={activeZoneRecherche}
                 touchNavTuning={touchNavTuning}
                 isMobile
                 syncVersion={syncVersion}
@@ -1479,8 +1451,6 @@ function App() {
                     hapticsEnabled={hapticsEnabled}
                     onToggleHaptics={handleToggleHaptics}
                     touchNavTuning={touchNavTuning}
-                    onTouchNavTuningChange={handleTouchNavTuningChange}
-                    onTouchNavTuningReset={handleResetTouchNavTuning}
                     onMenuOpenChange={setIsAppMenuOpen}
                     isMobile
                   />
