@@ -40,9 +40,21 @@ const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
 const DESKTOP_RESOLUTION_SCALE = 1.22;
 const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
 const MOBILE_RESOLUTION_SCALE = 1;
+const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
+const IOS_RESOLUTION_SCALE = 0.82;
 const DESKTOP_MSAA_SAMPLES = 4;
 const DESKTOP_ULTRA_MSAA_SAMPLES = 8;
-const MOBILE_MSAA_SAMPLES = 4;
+const MOBILE_MSAA_SAMPLES = 2;
+const MOBILE_MOVING_MSAA_SAMPLES = 1;
+const IOS_MSAA_SAMPLES = 1;
+const MOBILE_GOOGLE_TILESET_FAST_SSE = 16;
+const MOBILE_GOOGLE_TILESET_PREMIUM_SSE = 9.5;
+const MOBILE_GOOGLE_TILESET_MOVING_SSE = 20;
+const MOBILE_GOOGLE_TILESET_IDLE_SSE = 8.5;
+const MOBILE_GLOBE_SSE_MOVING = 2.2;
+const MOBILE_GLOBE_SSE_IDLE = 1.55;
+const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
+const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
 const GOOGLE_TILESET_DESKTOP_CACHE_BYTES = 805_306_368; // 768 MB
 const GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES = 402_653_184; // +384 MB
 const GOOGLE_TILESET_MOBILE_CACHE_BYTES = 603_979_776; // 576 MB
@@ -52,8 +64,10 @@ const GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY = false;
 const OSM_IMAGERY_MAX_LEVEL = 20;
 const GLOBE_TILE_CACHE_SIZE_DESKTOP = 2600;
 const GLOBE_TILE_CACHE_SIZE_MOBILE = 1400;
+const GLOBE_TILE_CACHE_SIZE_IOS = 650;
 const GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP = 1200;
 const GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE = 600;
+const GLOBE_LOADING_DESCENDANT_LIMIT_IOS = 220;
 const SATELLITE_CLAMP_TIMEOUT_MS = 900;
 const SATELLITE_CLAMP_MAX_POSITIONS = 260;
 const PLAN_PAN_SPEED_MULTIPLIER = 0.605; // additional -20% from 0.756
@@ -133,7 +147,8 @@ function resolveMode(mapMode) {
   return mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
 }
 
-function getPreferredResolutionScale(isMobile) {
+function getPreferredResolutionScale(isMobile, isIOSDevice = false) {
+  if (isIOSDevice) return IOS_RESOLUTION_SCALE;
   if (isMobile) return MOBILE_RESOLUTION_SCALE;
   if (typeof window === "undefined") return DESKTOP_RESOLUTION_SCALE;
   const devicePixelRatio = Number(window.devicePixelRatio) || 1;
@@ -144,7 +159,8 @@ function getPreferredResolutionScale(isMobile) {
   return qualityScale;
 }
 
-function getUltraResolutionScale() {
+function getUltraResolutionScale(isIOSDevice = false) {
+  if (isIOSDevice) return IOS_RESOLUTION_SCALE;
   if (typeof window === "undefined") return DESKTOP_ULTRA_RESOLUTION_SCALE;
   const devicePixelRatio = Number(window.devicePixelRatio) || 1;
   return Math.max(
@@ -723,6 +739,7 @@ export default function CesiumMap({
   hapticsEnabled = true,
   touchNavTuning = TOUCH_NAV_TUNING,
   isMobile = false,
+  isIOSDevice = false,
   syncVersion = 0,
   focusBienId = null,
   focusBienVersion = 0,
@@ -768,13 +785,14 @@ export default function CesiumMap({
   const modeTransitionTimeoutRef = useRef(null);
   const googleQualityTimeoutRef = useRef(null);
   const googleUltraQualityTimeoutRef = useRef(null);
+  const mobileQualityRestoreTimeoutRef = useRef(null);
   const appBootTimestampRef = useRef(Date.now());
   const tiltToggleBaseRangeRef = useRef(null);
   const activeZoneCacheKeyRef = useRef(buildZoneCacheKey(searchZone));
   const satelliteViewLimitRectangleRef = useRef(null);
   const zoneCameraRestoreDoneRef = useRef(false);
   const hasInitialFlyRef = useRef(false);
-  const mapModeRef = useRef(mapMode);
+  const mapModeRef = useRef(canUseGoogle3D ? mapMode : "osm");
   const componentMountedRef = useRef(true);
   const touchNavTuningRef = useRef(touchNavTuning || TOUCH_NAV_TUNING);
   const isTiltedRef = useRef(false);
@@ -874,8 +892,8 @@ export default function CesiumMap({
   }, [placingBienId]);
 
   useEffect(() => {
-    mapModeRef.current = mapMode;
-  }, [mapMode]);
+    mapModeRef.current = canUseGoogle3D ? mapMode : "osm";
+  }, [mapMode, canUseGoogle3D]);
 
   useEffect(() => {
     touchNavTuningRef.current = touchNavTuning || TOUCH_NAV_TUNING;
@@ -941,6 +959,9 @@ export default function CesiumMap({
       }
       if (googleUltraQualityTimeoutRef.current) {
         window.clearTimeout(googleUltraQualityTimeoutRef.current);
+      }
+      if (mobileQualityRestoreTimeoutRef.current) {
+        window.clearTimeout(mobileQualityRestoreTimeoutRef.current);
       }
       if (longPressTimerRef.current) {
         window.clearTimeout(longPressTimerRef.current);
@@ -1487,7 +1508,8 @@ function findPickedInteractiveData(
       homeButton: false,
       navigationHelpButton: false,
       fullscreenButton: false,
-      requestRenderMode: false,
+      requestRenderMode: isMobile,
+      maximumRenderTimeChange: isMobile ? Number.POSITIVE_INFINITY : 0,
       sceneModePicker: false,
       timeline: false,
       animation: false,
@@ -1495,11 +1517,12 @@ function findPickedInteractiveData(
       selectionIndicator: false,
       contextOptions: {
         webgl: {
-          antialias: true,
-          powerPreference: "high-performance",
+          antialias: !isIOSDevice,
+          powerPreference: isIOSDevice ? "low-power" : "high-performance",
         },
       },
-      msaaSamples: isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES,
+      msaaSamples:
+        isIOSDevice ? IOS_MSAA_SAMPLES : isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES,
     });
 
     viewerRef.current = viewer;
@@ -1522,30 +1545,39 @@ function findPickedInteractiveData(
     viewer.container.addEventListener("contextmenu", preventContextMenu);
     viewer.selectedEntity = undefined;
     viewer.scene.globe.depthTestAgainstTerrain = false;
-    viewer.scene.globe.maximumScreenSpaceError = isMobile ? 1.6 : 1.05;
-    viewer.scene.globe.preloadAncestors = true;
-    viewer.scene.globe.preloadSiblings = true;
-    viewer.scene.globe.tileCacheSize = isMobile
-      ? GLOBE_TILE_CACHE_SIZE_MOBILE
-      : GLOBE_TILE_CACHE_SIZE_DESKTOP;
-    viewer.scene.globe.loadingDescendantLimit = isMobile
-      ? GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE
-      : GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP;
+    viewer.scene.globe.maximumScreenSpaceError = isIOSDevice
+      ? 2.4
+      : isMobile
+        ? MOBILE_GLOBE_SSE_IDLE
+        : 1.05;
+    viewer.scene.globe.preloadAncestors = !isIOSDevice;
+    viewer.scene.globe.preloadSiblings = !isIOSDevice;
+    viewer.scene.globe.tileCacheSize = isIOSDevice
+      ? GLOBE_TILE_CACHE_SIZE_IOS
+      : isMobile
+        ? GLOBE_TILE_CACHE_SIZE_MOBILE
+        : GLOBE_TILE_CACHE_SIZE_DESKTOP;
+    viewer.scene.globe.loadingDescendantLimit = isIOSDevice
+      ? GLOBE_LOADING_DESCENDANT_LIMIT_IOS
+      : isMobile
+        ? GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE
+        : GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP;
     viewer.scene.globe.showGroundAtmosphere = false;
-    viewer.scene.skyAtmosphere.show = true;
+    viewer.scene.skyAtmosphere.show = !isIOSDevice;
     viewer.scene.skyBox.show = false;
     viewer.scene.fog.enabled = false;
-    viewer.scene.highDynamicRange = true;
+    viewer.scene.highDynamicRange = !isIOSDevice;
     viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
     viewer.scene.fxaa = false;
     if (viewer.scene.postProcessStages?.fxaa) {
       viewer.scene.postProcessStages.fxaa.enabled = false;
     }
     viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
-    viewer.targetFrameRate = 60;
-    viewer.useBrowserRecommendedResolution = false;
-    viewer.resolutionScale = getPreferredResolutionScale(isMobile);
-    viewer.scene.msaaSamples = isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES;
+    viewer.targetFrameRate = isIOSDevice ? 30 : 60;
+    viewer.useBrowserRecommendedResolution = isIOSDevice;
+    viewer.resolutionScale = getPreferredResolutionScale(isMobile, isIOSDevice);
+    viewer.scene.msaaSamples =
+      isIOSDevice ? IOS_MSAA_SAMPLES : isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES;
     if (isMobile) {
       optimizeTouchNavigation(
         viewer,
@@ -1624,17 +1656,21 @@ function findPickedInteractiveData(
       show: false,
     });
 
-    if (CESIUM_ION_TOKEN) {
+    if (canUseGoogle3D && CESIUM_ION_TOKEN) {
       Cesium.createWorldTerrainAsync({
-        requestVertexNormals: true,
-        requestWaterMask: true,
+        requestVertexNormals: !isMobile,
+        requestWaterMask: !isMobile,
       })
         .then((terrainProvider) => {
           if (disposed || viewer.isDestroyed()) return;
           worldTerrainProviderRef.current = terrainProvider;
           if (modeRef.current === "google3d") {
             viewer.terrainProvider = terrainProvider;
-            viewer.scene.globe.maximumScreenSpaceError = isMobile ? 1.35 : 0.85;
+            viewer.scene.globe.maximumScreenSpaceError = isIOSDevice
+              ? 2.1
+              : isMobile
+                ? MOBILE_GLOBE_SSE_IDLE
+                : 0.85;
           }
           viewer.scene.requestRender();
         })
@@ -2366,7 +2402,7 @@ function findPickedInteractiveData(
     let cancelled = false;
     let warmupTimerId = null;
 
-    if (CESIUM_ION_TOKEN) {
+    if (canUseGoogle3D && CESIUM_ION_TOKEN) {
       setSatelliteReadySafely(Boolean(tilesetRef.current));
       setSatelliteWarmupBlockExpiredSafely(false);
     } else {
@@ -2385,23 +2421,91 @@ function findPickedInteractiveData(
       }
     };
 
+    const clearMobileQualityRestoreTimeout = () => {
+      if (mobileQualityRestoreTimeoutRef.current) {
+        window.clearTimeout(mobileQualityRestoreTimeoutRef.current);
+        mobileQualityRestoreTimeoutRef.current = null;
+      }
+    };
+
+    const applyMobileMovingQuality = (tileset = tilesetRef.current) => {
+      if (!isMobile || isIOSDevice) return;
+
+      viewer.scene.msaaSamples = MOBILE_MOVING_MSAA_SAMPLES;
+      viewer.resolutionScale = MOBILE_MOVING_RESOLUTION_SCALE;
+      viewer.scene.globe.maximumScreenSpaceError = MOBILE_GLOBE_SSE_MOVING;
+
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_MOVING_SSE;
+        tileset.dynamicScreenSpaceError = true;
+        tileset.foveatedScreenSpaceError = true;
+        tileset.cullRequestsWhileMoving = true;
+      }
+
+      if (osmImageryLayerRef.current && modeRef.current === "google3d") {
+        osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
+      }
+
+      viewer.scene.requestRender();
+    };
+
+    const applyMobileIdleQuality = (tileset = tilesetRef.current) => {
+      if (!isMobile || isIOSDevice) return;
+
+      viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
+      viewer.resolutionScale = MOBILE_RESOLUTION_SCALE;
+      viewer.scene.globe.maximumScreenSpaceError = MOBILE_GLOBE_SSE_IDLE;
+
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_IDLE_SSE;
+        tileset.dynamicScreenSpaceError = true;
+        tileset.foveatedScreenSpaceError = true;
+        tileset.cullRequestsWhileMoving = true;
+      }
+
+      if (osmImageryLayerRef.current && modeRef.current === "google3d") {
+        osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
+      }
+
+      viewer.scene.requestRender();
+    };
+
     const applyBalancedViewerQuality = () => {
-      if (isMobile) return;
+      if (isMobile) {
+        applyMobileIdleQuality();
+        return;
+      }
       viewer.scene.msaaSamples = DESKTOP_MSAA_SAMPLES;
-      viewer.resolutionScale = getPreferredResolutionScale(false);
+      viewer.resolutionScale = getPreferredResolutionScale(false, isIOSDevice);
       viewer.scene.requestRender();
     };
 
     const applyUltraViewerQuality = () => {
       if (isMobile) return;
       viewer.scene.msaaSamples = DESKTOP_ULTRA_MSAA_SAMPLES;
-      viewer.resolutionScale = getUltraResolutionScale();
+      viewer.resolutionScale = getUltraResolutionScale(isIOSDevice);
       viewer.scene.requestRender();
     };
 
     const applyFastThenPremiumGoogleQuality = (tileset) => {
       if (!tileset) return;
       clearGoogleQualityTimeout();
+      if (isMobile && !isIOSDevice) {
+        clearMobileQualityRestoreTimeout();
+        applyMobileMovingQuality(tileset);
+        tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_FAST_SSE;
+        tileset.dynamicScreenSpaceError = true;
+        tileset.foveatedScreenSpaceError = true;
+        tileset.cullRequestsWhileMoving = true;
+        viewer.scene.requestRender();
+        googleQualityTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled || !tilesetRef.current) return;
+          tilesetRef.current.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_PREMIUM_SSE;
+          applyMobileIdleQuality(tilesetRef.current);
+        }, GOOGLE_TILESET_FAST_PHASE_MS);
+        return;
+      }
+
       applyBalancedViewerQuality();
       tileset.maximumScreenSpaceError = GOOGLE_TILESET_FAST_SSE;
       tileset.dynamicScreenSpaceError = false;
@@ -2442,11 +2546,11 @@ function findPickedInteractiveData(
             preloadWhenHidden: true,
             preloadFlightDestinations: true,
             skipLevelOfDetail: false,
-            dynamicScreenSpaceError: false,
-            cullRequestsWhileMoving: false,
+            dynamicScreenSpaceError: isMobile && !isIOSDevice,
+            cullRequestsWhileMoving: isMobile && !isIOSDevice,
             cullWithChildrenBounds: true,
             preferLeaves: true,
-            foveatedScreenSpaceError: false,
+            foveatedScreenSpaceError: isMobile && !isIOSDevice,
             progressiveResolutionHeightFraction:
               GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION,
             immediatelyLoadDesiredLevelOfDetail:
@@ -2457,17 +2561,20 @@ function findPickedInteractiveData(
             maximumCacheOverflowBytes: isMobile
               ? GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES
               : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES,
-            maximumScreenSpaceError: GOOGLE_TILESET_PREMIUM_SSE,
+            maximumScreenSpaceError:
+              isMobile && !isIOSDevice
+                ? MOBILE_GOOGLE_TILESET_PREMIUM_SSE
+                : GOOGLE_TILESET_PREMIUM_SSE,
           }
         )
           .then((tileset) => {
             tileset.preloadWhenHidden = true;
             tileset.preloadFlightDestinations = true;
             tileset.skipLevelOfDetail = false;
-            tileset.dynamicScreenSpaceError = false;
-            tileset.cullRequestsWhileMoving = false;
+            tileset.dynamicScreenSpaceError = isMobile && !isIOSDevice;
+            tileset.cullRequestsWhileMoving = isMobile && !isIOSDevice;
             tileset.preferLeaves = true;
-            tileset.foveatedScreenSpaceError = false;
+            tileset.foveatedScreenSpaceError = isMobile && !isIOSDevice;
             tileset.progressiveResolutionHeightFraction =
               GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
             tileset.immediatelyLoadDesiredLevelOfDetail =
@@ -2478,7 +2585,10 @@ function findPickedInteractiveData(
             tileset.maximumCacheOverflowBytes = isMobile
               ? GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES
               : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES;
-            tileset.maximumScreenSpaceError = GOOGLE_TILESET_PREMIUM_SSE;
+            tileset.maximumScreenSpaceError =
+              isMobile && !isIOSDevice
+                ? MOBILE_GOOGLE_TILESET_PREMIUM_SSE
+                : GOOGLE_TILESET_PREMIUM_SSE;
             tilesetRef.current = tileset;
             setSatelliteReadySafely(true);
             if (!viewer.scene.primitives.contains(tileset)) {
@@ -2501,7 +2611,7 @@ function findPickedInteractiveData(
     }
 
     async function warmupGoogleUntilReady() {
-      if (!CESIUM_ION_TOKEN) return;
+      if (!canUseGoogle3D || !CESIUM_ION_TOKEN) return;
       if (tilesetRef.current) {
         setSatelliteReadySafely(true);
         setSatelliteWarmupBlockExpiredSafely(false);
@@ -2548,6 +2658,7 @@ function findPickedInteractiveData(
 
     function enableOsm() {
       clearGoogleQualityTimeout();
+      clearMobileQualityRestoreTimeout();
       applyBalancedViewerQuality();
       viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
       if (tilesetRef.current) {
@@ -2584,7 +2695,8 @@ function findPickedInteractiveData(
 
       if (osmImageryLayerRef.current) {
         osmImageryLayerRef.current.show = true;
-        osmImageryLayerRef.current.alpha = 1;
+        osmImageryLayerRef.current.alpha =
+          isMobile && !isIOSDevice ? MOBILE_GOOGLE_OSM_ALPHA : 1;
       }
       if (worldTerrainProviderRef.current) {
         viewer.terrainProvider = worldTerrainProviderRef.current;
@@ -2610,6 +2722,9 @@ function findPickedInteractiveData(
         if (cancelled) return;
         setSatelliteReadySafely(true);
         if (modeRef.current === "google3d") {
+          if (isMobile && !isIOSDevice) {
+            applyMobileIdleQuality(tileset);
+          }
           setTilesReadyVersion((value) => value + 1);
           viewer.scene.requestRender();
         }
@@ -2641,7 +2756,10 @@ function findPickedInteractiveData(
     }
 
     async function applyMode() {
-      const requestedMode = resolveMode(mapMode);
+      const requestedMode = canUseGoogle3D ? resolveMode(mapMode) : "osm";
+      if (!canUseGoogle3D && mapMode === "google3d") {
+        onSetMapModeRef.current?.("osm");
+      }
       if (modeRef.current === requestedMode) return;
 
       const cameraState = captureCamera(viewer);
@@ -2674,8 +2792,29 @@ function findPickedInteractiveData(
       }
     }
 
+    const handleMobileMoveStart = () => {
+      if (!isMobile || isIOSDevice) return;
+      clearMobileQualityRestoreTimeout();
+      applyMobileMovingQuality();
+    };
+
+    const handleMobileMoveEnd = () => {
+      if (!isMobile || isIOSDevice) return;
+      clearMobileQualityRestoreTimeout();
+      mobileQualityRestoreTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        applyMobileIdleQuality();
+      }, MOBILE_QUALITY_RESTORE_DELAY_MS);
+    };
+
+    if (isMobile && !isIOSDevice) {
+      viewer.camera.moveStart.addEventListener(handleMobileMoveStart);
+      viewer.camera.moveEnd.addEventListener(handleMobileMoveEnd);
+      applyMobileIdleQuality();
+    }
+
     // Warm up Google tiles in the background after first paint so reload stays snappy.
-    if (CESIUM_ION_TOKEN) {
+    if (canUseGoogle3D && CESIUM_ION_TOKEN) {
       warmupTimerId = window.setTimeout(() => {
         if (cancelled) return;
         warmupGoogleUntilReady().catch((error) => {
@@ -2689,6 +2828,7 @@ function findPickedInteractiveData(
     return () => {
       cancelled = true;
       clearGoogleQualityTimeout();
+      clearMobileQualityRestoreTimeout();
       if (modeTransitionTimeoutRef.current) {
         window.clearTimeout(modeTransitionTimeoutRef.current);
         modeTransitionTimeoutRef.current = null;
@@ -2700,12 +2840,16 @@ function findPickedInteractiveData(
         window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
         satelliteWarmupBlockTimeoutRef.current = null;
       }
+      if (isMobile && !isIOSDevice && !viewer.isDestroyed()) {
+        viewer.camera.moveStart.removeEventListener(handleMobileMoveStart);
+        viewer.camera.moveEnd.removeEventListener(handleMobileMoveEnd);
+      }
       setModeTransition({
         active: false,
         target: null,
       });
     };
-  }, [mapMode]);
+  }, [mapMode, canUseGoogle3D]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
