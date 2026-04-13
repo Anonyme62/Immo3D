@@ -173,3 +173,17 @@ def ensure_sqlite_compatibility_migrations():
                     "ADD COLUMN search_zone VARCHAR(64) NOT NULL DEFAULT ''"
                 )
             )
+        if "address" not in custom_marker_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE custom_markers "
+                    "ADD COLUMN address TEXT NOT NULL DEFAULT ''"
+                )
+            )
+        if "photos_json" not in custom_marker_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE custom_markers "
+                    "ADD COLUMN photos_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            )

@@ -3,6 +3,11 @@ export function formatPrix(prix) {
   return `${Number(prix).toLocaleString("fr-FR")} EUR`;
 }
 
+export function formatMarkerPrix(prix) {
+  if (prix === null || prix === undefined || prix === "") return "";
+  return Number(prix).toLocaleString("fr-FR");
+}
+
 export function formatSurface(surface) {
   if (surface === null || surface === undefined || surface === "") return "N/A";
   return `${surface} m2`;

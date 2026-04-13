@@ -129,7 +129,7 @@ test("filterBiens can show only professional biens", () => {
 
   assert.deepEqual(
     result.map((bien) => bien.id),
-    ["bien-1", "bien-2"]
+    ["bien-1"]
   );
 });
 
@@ -211,7 +211,7 @@ test("countBienCategories returns expected dashboard counts", () => {
     allBiens: 2,
     favorites: 1,
     setAside: 1,
-    professionnels: 2,
+    professionnels: 1,
     particuliers: 1,
     blacklist: 1,
     sansAdresse: 1,

@@ -17,14 +17,16 @@ function normalizeBaseUrl(value) {
 
 function defaultApiBaseUrl() {
   if (typeof window === "undefined") {
-    return "http://127.0.0.1:8000";
+    return "";
   }
 
   if (import.meta.env.PROD) {
     return "";
   }
 
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
+  // En dev, on passe par le proxy Vite (meme origin) pour stabiliser
+  // l'acces depuis mobile sans exposer un deuxieme port reseau.
+  return "";
 }
 
 export const API_BASE_URL = normalizeBaseUrl(

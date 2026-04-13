@@ -13,9 +13,33 @@ from app.schemas import (
 
 router = APIRouter(prefix="/markers", tags=["markers"])
 
+MAX_MARKER_PHOTOS = 8
+MAX_MARKER_PHOTO_LENGTH = 1_200_000
+
 
 def normalize_search_zone(value: str | None) -> str:
     return (value or "").strip()
+
+
+def sanitize_marker_photos(photos: list[str] | None) -> list[str]:
+    sanitized: list[str] = []
+    for photo in photos or []:
+        if not isinstance(photo, str):
+            continue
+        normalized_photo = photo.strip()
+        if not normalized_photo:
+            continue
+        if len(normalized_photo) > MAX_MARKER_PHOTO_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail="Une photo est trop volumineuse pour etre enregistree.",
+            )
+        sanitized.append(normalized_photo)
+
+        if len(sanitized) >= MAX_MARKER_PHOTOS:
+            break
+
+    return sanitized
 
 
 @router.get("", response_model=list[CustomMarkerResponse])
@@ -48,7 +72,9 @@ def create_marker(
         lat=payload.lat,
         lon=payload.lon,
         search_zone=normalize_search_zone(payload.search_zone),
+        address=(payload.address or "").strip(),
         note=payload.note.strip(),
+        photos=sanitize_marker_photos(payload.photos),
     )
     db.add(marker)
     db.commit()
@@ -74,6 +100,8 @@ def update_marker(
         raise HTTPException(status_code=404, detail="Repere introuvable")
 
     marker.note = payload.note.strip()
+    marker.address = (payload.address or "").strip()
+    marker.photos = sanitize_marker_photos(payload.photos)
     db.commit()
     db.refresh(marker)
     return marker

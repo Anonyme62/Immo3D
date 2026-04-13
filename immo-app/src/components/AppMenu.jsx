@@ -3,16 +3,21 @@ import { useEffect, useState } from "react";
 export default function AppMenu({
   onLogout,
   onExportKml,
+  onOpenSettings,
   showBoundary = false,
   onToggleBoundary,
   themeMode = "light",
   onToggleTheme,
   styleMode = "default",
   onChangeStyle,
+  hapticsEnabled = true,
+  onToggleHaptics,
+  onMenuOpenChange,
   isMobile = false,
   compact = false,
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showPreferences, setShowPreferences] = useState(false);
   const [styleSelectValue, setStyleSelectValue] = useState(styleMode);
 
   useEffect(() => {
@@ -41,10 +46,17 @@ export default function AppMenu({
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    onMenuOpenChange?.(isOpen);
+  }, [isOpen, onMenuOpenChange]);
+
   return (
     <>
       <button
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          setIsOpen(true);
+          setShowPreferences(false);
+        }}
         style={menuButtonStyle(compact)}
         title="Ouvrir le menu"
         aria-label="Ouvrir le menu"
@@ -121,23 +133,78 @@ export default function AppMenu({
             >
               <button
                 onClick={() => {
-                  setIsOpen(false);
-                  onToggleBoundary?.();
+                  setShowPreferences((value) => !value);
                 }}
                 style={drawerActionButtonStyle()}
               >
-                {showBoundary ? "Masquer bordure" : "Afficher bordure"}
+                Preferences
               </button>
 
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  onToggleTheme?.();
-                }}
-                style={drawerActionButtonStyle()}
-              >
-                {themeMode === "dark" ? "Mode clair" : "Mode sombre"}
-              </button>
+              {showPreferences ? (
+                <div style={stylePickerStyle()}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1.2,
+                      marginBottom: 10,
+                    }}
+                  >
+                    Affichage
+                  </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <button
+                      onClick={() => onToggleBoundary?.()}
+                      style={drawerActionButtonStyle("compact")}
+                    >
+                      {showBoundary ? "Masquer bordure" : "Afficher bordure"}
+                    </button>
+                    <button
+                      onClick={() => onToggleTheme?.()}
+                      style={drawerActionButtonStyle("compact")}
+                    >
+                      {themeMode === "dark" ? "Mode clair" : "Mode sombre"}
+                    </button>
+                    {isMobile ? (
+                      <button
+                        onClick={() => onToggleHaptics?.()}
+                        style={drawerActionButtonStyle("compact")}
+                      >
+                        {hapticsEnabled ? "Retour haptique actif" : "Retour haptique inactif"}
+                      </button>
+                    ) : null}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 12,
+                      fontSize: 12,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1.2,
+                      marginBottom: 10,
+                    }}
+                  >
+                    Style
+                  </div>
+                  <select
+                    value={styleSelectValue}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setStyleSelectValue(nextValue);
+                      onChangeStyle?.(nextValue);
+                    }}
+                    style={styleSelectStyle()}
+                  >
+                    {STYLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
+                </div>
+              ) : null}
 
               <button
                 onClick={() => {
@@ -161,37 +228,12 @@ export default function AppMenu({
 
               <div style={{ flex: 1 }} />
 
-              <div style={stylePickerStyle()}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: 1.2,
-                    marginBottom: 10,
-                  }}
-                >
-                  Style
-                </div>
-                <select
-                  value={styleSelectValue}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setStyleSelectValue(nextValue);
-                    onChangeStyle?.(nextValue);
-                  }}
-                  style={styleSelectStyle()}
-                >
-                  {STYLE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <button
                 type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onOpenSettings?.();
+                }}
                 style={drawerActionButtonStyle()}
                 title="Parametres"
                 aria-label="Parametres"
@@ -213,6 +255,8 @@ const STYLE_OPTIONS = [
   { value: "default", label: "Classique" },
   { value: "editorial", label: "Editorial" },
   { value: "luxury", label: "Luxury Noir" },
+  { value: "heritage", label: "Heritage" },
+  { value: "glass", label: "Glass" },
 ];
 
 function HamburgerIcon() {
@@ -286,7 +330,7 @@ function overlayStyle() {
 
 function drawerStyle(isMobile) {
   return {
-    width: isMobile ? "min(86vw, 320px)" : 320,
+    width: isMobile ? "min(43vw, 160px)" : 160,
     height: "100%",
     background: "var(--panel-bg)",
     boxShadow: "18px 0 48px rgba(17, 24, 39, 0.18)",
@@ -311,13 +355,14 @@ function closeButtonStyle() {
   };
 }
 
-function drawerActionButtonStyle() {
+function drawerActionButtonStyle(variant = "default") {
+  const compact = variant === "compact";
   return {
     width: "100%",
-    padding: "13px 16px",
+    padding: compact ? "10px 12px" : "13px 16px",
     borderRadius: 16,
     border: "1px solid var(--border-color)",
-    background: "var(--panel-bg)",
+    background: compact ? "var(--panel-muted-bg)" : "var(--panel-bg)",
     color: "var(--text-primary)",
     textAlign: "left",
     fontWeight: 600,

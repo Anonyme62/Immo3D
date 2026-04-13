@@ -231,6 +231,17 @@ export default function BiensSidebar({
                 />
               </div>
             ) : null}
+
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                fontStyle: "italic",
+                color: "var(--text-muted)",
+              }}
+            >
+              * Les biens blacklistes ne sont affiches que si le filtre est coche.
+            </div>
           </div>
 
           {isMobile ? (
@@ -265,7 +276,7 @@ export default function BiensSidebar({
             <input
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Filtrer : agence, adresse, prix..."
+              placeholder="Rechercher par : agence, adresse, prix..."
               style={topInputStyle(isMobile)}
             />
           </div>

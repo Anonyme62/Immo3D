@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
@@ -163,7 +164,9 @@ class CustomMarker(Base):
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
     search_zone: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    address: Mapped[str] = mapped_column(Text, nullable=False, default="")
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    photos_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -171,6 +174,18 @@ class CustomMarker(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    @property
+    def photos(self) -> list[str]:
+        try:
+            loaded_photos = json.loads(self.photos_json or "[]")
+            return loaded_photos if isinstance(loaded_photos, list) else []
+        except json.JSONDecodeError:
+            return []
+
+    @photos.setter
+    def photos(self, value: list[str]) -> None:
+        self.photos_json = json.dumps(value or [])
 
 
 class FavoriteBien(Base):

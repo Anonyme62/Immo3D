@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "./config";
 
 const CSRF_STORAGE_KEY = "immo3d_csrf_token";
+const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 12000);
 
 async function readJson(response) {
   try {
@@ -33,10 +34,15 @@ async function apiFetch(path, options = {}) {
   let response;
   const method = (options.method || "GET").toUpperCase();
   const csrfToken = getStoredCsrfToken();
+  const abortController = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    abortController.abort();
+  }, API_TIMEOUT_MS);
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
+      signal: abortController.signal,
       headers: {
         "Content-Type": "application/json",
         ...(csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)
@@ -47,14 +53,32 @@ async function apiFetch(path, options = {}) {
       ...options,
     });
   } catch (error) {
-    const networkError = new Error(
-      "Connexion au backend impossible. Verifie que le backend tourne sur le PC, qu'il ecoute sur le reseau local et que le telephone est sur le meme Wi-Fi."
-    );
+    const timeoutError =
+      error?.name === "AbortError"
+        ? new Error(
+            "Le backend met trop de temps a repondre. Verifie le Wi-Fi, puis recharge la page."
+          )
+        : null;
+    const networkError =
+      timeoutError ||
+      new Error(
+        "Connexion au backend impossible. Verifie que le backend tourne sur le PC, qu'il ecoute sur le reseau local et que le telephone est sur le meme Wi-Fi."
+      );
     networkError.cause = error;
     throw networkError;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   const data = await readJson(response);
+  const contentType = response.headers.get("content-type") || "";
+
+  if (response.ok && data === null && contentType.includes("text/html")) {
+    throw new Error(
+      "Le front n'arrive pas a joindre l'API (proxy dev). Relance le front et reessaie."
+    );
+  }
+
   syncAuthPayload(data);
 
   if (!response.ok) {
@@ -176,17 +200,31 @@ export function getCustomMarkers(searchZone = "") {
   return apiFetch(`/markers${query ? `?${query}` : ""}`, { method: "GET" });
 }
 
-export function createCustomMarker(lat, lon, note, searchZone = "") {
+export function createCustomMarker(
+  lat,
+  lon,
+  note,
+  searchZone = "",
+  address = "",
+  photos = []
+) {
   return apiFetch("/markers", {
     method: "POST",
-    body: JSON.stringify({ lat, lon, note, search_zone: searchZone.trim() }),
+    body: JSON.stringify({
+      lat,
+      lon,
+      note,
+      search_zone: searchZone.trim(),
+      address,
+      photos,
+    }),
   });
 }
 
-export function updateCustomMarker(markerId, note) {
+export function updateCustomMarker(markerId, note, address = "", photos = []) {
   return apiFetch(`/markers/${markerId}`, {
     method: "PATCH",
-    body: JSON.stringify({ note }),
+    body: JSON.stringify({ note, address, photos }),
   });
 }
 

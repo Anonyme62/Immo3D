@@ -37,6 +37,8 @@ export default function SelectedBienPanel({
     Boolean(selectedBien?.sans_adresse) ||
     Boolean(selectedBien?.placed_manually) ||
     isPlacingBien;
+  const canOpenDirections = Boolean(buildDirectionsUrl(selectedBien));
+  const displayAddress = formatDisplayAddress(selectedBien?.adresse);
 
   const placementButtonLabel = isPlacingBien
     ? "Annuler placement"
@@ -98,6 +100,38 @@ export default function SelectedBienPanel({
             )}
           </div>
 
+          {photos.length > 0 ? (
+            <div style={{ marginTop: 16 }}>
+              <div
+                key={`photos-${selectedBienKey}`}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexDirection: isMobile ? "row" : "column",
+                  overflowX: isMobile ? "auto" : "visible",
+                  paddingBottom: isMobile ? 4 : 0,
+                }}
+              >
+                {photos.map((photo, index) => (
+                  <img
+                    key={`${selectedBienKey}-${photo}-${index}`}
+                    src={photo}
+                    alt={`Photo ${index + 1}`}
+                    style={{
+                      width: isMobile ? 260 : "100%",
+                      minWidth: isMobile ? 260 : "auto",
+                      borderRadius: 18,
+                      display: "block",
+                      border: "1px solid var(--border-color)",
+                      marginBottom: isMobile ? 0 : 10,
+                      objectFit: "cover",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div
             style={{
               marginTop: 12,
@@ -111,14 +145,14 @@ export default function SelectedBienPanel({
             {selectedBien.favorite ? (
               <button
                 onClick={onRemoveFavorite}
-                style={topActionButtonStyle(undefined, undefined, undefined, false, isMobile)}
+                style={panelActionButtonStyle("danger", isMobile)}
               >
                 Retirer favori
               </button>
             ) : (
               <button
                 onClick={onAddFavorite}
-                style={topActionButtonStyle(undefined, undefined, undefined, false, isMobile)}
+                style={panelActionButtonStyle("success", isMobile)}
               >
                 Ajouter favori
               </button>
@@ -127,14 +161,14 @@ export default function SelectedBienPanel({
             {selectedBien.de_cote ? (
               <button
                 onClick={onRemoveSetAside}
-                style={topActionButtonStyle("#92400e", "#ffffff", "none", false, isMobile)}
+                style={panelActionButtonStyle("neutral", isMobile)}
               >
                 Retirer de cote
               </button>
             ) : (
               <button
                 onClick={onAddSetAside}
-                style={topActionButtonStyle("#f59e0b", "#111827", "none", false, isMobile)}
+                style={panelActionButtonStyle("warning", isMobile)}
               >
                 Mettre de cote
               </button>
@@ -143,14 +177,14 @@ export default function SelectedBienPanel({
             {selectedBien.blackliste ? (
               <button
                 onClick={onRemoveBlacklist}
-                style={topActionButtonStyle("#065f46", "#ffffff", "none", false, isMobile)}
+                style={panelActionButtonStyle("success", isMobile)}
               >
                 Retirer blacklist
               </button>
             ) : (
               <button
                 onClick={onAddBlacklist}
-                style={topActionButtonStyle("#b91c1c", "#ffffff", "none", false, isMobile)}
+                style={panelActionButtonStyle("danger", isMobile)}
               >
                 Blacklister
               </button>
@@ -170,50 +204,56 @@ export default function SelectedBienPanel({
               <strong>Agence :</strong> {selectedBien.agence || "Non renseignee"}
             </div>
 
-            <div>
-              <strong>Adresse :</strong>{" "}
-              {selectedBien.adresse && selectedBien.adresse.trim() !== ""
-                ? selectedBien.adresse
-                : ""}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <strong>Adresse :</strong>
+              <span>{displayAddress}</span>
               {canPlaceBienMarker ? (
                 <button
                   onClick={onStartPlacingBien}
-                  style={{
-                    marginLeft: 6,
-                    padding: "1px 8px",
-                    borderRadius: 999,
-                    border: "1px solid var(--border-color)",
-                    background: "var(--panel-subtle)",
-                    color: "var(--text-primary)",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    lineHeight: 1,
-                    cursor: "pointer",
-                  }}
+                  style={panelActionButtonStyle("neutral", false, true)}
                 >
                   {placementButtonLabel}
                 </button>
               ) : null}
-              {selectedBien.placed_manually ? (
-                <button
-                  onClick={onRemovePlacedBienMarker}
-                  style={{
-                    marginLeft: 6,
-                    padding: "1px 8px",
-                    borderRadius: 999,
-                    border: "1px solid #7f1d1d",
-                    background: "#991b1b",
-                    color: "white",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    lineHeight: 1,
-                    cursor: "pointer",
-                  }}
-                >
-                  Supprimer le repere
-                </button>
-              ) : null}
             </div>
+
+            {canOpenDirections || selectedBien.placed_manually ? (
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                {canOpenDirections ? (
+                  <a
+                    href={buildDirectionsUrl(selectedBien)}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={panelActionLinkStyle("neutral", isMobile)}
+                  >
+                    S'y rendre
+                  </a>
+                ) : null}
+
+                {selectedBien.placed_manually ? (
+                  <button
+                    onClick={onRemovePlacedBienMarker}
+                    style={panelActionButtonStyle("danger", isMobile, true)}
+                  >
+                    Supprimer le repere
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
             <div>
               <strong>Prix :</strong> {formatPrix(selectedBien.prix)}
@@ -299,64 +339,111 @@ export default function SelectedBienPanel({
             )}
           </div>
 
-          {photos.length > 0 ? (
-            <div style={{ marginTop: 18 }}>
-              <div
-                key={`photos-${selectedBienKey}`}
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  flexDirection: isMobile ? "row" : "column",
-                  overflowX: isMobile ? "auto" : "visible",
-                  paddingBottom: isMobile ? 4 : 0,
-                }}
-              >
-                {photos.map((photo, index) => (
-                  <img
-                    key={`${selectedBienKey}-${photo}-${index}`}
-                    src={photo}
-                    alt={`Photo ${index + 1}`}
-                    style={{
-                      width: isMobile ? 260 : "100%",
-                      minWidth: isMobile ? 260 : "auto",
-                      borderRadius: 18,
-                      display: "block",
-                      border: "1px solid var(--border-color)",
-                      marginBottom: isMobile ? 0 : 10,
-                      objectFit: "cover",
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : null}
-
         </div>
       )}
     </div>
   );
 }
 
-function topActionButtonStyle(
-  background = "var(--panel-subtle)",
-  color = "var(--text-primary)",
-  border = "1px solid var(--border-color)",
-  compact = false,
-  isMobile = false
-) {
+function panelActionButtonStyle(tone = "neutral", isMobile = false, compact = false) {
+  const tones = {
+    neutral: {
+      background: "var(--panel-subtle)",
+      color: "var(--text-primary)",
+      border: "1px solid var(--border-color)",
+    },
+    success: {
+      background: "#dcfce7",
+      color: "#166534",
+      border: "1px solid #bbf7d0",
+    },
+    warning: {
+      background: "#fef3c7",
+      color: "#92400e",
+      border: "1px solid #fde68a",
+    },
+    danger: {
+      background: "#fee2e2",
+      color: "#991b1b",
+      border: "1px solid #fecaca",
+    },
+  };
+
+  const palette = tones[tone] || tones.neutral;
+
   return {
     width: isMobile ? "100%" : "auto",
-    padding: isMobile ? "12px 14px" : compact ? "4px 14px" : "6px 12px",
-    borderRadius: 999,
-    border,
-    background,
-    color,
+    padding: compact
+      ? isMobile
+        ? "10px 12px"
+        : "8px 12px"
+      : isMobile
+        ? "12px 14px"
+        : "10px 14px",
+    borderRadius: 14,
+    border: palette.border,
+    background: palette.background,
+    color: palette.color,
     fontWeight: 700,
-    fontSize: isMobile ? 14 : compact ? 13 : 12,
-    lineHeight: compact ? 1.05 : 1.1,
+    fontSize: isMobile ? 14 : compact ? 13 : 13,
+    lineHeight: 1.2,
     cursor: "pointer",
     whiteSpace: isMobile ? "normal" : "nowrap",
     flexShrink: 0,
     textAlign: "center",
+    boxSizing: "border-box",
   };
+}
+
+function panelActionLinkStyle(tone = "neutral", isMobile = false, compact = false) {
+  return {
+    ...panelActionButtonStyle(tone, isMobile, compact),
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textDecoration: "none",
+  };
+}
+
+function buildDirectionsUrl(selectedBien) {
+  if (!selectedBien) return "";
+
+  const latitude = selectedBien.lat;
+  const longitude = selectedBien.lon;
+  const address = (selectedBien.adresse || "").trim();
+  const destination =
+    latitude != null && longitude != null
+      ? `${latitude},${longitude}`
+      : address;
+
+  if (!destination) return "";
+
+  if (isAppleMobileDevice()) {
+    return `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=d`;
+  }
+
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+}
+
+function formatDisplayAddress(address) {
+  const trimmedAddress = (address || "").trim();
+  if (!trimmedAddress) return "";
+
+  return trimmedAddress
+    .replace(/,\s*(\d{5})\s+([A-Za-zÀ-ÿ' -]+)$/u, ", $2")
+    .replace(/\s+(\d{5})\s+([A-Za-zÀ-ÿ' -]+)$/u, " $2")
+    .trim();
+}
+
+function isAppleMobileDevice() {
+  if (typeof navigator === "undefined") return false;
+
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+  return (
+    /iPhone|iPad|iPod/i.test(userAgent) ||
+    (platform === "MacIntel" && maxTouchPoints > 1)
+  );
 }

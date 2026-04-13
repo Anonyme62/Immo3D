@@ -40,6 +40,7 @@ export function filterBiens(
     if (!correspondAuTexte) return false;
 
     if (showProfessionnels || showParticuliers) {
+      if (isBlacklisted) return false;
       return (
         (showProfessionnels && isProfessionnel) ||
         (showParticuliers && isParticulier)
@@ -80,6 +81,7 @@ export function countBienCategories(biens) {
     favorites: biens.filter((bien) => !!bien.favorite).length,
     setAside: biens.filter((bien) => !!bien.de_cote).length,
     professionnels: biens.filter((bien) => {
+      if (bien.blackliste) return false;
       const annonceurType = String(bien.annonceur_type || "").trim().toLowerCase();
       return (
         annonceurType === "professionnel" ||
@@ -87,6 +89,7 @@ export function countBienCategories(biens) {
       );
     }).length,
     particuliers: biens.filter((bien) => {
+      if (bien.blackliste) return false;
       const annonceurType = String(bien.annonceur_type || "").trim().toLowerCase();
       return (
         annonceurType === "particulier" ||

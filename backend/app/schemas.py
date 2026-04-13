@@ -101,11 +101,15 @@ class CustomMarkerCreateRequest(BaseModel):
     lat: float
     lon: float
     search_zone: str = Field(default="", max_length=64)
+    address: str = Field(default="", max_length=500)
     note: str = Field(default="", min_length=1, max_length=5000)
+    photos: list[str] = Field(default_factory=list, max_length=8)
 
 
 class CustomMarkerUpdateRequest(BaseModel):
     note: str = Field(default="", min_length=1, max_length=5000)
+    address: str = Field(default="", max_length=500)
+    photos: list[str] = Field(default_factory=list, max_length=8)
 
 
 class CustomMarkerResponse(BaseModel):
@@ -114,7 +118,9 @@ class CustomMarkerResponse(BaseModel):
     lat: float
     lon: float
     search_zone: str = ""
+    address: str = ""
     note: str
+    photos: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

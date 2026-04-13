@@ -29,7 +29,12 @@ import { CESIUM_ION_TOKEN } from "./config";
 import LoginScreen from "./components/LoginScreen";
 import SelectedBienPanel from "./components/SelectedBienPanel";
 import SubscriptionScreen from "./components/SubscriptionScreen";
+import {
+  TOUCH_NAV_TUNING,
+  mergeTouchNavTuning,
+} from "./config/touchNavigationTuning";
 import { countBienCategories, filterBiens } from "./utils/bienFilters";
+import { formatPrix, formatSurface, getBienBadge } from "./utils/bienFormat";
 import { downloadKmlExport } from "./utils/kmlExport";
 
 function App() {
@@ -43,6 +48,10 @@ function App() {
   const RECENT_SEARCHES_STORAGE_KEY = "immo3d_recent_searches";
   const THEME_STORAGE_KEY = "immo3d_theme_mode";
   const STYLE_STORAGE_KEY = "immo3d_style_mode";
+  const HAPTICS_STORAGE_KEY = "immo3d_haptics_enabled";
+  const FILTERS_BY_ZONE_STORAGE_KEY = "immo3d_filters_by_zone";
+  const TOUCH_NAV_TUNING_STORAGE_KEY = "immo3d_touch_nav_tuning";
+  const MAP_MODE_STORAGE_KEY = "immo3d_map_mode";
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 980);
   const [themeMode, setThemeMode] = useState(() => {
@@ -78,18 +87,52 @@ function App() {
   const [recentSearches, setRecentSearches] = useState([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteStatus, setNoteStatus] = useState("");
-  const [mapMode, setMapMode] = useState("osm");
+  const [mapMode, setMapMode] = useState(() => {
+    const savedMode = localStorage.getItem(MAP_MODE_STORAGE_KEY);
+    if (savedMode === "google3d" && CESIUM_ION_TOKEN) {
+      return "google3d";
+    }
+    return "osm";
+  });
   const [syncVersion, setSyncVersion] = useState(0);
   const [focusBienId, setFocusBienId] = useState(null);
   const [focusBienVersion, setFocusBienVersion] = useState(0);
-  const [mobilePanel, setMobilePanel] = useState("search");
-  const [isMapExpandedMobile, setIsMapExpandedMobile] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState("none");
+  const [mobileFiltersOrigin, setMobileFiltersOrigin] = useState("map");
+  const [mobileDetailOrigin, setMobileDetailOrigin] = useState("map");
+  const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [customMarkers, setCustomMarkers] = useState([]);
   const [showBoundary, setShowBoundary] = useState(true);
   const [boundaryGeoJson, setBoundaryGeoJson] = useState(null);
   const [placingBienId, setPlacingBienId] = useState(null);
+  const [hapticsEnabled, setHapticsEnabled] = useState(() => {
+    const storedValue = localStorage.getItem(HAPTICS_STORAGE_KEY);
+    if (storedValue === null) return true;
+    return storedValue !== "false";
+  });
+  const [touchNavTuning, setTouchNavTuning] = useState(() => {
+    const storedValue = localStorage.getItem(TOUCH_NAV_TUNING_STORAGE_KEY);
+    if (!storedValue) return mergeTouchNavTuning(TOUCH_NAV_TUNING);
+    try {
+      const parsed = JSON.parse(storedValue);
+      return mergeTouchNavTuning(parsed);
+    } catch {
+      return mergeTouchNavTuning(TOUCH_NAV_TUNING);
+    }
+  });
+  const [filtersByZone, setFiltersByZone] = useState(() => {
+    const storedValue = localStorage.getItem(FILTERS_BY_ZONE_STORAGE_KEY);
+    if (!storedValue) return {};
+    try {
+      const parsed = JSON.parse(storedValue);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
 
   const [showAllBiens, setShowAllBiens] = useState(true);
   const [showFavorites, setShowFavorites] = useState(false);
@@ -137,6 +180,57 @@ function App() {
     setCurrentUser(data?.user ?? null);
   }
 
+  function getDefaultFilterState() {
+    return {
+      showAllBiens: true,
+      showFavorites: false,
+      showSetAside: false,
+      showProfessionnels: false,
+      showParticuliers: false,
+      showBlacklist: true,
+      showSansAdresse: true,
+      showNouveaux: true,
+    };
+  }
+
+  function normalizeZoneKey(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function getCurrentFilterState() {
+    return {
+      showAllBiens,
+      showFavorites,
+      showSetAside,
+      showProfessionnels,
+      showParticuliers,
+      showBlacklist,
+      showSansAdresse,
+      showNouveaux,
+    };
+  }
+
+  function applyFilterState(nextFilterState) {
+    setShowAllBiens(Boolean(nextFilterState.showAllBiens));
+    setShowFavorites(Boolean(nextFilterState.showFavorites));
+    setShowSetAside(Boolean(nextFilterState.showSetAside));
+    setShowProfessionnels(Boolean(nextFilterState.showProfessionnels));
+    setShowParticuliers(Boolean(nextFilterState.showParticuliers));
+    setShowBlacklist(Boolean(nextFilterState.showBlacklist));
+    setShowSansAdresse(Boolean(nextFilterState.showSansAdresse));
+    setShowNouveaux(Boolean(nextFilterState.showNouveaux));
+  }
+
+  function triggerHapticFeedback(level = "light") {
+    if (!hapticsEnabled || typeof window === "undefined") return;
+    if (!("navigator" in window) || !window.navigator.vibrate) return;
+    if (level === "success") {
+      window.navigator.vibrate([12, 40, 16]);
+      return;
+    }
+    window.navigator.vibrate(10);
+  }
+
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
@@ -144,6 +238,37 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STYLE_STORAGE_KEY, styleMode);
   }, [styleMode]);
+
+  useEffect(() => {
+    localStorage.setItem(HAPTICS_STORAGE_KEY, hapticsEnabled ? "true" : "false");
+  }, [hapticsEnabled]);
+
+  useEffect(() => {
+    const safeMode = mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
+    localStorage.setItem(MAP_MODE_STORAGE_KEY, safeMode);
+  }, [mapMode]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      TOUCH_NAV_TUNING_STORAGE_KEY,
+      JSON.stringify(touchNavTuning)
+    );
+  }, [touchNavTuning]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      FILTERS_BY_ZONE_STORAGE_KEY,
+      JSON.stringify(filtersByZone)
+    );
+  }, [filtersByZone]);
+
+  useEffect(() => {
+    const zoneKey = normalizeZoneKey(activeZoneRecherche);
+    if (!zoneKey) return;
+
+    const savedFilterState = filtersByZone[zoneKey] || getDefaultFilterState();
+    applyFilterState(savedFilterState);
+  }, [activeZoneRecherche, filtersByZone]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -526,8 +651,8 @@ function App() {
 
   useEffect(() => {
     if (!isMobile) {
-      setMobilePanel("search");
-      setIsMapExpandedMobile(false);
+      setMobilePanel("none");
+      setIsAppMenuOpen(false);
       return;
     }
 
@@ -535,7 +660,7 @@ function App() {
     setIsRightPanelCollapsed(false);
 
     if (!selectedBien && mobilePanel === "detail") {
-      setMobilePanel("list");
+      setMobilePanel("none");
     }
   }, [isMobile, mobilePanel, selectedBien]);
 
@@ -566,9 +691,6 @@ function App() {
       setFocusBienId(null);
       setPlacingBienId(null);
 
-      if (isMobile) {
-        setMobilePanel("list");
-      }
     } catch (error) {
       console.error("Erreur chargement biens :", error);
 
@@ -875,10 +997,26 @@ function App() {
     };
 
     setters[key]?.(value);
+    triggerHapticFeedback("light");
+
+    const zoneKey = normalizeZoneKey(activeZoneRecherche || zoneRecherche);
+    if (!zoneKey) return;
+
+    setFiltersByZone((previousMap) => {
+      const baseState = previousMap[zoneKey] || getCurrentFilterState();
+      return {
+        ...previousMap,
+        [zoneKey]: {
+          ...baseState,
+          [key]: value,
+        },
+      };
+    });
   }
 
   function toggleMapMode() {
     if (!CESIUM_ION_TOKEN) return;
+    triggerHapticFeedback("light");
     setMapMode((value) => (value === "google3d" ? "osm" : "google3d"));
   }
 
@@ -890,15 +1028,17 @@ function App() {
     });
   }
 
-  function handleSidebarSelection(bien) {
+  function handleSidebarSelection(bien, origin = "list") {
     setPlacingBienId(null);
     setSelectedBien(bien);
+    setMobileDetailOrigin(origin);
     if (bien.lat != null && bien.lon != null) {
       setFocusBienId(bien.id);
       setFocusBienVersion((value) => value + 1);
     } else {
       setFocusBienId(null);
     }
+    triggerHapticFeedback("light");
 
     if (isMobile) {
       setMobilePanel("detail");
@@ -910,13 +1050,15 @@ function App() {
       marker.lat,
       marker.lon,
       marker.note,
-      activeZoneRecherche
+      activeZoneRecherche,
+      marker.address || "",
+      marker.photos || []
     );
     setCustomMarkers((prev) => [created, ...prev]);
   }
 
-  async function handleUpdateCustomMarker(markerId, note) {
-    const updated = await updateCustomMarker(markerId, note);
+  async function handleUpdateCustomMarker(markerId, note, address = "", photos = []) {
+    const updated = await updateCustomMarker(markerId, note, address, photos);
     setCustomMarkers((prev) =>
       prev.map((marker) => (marker.id === markerId ? updated : marker))
     );
@@ -1015,6 +1157,55 @@ function App() {
     setFocusBienId(null);
   }
 
+  function openMobileSearchPanel() {
+    setMobilePanel((current) => (current === "search" ? "none" : "search"));
+    triggerHapticFeedback("light");
+  }
+
+  function openMobileFiltersPanel(origin = "map") {
+    setMobileFiltersOrigin(origin);
+    setMobilePanel((current) =>
+      current === "filters" && origin === "map" ? "none" : "filters"
+    );
+    triggerHapticFeedback("light");
+  }
+
+  function closeMobileFiltersPanel() {
+    if (mobileFiltersOrigin === "search") {
+      setMobilePanel("search");
+    } else {
+      setMobilePanel("none");
+    }
+    triggerHapticFeedback("light");
+  }
+
+  function closeMobileDetailPanel() {
+    setMobilePanel(mobileDetailOrigin === "list" ? "search" : "none");
+    triggerHapticFeedback("light");
+  }
+
+  function handleToggleHaptics() {
+    setHapticsEnabled((currentValue) => {
+      const nextValue = !currentValue;
+      if (nextValue) {
+        window.navigator?.vibrate?.(10);
+      }
+      return nextValue;
+    });
+  }
+
+  function handleResetTouchNavTuning() {
+    setTouchNavTuning(mergeTouchNavTuning(TOUCH_NAV_TUNING));
+  }
+
+  function handleTouchNavTuningChange(updater) {
+    setTouchNavTuning((currentValue) => {
+      const nextValue =
+        typeof updater === "function" ? updater(currentValue) : updater;
+      return mergeTouchNavTuning(nextValue);
+    });
+  }
+
   if (!authChecked) {
     return (
       <div
@@ -1079,7 +1270,7 @@ function App() {
           background: "var(--app-bg)",
           color: "var(--text-primary)",
           overflow: isMobile ? "visible" : "hidden",
-          paddingBottom: isMobile && !isMapExpandedMobile ? 86 : 0,
+          paddingBottom: 0,
           boxSizing: "border-box",
         }}
       >
@@ -1096,6 +1287,7 @@ function App() {
               <AppMenu
                 onLogout={seDeconnecter}
                 onExportKml={handleExportKml}
+                onOpenSettings={() => setSettingsPanelOpen(true)}
                 showBoundary={showBoundary}
                 onToggleBoundary={() => setShowBoundary((value) => !value)}
                 themeMode={themeMode}
@@ -1104,6 +1296,11 @@ function App() {
                 }
                 styleMode={styleMode}
                 onChangeStyle={setStyleMode}
+                hapticsEnabled={hapticsEnabled}
+                onToggleHaptics={handleToggleHaptics}
+                touchNavTuning={touchNavTuning}
+                onTouchNavTuningChange={handleTouchNavTuningChange}
+                onTouchNavTuningReset={handleResetTouchNavTuning}
                 compact
               />
             }
@@ -1162,6 +1359,7 @@ function App() {
                 setSelectedBien={(bien) => {
                   setPlacingBienId(null);
                   setSelectedBien(bien);
+                  triggerHapticFeedback("light");
                 }}
                 onAddCustomMarker={handleAddCustomMarker}
                 onUpdateCustomMarker={handleUpdateCustomMarker}
@@ -1169,6 +1367,10 @@ function App() {
                 mapMode={mapMode}
                 canUseGoogle3D={Boolean(CESIUM_ION_TOKEN)}
                 onToggleMapMode={toggleMapMode}
+                onSetMapMode={setMapMode}
+                hapticsEnabled={hapticsEnabled}
+                allBiens={biens}
+                touchNavTuning={touchNavTuning}
                 isMobile={false}
                 syncVersion={syncVersion}
                 focusBienId={focusBienId}
@@ -1213,238 +1415,149 @@ function App() {
           <div
             style={{
               flex: 1,
-              display: "block",
               minHeight: 0,
-            }}
-          >
-          <div
-            style={{
               position: "relative",
-              minHeight: "100svh",
-              height: "100svh",
-              overflow: "hidden",
-              background: "var(--map-shell-bg)",
-              ...(isMapExpandedMobile
-                ? {
-                    position: "fixed",
-                    inset: 0,
-                    zIndex: 50,
-                  }
-                : {}),
             }}
           >
-            <CesiumMap
-              biens={biensFiltres}
-              customMarkers={customMarkers}
-              selectedBienId={selectedBien?.id ?? null}
-              setSelectedBien={(bien) => {
-                setPlacingBienId(null);
-                setSelectedBien(bien);
-                setMobilePanel("detail");
-              }}
-              onAddCustomMarker={handleAddCustomMarker}
-              onUpdateCustomMarker={handleUpdateCustomMarker}
-              onDeleteCustomMarker={handleDeleteCustomMarker}
-              mapMode={mapMode}
-              canUseGoogle3D={Boolean(CESIUM_ION_TOKEN)}
-              onToggleMapMode={toggleMapMode}
-              isMobile
-              syncVersion={syncVersion}
-              focusBienId={focusBienId}
-              focusBienVersion={focusBienVersion}
-              onFocusHandled={handleMapFocusHandled}
-              mobilePanel={mobilePanel}
-              placingBienId={placingBienId}
-              boundaryGeoJson={boundaryGeoJson}
-              placingBienLabel={
-                biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
-              }
-              onPlaceBien={handlePlaceBienOnMap}
-              isMobileMapExpanded={isMapExpandedMobile}
-              onToggleMobileMapExpanded={() =>
-                setIsMapExpandedMobile((value) => !value)
-              }
-              topLeftOverlay={
-                <AppMenu
-                  onLogout={seDeconnecter}
-                  onExportKml={handleExportKml}
-                  showBoundary={showBoundary}
-                  onToggleBoundary={() => setShowBoundary((value) => !value)}
-                  themeMode={themeMode}
-                  onToggleTheme={() =>
-                    setThemeMode((value) => (value === "dark" ? "light" : "dark"))
-                  }
-                  styleMode={styleMode}
-                  onChangeStyle={setStyleMode}
-                  isMobile
-                />
-              }
-            />
-          </div>
-
-          {!isMapExpandedMobile ? (
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                minHeight: "calc(100svh - 140px)",
-                background: "var(--panel-bg)",
-                borderTop: "1px solid var(--border-color)",
-                borderTopLeftRadius: 20,
-                borderTopRightRadius: 20,
-                marginTop: -10,
                 position: "relative",
-                zIndex: 1,
+                minHeight: "100svh",
+                height: "100svh",
                 overflow: "hidden",
+                background: "var(--map-shell-bg)",
               }}
             >
-              {mobilePanel === "search" ? (
-                <div
-                  style={{
-                    padding: "12px 14px 6px 14px",
-                    borderBottom: "1px solid var(--border-soft)",
-                    background: "var(--panel-bg)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 10,
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Zone active</div>
-                      <div style={{ fontWeight: 700 }}>
-                        {activeZoneRecherche || zoneRecherche || "Aucune zone"}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Resultats</div>
-                      <div style={{ fontWeight: 700 }}>{biensFiltres.length} biens</div>
-                    </div>
-                  </div>
+              <CesiumMap
+                biens={biensFiltres}
+                customMarkers={customMarkers}
+                selectedBienId={selectedBien?.id ?? null}
+                setSelectedBien={(bien) => {
+                  setPlacingBienId(null);
+                  setSelectedBien(bien);
+                  setMobileDetailOrigin("map");
+                  triggerHapticFeedback("light");
+                  setMobilePanel("detail");
+                }}
+                onAddCustomMarker={handleAddCustomMarker}
+                onUpdateCustomMarker={handleUpdateCustomMarker}
+                onDeleteCustomMarker={handleDeleteCustomMarker}
+                mapMode={mapMode}
+                canUseGoogle3D={Boolean(CESIUM_ION_TOKEN)}
+                onToggleMapMode={toggleMapMode}
+                onSetMapMode={setMapMode}
+                hapticsEnabled={hapticsEnabled}
+                allBiens={biens}
+                touchNavTuning={touchNavTuning}
+                isMobile
+                syncVersion={syncVersion}
+                focusBienId={focusBienId}
+                focusBienVersion={focusBienVersion}
+                onFocusHandled={handleMapFocusHandled}
+                mobilePanel={mobilePanel}
+                placingBienId={placingBienId}
+                boundaryGeoJson={boundaryGeoJson}
+                placingBienLabel={
+                  biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
+                }
+                onPlaceBien={handlePlaceBienOnMap}
+                isMobileMapExpanded
+                showMobileExpandButton={false}
+                topLeftOverlay={
+                  <AppMenu
+                    onLogout={seDeconnecter}
+                    onExportKml={handleExportKml}
+                    onOpenSettings={() => setSettingsPanelOpen(true)}
+                    showBoundary={showBoundary}
+                    onToggleBoundary={() => setShowBoundary((value) => !value)}
+                    themeMode={themeMode}
+                    onToggleTheme={() =>
+                      setThemeMode((value) => (value === "dark" ? "light" : "dark"))
+                    }
+                    styleMode={styleMode}
+                    onChangeStyle={setStyleMode}
+                    hapticsEnabled={hapticsEnabled}
+                    onToggleHaptics={handleToggleHaptics}
+                    touchNavTuning={touchNavTuning}
+                    onTouchNavTuningChange={handleTouchNavTuningChange}
+                    onTouchNavTuningReset={handleResetTouchNavTuning}
+                    onMenuOpenChange={setIsAppMenuOpen}
+                    isMobile
+                  />
+                }
+              />
 
-                  {selectedBien ? (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        padding: "10px 12px",
-                        background: "var(--panel-subtle)",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: 14,
-                      }}
-                    >
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Bien selectionne</div>
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          marginTop: 2,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {selectedBien.adresse || ""}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              <MobileMapActionButtons
+                mobilePanel={mobilePanel}
+                disabled={isAppMenuOpen}
+                onOpenSearch={openMobileSearchPanel}
+                onOpenFilters={() => openMobileFiltersPanel("map")}
+              />
 
-              <div style={{ minHeight: 0, paddingBottom: 10 }}>
-                {mobilePanel === "search" ? (
-                  <BiensSidebar
-                    zoneRecherche={zoneRecherche}
-                    recentSearches={recentSearches}
-                    search={search}
-                    loading={loading}
-                    syncError={syncError}
-                    filteredBiens={biensFiltres}
-                    selectedBienId={selectedBien?.id ?? null}
-                    counts={counts}
-                    filterState={{
-                      showAllBiens,
-                      showFavorites,
-                      showSetAside,
-                      showProfessionnels,
-                      showParticuliers,
-                      showBlacklist,
-                      showSansAdresse,
-                      showNouveaux,
-                    }}
-                    onZoneRechercheChange={setZoneRecherche}
-                    onSelectRecentSearch={setZoneRecherche}
-                    onSearchChange={setSearch}
-                    onSynchronize={chargerBiens}
-                    onFilterChange={handleFilterChange}
-                    onSelectBien={handleSidebarSelection}
-                    isMobile
-                    mobileMode="search"
-                  />
-                ) : mobilePanel === "list" ? (
-                  <BiensSidebar
-                    zoneRecherche={zoneRecherche}
-                    recentSearches={recentSearches}
-                    search={search}
-                    loading={loading}
-                    syncError={syncError}
-                    filteredBiens={biensFiltres}
-                    selectedBienId={selectedBien?.id ?? null}
-                    counts={counts}
-                    filterState={{
-                      showAllBiens,
-                      showFavorites,
-                      showSetAside,
-                      showProfessionnels,
-                      showParticuliers,
-                      showBlacklist,
-                      showSansAdresse,
-                      showNouveaux,
-                    }}
-                    onZoneRechercheChange={setZoneRecherche}
-                    onSelectRecentSearch={setZoneRecherche}
-                    onSearchChange={setSearch}
-                    onSynchronize={chargerBiens}
-                    onFilterChange={handleFilterChange}
-                    onSelectBien={handleSidebarSelection}
-                    isMobile
-                    mobileMode="list"
-                  />
-                ) : (
-                  <SelectedBienPanel
-                    selectedBien={selectedBien}
-                    noteDraft={noteDraft}
-                    noteStatus={noteStatus}
-                    onNoteChange={handleNoteChange}
-                    onAddBlacklist={blacklisterBien}
-                    onRemoveBlacklist={retirerBlacklist}
-                    onAddFavorite={ajouterFavori}
-                    onRemoveFavorite={retirerFavori}
-                    onAddSetAside={ajouterDeCote}
-                    onRemoveSetAside={retirerDeCote}
-                    onStartPlacingBien={startPlacingSelectedBien}
-                    onRemovePlacedBienMarker={handleRemovePlacedBienMarker}
-                    isPlacingBien={placingBienId === selectedBien?.id}
-                    isMobile
-                  />
-                )}
-              </div>
+              <MobileSearchOverlay
+                open={mobilePanel === "search"}
+                zoneRecherche={zoneRecherche}
+                search={search}
+                loading={loading}
+                syncError={syncError}
+                filteredBiens={biensFiltres}
+                selectedBienId={selectedBien?.id ?? null}
+                onZoneRechercheChange={setZoneRecherche}
+                onSearchChange={setSearch}
+                onSynchronize={chargerBiens}
+                onOpenFilters={() => openMobileFiltersPanel("search")}
+                onClose={() => setMobilePanel("none")}
+                onSelectBien={(bien) => handleSidebarSelection(bien, "list")}
+              />
+
+              <MobileFiltersOverlay
+                open={mobilePanel === "filters"}
+                counts={counts}
+                filterState={{
+                  showAllBiens,
+                  showFavorites,
+                  showSetAside,
+                  showProfessionnels,
+                  showParticuliers,
+                  showBlacklist,
+                  showSansAdresse,
+                  showNouveaux,
+                }}
+                onFilterChange={handleFilterChange}
+                onClose={closeMobileFiltersPanel}
+              />
+
+              <MobileDetailOverlay
+                open={mobilePanel === "detail" && Boolean(selectedBien)}
+                onClose={closeMobileDetailPanel}
+              >
+                <SelectedBienPanel
+                  selectedBien={selectedBien}
+                  noteDraft={noteDraft}
+                  noteStatus={noteStatus}
+                  onNoteChange={handleNoteChange}
+                  onAddBlacklist={blacklisterBien}
+                  onRemoveBlacklist={retirerBlacklist}
+                  onAddFavorite={ajouterFavori}
+                  onRemoveFavorite={retirerFavori}
+                  onAddSetAside={ajouterDeCote}
+                  onRemoveSetAside={retirerDeCote}
+                  onStartPlacingBien={startPlacingSelectedBien}
+                  onRemovePlacedBienMarker={handleRemovePlacedBienMarker}
+                  isPlacingBien={placingBienId === selectedBien?.id}
+                  isMobile
+                />
+              </MobileDetailOverlay>
             </div>
-          ) : null}
-        </div>
+          </div>
         )}
       </div>
 
-      {isMobile && !isMapExpandedMobile ? (
-      <MobileBottomNav
-          themeMode={themeMode}
-          mobilePanel={mobilePanel}
-          hasSelection={Boolean(selectedBien)}
-          onChangePanel={setMobilePanel}
-        />
-      ) : null}
+      <SettingsOverlay
+        open={settingsPanelOpen}
+        onClose={() => setSettingsPanelOpen(false)}
+        onOpenSubscriptionPortal={ouvrirPortailAbonnement}
+      />
     </div>
   );
 }
@@ -1523,6 +1636,524 @@ function DesktopSidePanel({
   );
 }
 
+function MobileMapActionButtons({ mobilePanel, onOpenSearch, onOpenFilters, disabled = false }) {
+  if (disabled) return null;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 14,
+        right: 14,
+        zIndex: 12,
+        display: "flex",
+        gap: 10,
+      }}
+    >
+      <button
+        onClick={onOpenSearch}
+        style={mobileTopActionButtonStyle(mobilePanel === "search")}
+        title="Recherche"
+        aria-label="Recherche"
+      >
+        <SearchIcon />
+      </button>
+      <button
+        onClick={onOpenFilters}
+        style={mobileTopActionButtonStyle(mobilePanel === "filters")}
+        title="Filtres"
+        aria-label="Filtres"
+      >
+        <img
+          src="https://static.vecteezy.com/ti/vecteur-libre/p1/9008831-vecteur-de-filtre-icone-filtre-logo-isole-sur-fond-blanc-gratuit-vectoriel.jpg"
+          alt=""
+          style={{ width: 20, height: 20, objectFit: "cover", borderRadius: 4 }}
+        />
+      </button>
+    </div>
+  );
+}
+
+function MobileSearchOverlay({
+  open,
+  zoneRecherche,
+  search,
+  loading,
+  syncError,
+  filteredBiens,
+  selectedBienId,
+  onZoneRechercheChange,
+  onSearchChange,
+  onSynchronize,
+  onOpenFilters,
+  onClose,
+  onSelectBien,
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 15,
+        pointerEvents: open ? "auto" : "none",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.26)",
+          opacity: open ? 1 : 0,
+          transition: "opacity 170ms ease",
+        }}
+        onClick={onClose}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: 64,
+          left: 12,
+          right: 12,
+          bottom: 12,
+          borderRadius: 22,
+          border: "1px solid var(--border-color)",
+          background: "var(--panel-bg)",
+          boxShadow: "0 24px 50px rgba(15, 23, 42, 0.28)",
+          backdropFilter: "blur(12px)",
+          overflow: "hidden",
+          transform: open ? "translateY(0)" : "translateY(22px)",
+          opacity: open ? 1 : 0,
+          transition: "transform 220ms ease, opacity 220ms ease",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "12px 14px",
+            borderBottom: "1px solid var(--border-soft)",
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Recherche</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={onOpenFilters}
+              style={mobileOverlayIconButtonStyle()}
+              title="Ouvrir les filtres"
+            >
+              <FilterLinesIcon />
+            </button>
+            <button onClick={onClose} style={mobileOverlayIconButtonStyle()} title="Fermer">
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+
+        <div style={{ padding: "12px 14px 8px 14px", borderBottom: "1px solid var(--border-soft)" }}>
+          <input
+            value={zoneRecherche}
+            onChange={(event) => onZoneRechercheChange(event.target.value)}
+            placeholder="Code postal ou ville (ex: 62750)"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onSynchronize();
+            }}
+            style={mobileOverlayInputStyle()}
+          />
+          <button onClick={onSynchronize} style={mobileOverlaySyncButtonStyle()}>
+            {loading ? "Chargement..." : "Synchroniser Yanport"}
+          </button>
+          <div style={{ marginTop: 8, fontWeight: 700, fontSize: 13 }}>
+            Resultat: {filteredBiens.length} biens
+          </div>
+          {syncError ? (
+            <div style={{ marginTop: 8, color: "#991b1b", fontSize: 13 }}>{syncError}</div>
+          ) : null}
+        </div>
+
+        <div style={{ padding: "10px 14px 8px 14px" }}>
+          <input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Rechercher par : agence, adresse, prix..."
+            style={mobileOverlayInputStyle()}
+          />
+        </div>
+
+        <div style={{ padding: "0 14px 14px 14px", overflowY: "auto", flex: 1 }}>
+          {filteredBiens.map((bien) => {
+            const isSelected = selectedBienId === bien.id;
+            const badge = getBienBadge(bien);
+            return (
+              <button
+                key={bien.id}
+                onClick={() => onSelectBien(bien)}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  marginBottom: 10,
+                  borderRadius: 16,
+                  border: isSelected
+                    ? "1px solid var(--text-primary)"
+                    : "1px solid var(--border-color)",
+                  background: "var(--panel-bg)",
+                  padding: 12,
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <strong>{formatPrix(bien.prix)}</strong>
+                  <span
+                    style={{
+                      ...badge.style,
+                      padding: "5px 8px",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {badge.label}
+                  </span>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-secondary)" }}>
+                  {bien.adresse || ""}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
+                  {formatSurface(bien.surface)} •{" "}
+                  {bien.anciennete !== null && bien.anciennete !== undefined
+                    ? `${bien.anciennete} jours`
+                    : "? jours"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileFiltersOverlay({ open, counts, filterState, onFilterChange, onClose }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 15,
+        pointerEvents: open ? "auto" : "none",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.26)",
+          opacity: open ? 1 : 0,
+          transition: "opacity 170ms ease",
+        }}
+        onClick={onClose}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: 64,
+          left: 12,
+          right: 12,
+          maxHeight: "calc(100svh - 76px)",
+          borderRadius: 22,
+          border: "1px solid var(--border-color)",
+          background: "var(--panel-bg)",
+          boxShadow: "0 24px 50px rgba(15, 23, 42, 0.28)",
+          overflowY: "auto",
+          transform: open ? "translateY(0)" : "translateY(22px)",
+          opacity: open ? 1 : 0,
+          transition: "transform 220ms ease, opacity 220ms ease",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "12px 14px",
+            borderBottom: "1px solid var(--border-soft)",
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Filtres</div>
+          <button onClick={onClose} style={mobileOverlayIconButtonStyle()} title="Fermer">
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div style={{ padding: 14, display: "grid", gap: 10 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontStyle: "italic",
+              color: "var(--text-muted)",
+              marginBottom: 2,
+            }}
+          >
+            * Les biens blacklistes ne sont affiches que si le filtre est coche.
+          </div>
+          <MobileFilterRow
+            label={`Tous les biens (${counts.allBiens})`}
+            checked={filterState.showAllBiens}
+            onChange={(checked) => onFilterChange("showAllBiens", checked)}
+          />
+          <MobileFilterRow
+            label={`Favoris (${counts.favorites})`}
+            checked={filterState.showFavorites}
+            onChange={(checked) => onFilterChange("showFavorites", checked)}
+          />
+          <MobileFilterRow
+            label={`Nouveaux < 7 jours (${counts.nouveaux})`}
+            checked={filterState.showNouveaux}
+            onChange={(checked) => onFilterChange("showNouveaux", checked)}
+          />
+          <MobileFilterRow
+            label={`Sans adresses (${counts.sansAdresse})`}
+            checked={filterState.showSansAdresse}
+            onChange={(checked) => onFilterChange("showSansAdresse", checked)}
+          />
+          <MobileFilterRow
+            label={`Professionnels (${counts.professionnels})`}
+            checked={filterState.showProfessionnels}
+            onChange={(checked) => onFilterChange("showProfessionnels", checked)}
+          />
+          <MobileFilterRow
+            label={`Particuliers (${counts.particuliers})`}
+            checked={filterState.showParticuliers}
+            onChange={(checked) => onFilterChange("showParticuliers", checked)}
+          />
+          <MobileFilterRow
+            label={`Mettre de cote (${counts.setAside})`}
+            checked={filterState.showSetAside}
+            onChange={(checked) => onFilterChange("showSetAside", checked)}
+          />
+          <MobileFilterRow
+            label={`Afficher les blacklistes (${counts.blacklist})`}
+            checked={filterState.showBlacklist}
+            onChange={(checked) => onFilterChange("showBlacklist", checked)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileFilterRow({ label, checked, onChange }) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        border: "1px solid var(--border-color)",
+        borderRadius: 14,
+        padding: "10px 12px",
+        background: "var(--panel-muted-bg)",
+        cursor: "pointer",
+      }}
+    >
+      <span style={{ fontSize: 14 }}>{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
+  );
+}
+
+function MobileDetailOverlay({ open, onClose, children }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 16,
+        pointerEvents: open ? "auto" : "none",
+      }}
+    >
+      <div
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.26)",
+          opacity: open ? 1 : 0,
+          transition: "opacity 170ms ease",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: 64,
+          left: 12,
+          right: 12,
+          bottom: 12,
+          borderRadius: 22,
+          border: "1px solid var(--border-color)",
+          background: "var(--panel-bg)",
+          boxShadow: "0 24px 50px rgba(15, 23, 42, 0.28)",
+          backdropFilter: "blur(12px)",
+          overflow: "hidden",
+          transform: open ? "translateY(0)" : "translateY(22px)",
+          opacity: open ? 1 : 0,
+          transition: "transform 220ms ease, opacity 220ms ease",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "12px 14px",
+            borderBottom: "1px solid var(--border-soft)",
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Fiche du bien</div>
+          <button onClick={onClose} style={mobileOverlayIconButtonStyle()} title="Fermer">
+            <CloseIcon />
+          </button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsOverlay({ open, onClose, onOpenSubscriptionPortal }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 170,
+        pointerEvents: open ? "auto" : "none",
+      }}
+    >
+      <div
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.3)",
+          opacity: open ? 1 : 0,
+          transition: "opacity 170ms ease",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          transform: open ? "translate(-50%, -50%)" : "translate(-50%, -45%)",
+          width: "min(92vw, 420px)",
+          borderRadius: 20,
+          border: "1px solid var(--border-color)",
+          background: "var(--panel-bg)",
+          boxShadow: "0 26px 56px rgba(15, 23, 42, 0.3)",
+          padding: 16,
+          opacity: open ? 1 : 0,
+          transition: "transform 220ms ease, opacity 220ms ease",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Parametres</div>
+          <button onClick={onClose} style={mobileOverlayIconButtonStyle()} title="Fermer">
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            border: "1px solid var(--border-color)",
+            borderRadius: 16,
+            padding: 12,
+            background: "var(--panel-muted-bg)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Abonnement</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.45 }}>
+            Preparation de l'espace abonnement. Tu peux deja ouvrir Stripe pour gerer ton abonnement.
+          </div>
+          <button
+            onClick={() => {
+              onOpenSubscriptionPortal?.();
+            }}
+            style={{
+              marginTop: 10,
+              width: "100%",
+              height: 40,
+              borderRadius: 12,
+              border: "1px solid var(--border-color)",
+              background: "var(--panel-bg)",
+              color: "var(--text-primary)",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Gerer mon abonnement
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+      <path d="M20 20L16.7 16.7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function FilterLinesIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 6H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M6 12H18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M10 18H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ChevronIcon({ direction }) {
   const rotation = {
     left: "rotate(180 12 12)",
@@ -1588,85 +2219,69 @@ function inferBoundaryQuery(zoneRecherche, biens) {
 
 export default App;
 
-function mobileTabButtonStyle(active) {
+function mobileTopActionButtonStyle(active) {
   return {
-    flex: 1,
-    padding: "12px 14px",
-    borderRadius: 999,
-    border: active ? "1px solid #111827" : "1px solid #e5e7eb",
-    background: active ? "#111827" : "#ffffff",
-    color: active ? "#ffffff" : "#111827",
-    fontWeight: 600,
-    fontSize: 14,
+    width: 42,
+    minWidth: 42,
+    height: 42,
+    borderRadius: 13,
+    border: "1px solid var(--control-border)",
+    background: active ? "var(--text-primary)" : "var(--control-bg)",
+    color: active ? "var(--panel-bg)" : "var(--text-primary)",
+    boxShadow: "var(--control-shadow)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+    backdropFilter: "blur(10px)",
+  };
+}
+
+function mobileOverlayIconButtonStyle() {
+  return {
+    width: 34,
+    minWidth: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid var(--border-color)",
+    background: "var(--panel-muted-bg)",
+    color: "var(--text-primary)",
+    padding: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     cursor: "pointer",
   };
 }
 
-function MobileBottomNav({ mobilePanel, hasSelection, onChangePanel, themeMode }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: 12,
-        right: 12,
-        bottom: 10,
-        background:
-          themeMode === "dark" ? "rgba(17, 24, 39, 0.94)" : "rgba(255,255,255,0.96)",
-        border: "1px solid var(--border-color)",
-        borderRadius: 22,
-        boxShadow: "0 10px 30px rgba(17, 24, 39, 0.12)",
-        padding: 8,
-        display: "flex",
-        gap: 8,
-        zIndex: 20,
-        backdropFilter: "blur(10px)",
-      }}
-    >
-      <button
-        onClick={() => onChangePanel("search")}
-        style={mobileNavButtonStyle(mobilePanel === "search", themeMode)}
-      >
-        <span style={mobileNavLabelStyle()}>Recherche</span>
-        <span style={mobileNavHintStyle()}>zone et filtres</span>
-      </button>
-
-      <button
-        onClick={() => onChangePanel("list")}
-        style={mobileNavButtonStyle(mobilePanel === "list", themeMode)}
-      >
-        <span style={mobileNavLabelStyle()}>Liste</span>
-        <span style={mobileNavHintStyle()}>annonces</span>
-      </button>
-
-      <button
-        onClick={() => onChangePanel(hasSelection ? "detail" : "list")}
-        style={mobileNavButtonStyle(mobilePanel === "detail", themeMode)}
-      >
-        <span style={mobileNavLabelStyle()}>Bien</span>
-        <span style={mobileNavHintStyle()}>{hasSelection ? "detail" : "selection"}</span>
-      </button>
-    </div>
-  );
+function mobileOverlayInputStyle() {
+  return {
+    width: "100%",
+    height: 42,
+    borderRadius: 12,
+    border: "1px solid var(--border-color)",
+    background: "var(--input-bg)",
+    color: "var(--text-primary)",
+    padding: "0 12px",
+    boxSizing: "border-box",
+    fontSize: 14,
+    outline: "none",
+  };
 }
 
-function mobileNavButtonStyle(active, themeMode) {
+function mobileOverlaySyncButtonStyle() {
   return {
-    flex: 1,
-    border: active ? "1px solid var(--text-primary)" : "1px solid transparent",
-    background: active
-      ? "var(--text-primary)"
-      : themeMode === "dark"
-        ? "rgba(255,255,255,0.02)"
-        : "transparent",
-    color: active ? "var(--panel-bg)" : "var(--text-primary)",
-    borderRadius: 16,
-    padding: "10px 8px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 2,
+    marginTop: 8,
+    width: "100%",
+    height: 42,
+    borderRadius: 12,
+    border: "1px solid #111827",
+    background: "#111827",
+    color: "#ffffff",
+    fontWeight: 700,
+    fontSize: 14,
     cursor: "pointer",
-    minWidth: 0,
   };
 }
 
@@ -1931,21 +2546,5 @@ function getThemeVariables(themeMode, styleMode = "default") {
     "--control-shadow": "0 10px 30px rgba(17, 24, 39, 0.12)",
     "--scrollbar-track": "#f3f4f6",
     "--scrollbar-thumb": "#cbd5e1",
-  };
-}
-
-function mobileNavLabelStyle() {
-  return {
-    fontSize: 13,
-    fontWeight: 700,
-    lineHeight: 1.1,
-  };
-}
-
-function mobileNavHintStyle() {
-  return {
-    fontSize: 11,
-    opacity: 0.72,
-    lineHeight: 1.1,
   };
 }

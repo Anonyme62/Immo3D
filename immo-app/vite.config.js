@@ -13,6 +13,7 @@ const cesiumSource = normalizePath(
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const httpsConfig = command === "serve" ? resolveHttpsConfig(env) : undefined;
+  const apiProxyTarget = env.VITE_DEV_API_TARGET || "http://127.0.0.1:8000";
 
   return {
     plugins: [
@@ -35,6 +36,16 @@ export default defineConfig(({ mode, command }) => {
       host: env.VITE_DEV_HOST || undefined,
       port: parseOptionalPort(env.VITE_DEV_PORT),
       https: httpsConfig,
+      proxy: {
+        "/auth": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/biens": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/notes": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/markers": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/blacklist": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/billing": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/health": { target: apiProxyTarget, changeOrigin: false, secure: false },
+        "/geocoding": { target: apiProxyTarget, changeOrigin: false, secure: false },
+      },
     },
 
     preview: {
