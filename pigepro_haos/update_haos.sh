@@ -8,6 +8,7 @@ ADDON_SLUG="${ADDON_SLUG:-local_pigepro_haos}"
 ADDON_DIR="${ADDON_DIR:-/addons/local/pigepro_haos}"
 RETRY_MAX="${RETRY_MAX:-4}"
 RETRY_DELAY_SECONDS="${RETRY_DELAY_SECONDS:-3}"
+START_WAIT_SECONDS="${START_WAIT_SECONDS:-30}"
 
 log() {
   echo "[update_haos] $*"
@@ -27,7 +28,7 @@ get_running_version() {
 
 wait_until_started() {
   attempts=0
-  while [ "${attempts}" -lt 20 ]; do
+  while [ "${attempts}" -lt "${START_WAIT_SECONDS}" ]; do
     state="$(get_running_state || true)"
     if [ "${state}" = "started" ]; then
       return 0
@@ -36,6 +37,61 @@ wait_until_started() {
     sleep 1
   done
   return 1
+}
+
+run_update() {
+  if out="$(ha addons update "${ADDON_SLUG}" 2>&1)"; then
+    log "update: OK"
+    echo "${out}"
+    return 0
+  fi
+  log "update: ECHEC"
+  echo "${out}"
+  if echo "${out}" | grep -qi "No update available"; then
+    log "update: aucune mise a jour disponible (on continue quand meme)."
+    return 0
+  fi
+  return 1
+}
+
+run_rebuild() {
+  if out="$(ha addons rebuild "${ADDON_SLUG}" 2>&1)"; then
+    log "rebuild: OK"
+    echo "${out}"
+    return 0
+  fi
+  log "rebuild: ECHEC"
+  echo "${out}"
+  if echo "${out}" | grep -qi "Version changed, use Update instead Rebuild"; then
+    log "rebuild demande update -> fallback auto."
+    return 2
+  fi
+  return 1
+}
+
+start_and_verify() {
+  if ! start_out="$(ha addons start "${ADDON_SLUG}" 2>&1)"; then
+    log "start: ECHEC"
+    echo "${start_out}"
+    return 1
+  fi
+  log "start: OK"
+  echo "${start_out}"
+  if ! wait_until_started; then
+    log "start: timeout, add-on non demarre."
+    return 1
+  fi
+  running_state="$(get_running_state || true)"
+  running_version="$(get_running_version || true)"
+  if [ "${running_state}" != "started" ]; then
+    log "etat runtime inattendu: ${running_state}"
+    return 1
+  fi
+  if [ "${running_version}" != "${target_version}" ]; then
+    log "version runtime ${running_version} != cible ${target_version}"
+    return 1
+  fi
+  return 0
 }
 
 log "Repo: ${REPO_URL}"
@@ -90,36 +146,46 @@ ha addons reload
 
 attempt=1
 while [ "${attempt}" -le "${RETRY_MAX}" ]; do
-  log "Rebuild/start tentative ${attempt}/${RETRY_MAX}"
-  if ha addons rebuild "${ADDON_SLUG}" && ha addons start "${ADDON_SLUG}"; then
-    if wait_until_started; then
+  log "Tentative deploy ${attempt}/${RETRY_MAX}"
+
+  if run_update && start_and_verify; then
+    log "Deploy valide via update."
+    break
+  fi
+
+  rebuild_rc=1
+  if run_rebuild; then
+    rebuild_rc=0
+  else
+    rebuild_rc=$?
+  fi
+
+  if [ "${rebuild_rc}" -eq 2 ]; then
+    if run_update && start_and_verify; then
+      log "Deploy valide via fallback update apres rebuild."
       break
     fi
+  elif [ "${rebuild_rc}" -eq 0 ]; then
+    if start_and_verify; then
+      log "Deploy valide via rebuild."
+      break
+    fi
+  else
+    log "rebuild non exploitable sur cette tentative."
   fi
+
   if [ "${attempt}" -ge "${RETRY_MAX}" ]; then
-    log "ERREUR: add-on non demarre apres rebuild."
+    log "ERREUR: add-on non demarre apres update/rebuild."
     ha addons logs "${ADDON_SLUG}" --lines 120 || true
+    ha supervisor logs --lines 120 || true
     exit 1
   fi
   attempt=$((attempt + 1))
   sleep "${RETRY_DELAY_SECONDS}"
 done
 
-running_version="$(get_running_version || true)"
-running_state="$(get_running_state || true)"
 log "Etat final:"
 ha addons info "${ADDON_SLUG}" | grep -E 'slug|state|version|version_latest'
-
-if [ "${running_state}" != "started" ]; then
-  log "ERREUR: etat final inattendu (${running_state})."
-  exit 1
-fi
-
-if [ "${running_version}" != "${target_version}" ]; then
-  log "ATTENTION: version runtime (${running_version}) differente de la cible (${target_version})."
-  log "Si besoin, relancer: ha addons rebuild ${ADDON_SLUG} && ha addons restart ${ADDON_SLUG}"
-else
-  log "Version verifiee: ${running_version}"
-fi
+log "Version verifiee: ${target_version}"
 
 log "OK"
