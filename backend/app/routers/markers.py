@@ -1,4 +1,7 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -15,10 +18,16 @@ router = APIRouter(prefix="/markers", tags=["markers"])
 
 MAX_MARKER_PHOTOS = 8
 MAX_MARKER_PHOTO_LENGTH = 1_200_000
+POSTCODE_PATTERN = re.compile(r"\b\d{5}\b")
 
 
 def normalize_search_zone(value: str | None) -> str:
     return (value or "").strip()
+
+
+def extract_postcode(value: str | None) -> str:
+    match = POSTCODE_PATTERN.search(str(value or ""))
+    return match.group(0) if match else ""
 
 
 def sanitize_marker_photos(photos: list[str] | None) -> list[str]:
@@ -49,15 +58,29 @@ def list_markers(
     user: User = Depends(get_current_subscribed_user),
 ):
     normalized_zone = normalize_search_zone(zone)
-    return (
-        db.query(CustomMarker)
-        .filter(
-            CustomMarker.user_id == user.id,
-            CustomMarker.search_zone == normalized_zone,
-        )
-        .order_by(CustomMarker.updated_at.desc(), CustomMarker.created_at.desc())
-        .all()
-    )
+    query = db.query(CustomMarker).filter(CustomMarker.user_id == user.id)
+
+    if normalized_zone:
+        requested_postcode = extract_postcode(normalized_zone)
+        if requested_postcode:
+            postcode_like = f"%{requested_postcode}%"
+            query = query.filter(
+                or_(
+                    CustomMarker.search_zone.ilike(postcode_like),
+                    CustomMarker.address.ilike(postcode_like),
+                )
+            )
+        else:
+            normalized_zone_lower = normalized_zone.lower()
+            zone_like = f"%{normalized_zone_lower}%"
+            query = query.filter(
+                or_(
+                    func.lower(CustomMarker.search_zone) == normalized_zone_lower,
+                    func.lower(CustomMarker.search_zone).like(zone_like),
+                )
+            )
+
+    return query.order_by(CustomMarker.updated_at.desc(), CustomMarker.created_at.desc()).all()
 
 
 @router.post("", response_model=CustomMarkerResponse)

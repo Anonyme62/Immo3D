@@ -30,20 +30,21 @@ Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
 const GOOGLE_TILESET_READY_TIMEOUT_MS = 1400;
 const GOOGLE_TILESET_SWITCH_TIMEOUT_MS = 4800;
-const GOOGLE_TILESET_FAST_SSE = 14;
 const GOOGLE_TILESET_PREMIUM_SSE = 6;
-const GOOGLE_TILESET_ULTRA_SSE = 2.5;
 const GOOGLE_TILESET_FAST_PHASE_MS = 420;
 const GOOGLE_TILESET_ULTRA_PHASE_MS = 2600;
 const GOOGLE_WARMUP_START_DELAY_MS = 220;
 const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
+const SATELLITE_LOAD_WATCHDOG_MS = 15000;
 const DESKTOP_RESOLUTION_SCALE = 1.22;
 const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
+const DESKTOP_MOVING_RESOLUTION_SCALE = 1.02;
 const MOBILE_RESOLUTION_SCALE = 1;
 const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
 const IOS_RESOLUTION_SCALE = 0.82;
 const DESKTOP_MSAA_SAMPLES = 4;
 const DESKTOP_ULTRA_MSAA_SAMPLES = 8;
+const DESKTOP_MOVING_MSAA_SAMPLES = 2;
 const MOBILE_MSAA_SAMPLES = 2;
 const MOBILE_MOVING_MSAA_SAMPLES = 1;
 const IOS_MSAA_SAMPLES = 1;
@@ -51,10 +52,29 @@ const MOBILE_GOOGLE_TILESET_FAST_SSE = 16;
 const MOBILE_GOOGLE_TILESET_PREMIUM_SSE = 9.5;
 const MOBILE_GOOGLE_TILESET_MOVING_SSE = 20;
 const MOBILE_GOOGLE_TILESET_IDLE_SSE = 8.5;
+const DESKTOP_GOOGLE_TILESET_MOVING_SSE = 13;
+const DESKTOP_GOOGLE_TILESET_IDLE_SSE = 6;
+const DESKTOP_GOOGLE_TILESET_ULTRA_SSE = 3.4;
 const MOBILE_GLOBE_SSE_MOVING = 2.2;
 const MOBILE_GLOBE_SSE_IDLE = 1.55;
+const DESKTOP_GLOBE_SSE_MOVING = 1.45;
+const DESKTOP_GLOBE_SSE_IDLE = 1.05;
+const DESKTOP_GLOBE_SSE_ULTRA = 0.9;
+const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
+const DESKTOP_QUALITY_ULTRA_DELAY_MS = 780;
+const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
 const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
 const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
+const MOBILE_QUALITY_ULTRA_DELAY_MS = 980;
+const MOBILE_ULTRA_RESOLUTION_SCALE = 1.08;
+const MOBILE_GOOGLE_TILESET_ULTRA_SSE = 6.9;
+const MOBILE_GLOBE_SSE_ULTRA = 1.24;
+const SATELLITE_MOVE_RECOVERY_DELAY_MS = 1600;
+const ADAPTIVE_QUALITY_SAMPLE_WINDOW_MS = 1450;
+const ADAPTIVE_QUALITY_DROP_FRAME_MS = 34;
+const ADAPTIVE_QUALITY_DROP_STREAK_LIMIT = 7;
+const ADAPTIVE_QUALITY_RAISE_FPS_MOBILE = 52;
+const ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP = 57;
 const GOOGLE_TILESET_DESKTOP_CACHE_BYTES = 805_306_368; // 768 MB
 const GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES = 402_653_184; // +384 MB
 const GOOGLE_TILESET_MOBILE_CACHE_BYTES = 603_979_776; // 576 MB
@@ -71,6 +91,11 @@ const GLOBE_LOADING_DESCENDANT_LIMIT_IOS = 220;
 const SATELLITE_CLAMP_TIMEOUT_MS = 900;
 const SATELLITE_CLAMP_MAX_POSITIONS = 260;
 const PLAN_PAN_SPEED_MULTIPLIER = 0.605; // additional -20% from 0.756
+const MOBILE_TOUCH_PAN_SENSITIVITY_MULTIPLIER = 3; // +200% on mobile touch pan
+// Preserve the "dezoomed" feel while strongly damping pan close to the ground.
+const MOBILE_NEAR_ZOOM_PAN_BRAKE_START_MULTIPLIER = 6;
+const MOBILE_NEAR_ZOOM_PAN_BRAKE_MIN_FACTOR = 0.28;
+const MOBILE_NEAR_ZOOM_PAN_BRAKE_CURVE = 1.35;
 const SATELLITE_MIN_GROUND_CLEARANCE_METERS = 40; // hard floor at 40m above ground
 const SATELLITE_MARKER_HEIGHT_OFFSET_METERS = 1.7;
 const SATELLITE_MARKER_FALLBACK_HEIGHT_METERS = 40;
@@ -94,7 +119,7 @@ const MARKER_PHOTO_MAX_DIMENSION_STEPS = [1920, 1600, 1280, 1024, 800, 640];
 const MARKER_PHOTO_QUALITY_STEPS = [0.86, 0.78, 0.7, 0.62, 0.54, 0.46];
 const MARKER_ADDRESS_DEBOUNCE_MS = 260;
 const POSTCODE_PATTERN = /\b\d{5}\b/;
-const MAP_ZONE_CACHE_STORAGE_KEY = "immo3d_map_zone_cache_v1";
+const MAP_ZONE_CACHE_STORAGE_KEY = "immo3d_map_zone_cache_v2";
 const MAP_ZONE_CACHE_MAX_ENTRIES = 20;
 const MAP_ZONE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SATELLITE_ZONE_LIMIT_PADDING_DEGREES = 0.002;
@@ -167,6 +192,24 @@ function getUltraResolutionScale(isIOSDevice = false) {
     DESKTOP_RESOLUTION_SCALE,
     Math.min(DESKTOP_ULTRA_RESOLUTION_SCALE, devicePixelRatio * 1.02)
   );
+}
+
+function canEnableMobileUltraQuality(isIOSDevice = false) {
+  if (isIOSDevice) return false;
+  if (typeof navigator === "undefined") return true;
+
+  const connectionType = String(navigator.connection?.effectiveType || "").toLowerCase();
+  const saveDataEnabled = Boolean(navigator.connection?.saveData);
+  const deviceMemoryGb = Number(navigator.deviceMemory || 0);
+  const cpuThreads = Number(navigator.hardwareConcurrency || 0);
+
+  if (saveDataEnabled) return false;
+  if (connectionType.includes("2g")) return false;
+  if (connectionType === "slow-2g") return false;
+  if (deviceMemoryGb > 0 && deviceMemoryGb < 4) return false;
+  if (cpuThreads > 0 && cpuThreads < 6) return false;
+
+  return true;
 }
 
 function tuneImageryLayer(imageryLayer, mode = "satellite") {
@@ -364,29 +407,88 @@ function deserializeRectangleDegrees(serializedRectangle) {
   return Cesium.Rectangle.fromDegrees(west, south, east, north);
 }
 
+function expandRectangleByDegrees(rectangle, paddingDegrees = 0) {
+  if (!rectangle || !Number.isFinite(paddingDegrees) || paddingDegrees <= 0) {
+    return rectangle || null;
+  }
+  const paddingRadians = Cesium.Math.toRadians(paddingDegrees);
+  const west = Math.max(-Math.PI, rectangle.west - paddingRadians);
+  const east = Math.min(Math.PI, rectangle.east + paddingRadians);
+  const south = Math.max(-Cesium.Math.PI_OVER_TWO, rectangle.south - paddingRadians);
+  const north = Math.min(Cesium.Math.PI_OVER_TWO, rectangle.north + paddingRadians);
+  return new Cesium.Rectangle(west, south, east, north);
+}
+
+function isSerializedCameraInsideRectangle(
+  serializedCamera,
+  rectangle,
+  paddingDegrees = 0.35
+) {
+  if (!serializedCamera || !rectangle) return true;
+  const longitude = Number(serializedCamera.longitude);
+  const latitude = Number(serializedCamera.latitude);
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return false;
+  const expandedRectangle = expandRectangleByDegrees(rectangle, paddingDegrees);
+  const cartographic = Cesium.Cartographic.fromDegrees(longitude, latitude, 0);
+  return Cesium.Rectangle.contains(expandedRectangle, cartographic);
+}
+
 function waitForGoogleTilesetReady(tileset) {
   if (!tileset || tileset.tilesLoaded) {
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
 
   return new Promise((resolve) => {
     let finished = false;
 
-    function complete() {
+    function handleInitialTilesLoaded() {
+      complete(true);
+    }
+
+    function complete(didLoad = false) {
       if (finished) return;
       finished = true;
       window.clearTimeout(timeoutId);
-      tileset.initialTilesLoaded.removeEventListener(complete);
-      resolve();
+      tileset.initialTilesLoaded.removeEventListener(handleInitialTilesLoaded);
+      resolve(didLoad);
     }
 
     const timeoutId = window.setTimeout(
-      complete,
+      () => complete(false),
       GOOGLE_TILESET_READY_TIMEOUT_MS
     );
 
-    tileset.initialTilesLoaded.addEventListener(complete);
+    tileset.initialTilesLoaded.addEventListener(handleInitialTilesLoaded);
   });
+}
+
+function buildSatelliteFailureMessage(error) {
+  const code = String(error?.code || "");
+  const rawMessage = String(error?.message || "").toLowerCase();
+
+  if (code === "GOOGLE_TILESET_TIMEOUT") {
+    return "Vue satellite indisponible: chargement trop long. Retour en vue plan.";
+  }
+
+  if (
+    rawMessage.includes("401") ||
+    rawMessage.includes("403") ||
+    rawMessage.includes("unauthorized") ||
+    rawMessage.includes("forbidden")
+  ) {
+    return "Vue satellite indisponible: token Cesium non autorise pour ce domaine.";
+  }
+
+  if (
+    rawMessage.includes("network") ||
+    rawMessage.includes("failed to fetch") ||
+    rawMessage.includes("connection") ||
+    rawMessage.includes("dns")
+  ) {
+    return "Vue satellite indisponible: acces reseau aux tuiles Google 3D bloque.";
+  }
+
+  return "Vue satellite indisponible pour le moment. Retour en vue plan.";
 }
 
 function createTimeoutError(message, code) {
@@ -683,7 +785,6 @@ function computeEffectivePanSpeed({
   resolvedMode,
   currentHeight,
   syncHeight,
-  isSatellite3D = false,
 }) {
   const modePanConfig = getModePanConfig(tuning, resolvedMode);
   const speedAtSync = Math.max(0.05, Number(modePanConfig.syncSpeed) || 10);
@@ -703,23 +804,22 @@ function computeEffectivePanSpeed({
     1
   );
   const baseMinFactor = Math.max(0, 1 - reductionPercent / 100);
-
-  // Satellite (2D + 3D):
-  // keep the same speed at sync and at max zoom, but interpolate continuously
-  // between both to avoid abrupt thresholds in the middle zoom range.
-  if (resolvedMode === "google3d") {
-    // At max zoom, reduce satellite pan speed by an additional 60%.
-    const satelliteMinFactor = Cesium.Math.clamp(
-      baseMinFactor * 0.25 * 0.4,
-      0,
-      1
-    );
-    const smoothFactor = Cesium.Math.lerp(1, satelliteMinFactor, zoomProgress);
-    return speedAtSync * smoothFactor;
-  }
+  const nearZoomBrakeStartHeight =
+    minZoomHeight * MOBILE_NEAR_ZOOM_PAN_BRAKE_START_MULTIPLIER;
+  const nearZoomProgress = Cesium.Math.clamp(
+    (nearZoomBrakeStartHeight - currentHeight) /
+      Math.max(0.01, nearZoomBrakeStartHeight - minZoomHeight),
+    0,
+    1
+  );
+  const nearZoomBrakeFactor = Cesium.Math.lerp(
+    1,
+    MOBILE_NEAR_ZOOM_PAN_BRAKE_MIN_FACTOR,
+    Math.pow(nearZoomProgress, MOBILE_NEAR_ZOOM_PAN_BRAKE_CURVE)
+  );
 
   const baseFactor = Cesium.Math.lerp(1, baseMinFactor, zoomProgress);
-  return speedAtSync * baseFactor;
+  return speedAtSync * baseFactor * nearZoomBrakeFactor;
 }
 
 export default function CesiumMap({
@@ -785,7 +885,21 @@ export default function CesiumMap({
   const modeTransitionTimeoutRef = useRef(null);
   const googleQualityTimeoutRef = useRef(null);
   const googleUltraQualityTimeoutRef = useRef(null);
+  const desktopQualityRestoreTimeoutRef = useRef(null);
+  const desktopUltraRestoreTimeoutRef = useRef(null);
   const mobileQualityRestoreTimeoutRef = useRef(null);
+  const mobileUltraRestoreTimeoutRef = useRef(null);
+  const qualityRecoverySafetyTimeoutRef = useRef(null);
+  const satelliteLoadWatchdogTimeoutRef = useRef(null);
+  const adaptiveQualityStateRef = useRef({
+    isMoving: false,
+    isUltraActive: false,
+    lastFrameAt: 0,
+    sampleStartAt: 0,
+    sampleFrameCount: 0,
+    sampleFrameMsTotal: 0,
+    dropFrameStreak: 0,
+  });
   const appBootTimestampRef = useRef(Date.now());
   const tiltToggleBaseRangeRef = useRef(null);
   const activeZoneCacheKeyRef = useRef(buildZoneCacheKey(searchZone));
@@ -850,10 +964,12 @@ export default function CesiumMap({
   const [isSatelliteReady, setIsSatelliteReady] = useState(false);
   const [isSatelliteWarmupBlockExpired, setIsSatelliteWarmupBlockExpired] =
     useState(false);
+  const [satelliteIssueMessage, setSatelliteIssueMessage] = useState("");
   const [modeTransition, setModeTransition] = useState({
     active: false,
     target: null,
   });
+  const isSatelliteReadyRef = useRef(false);
 
   useEffect(() => {
     onSelectBienRef.current = setSelectedBien;
@@ -894,6 +1010,10 @@ export default function CesiumMap({
   useEffect(() => {
     mapModeRef.current = canUseGoogle3D ? mapMode : "osm";
   }, [mapMode, canUseGoogle3D]);
+
+  useEffect(() => {
+    isSatelliteReadyRef.current = isSatelliteReady;
+  }, [isSatelliteReady]);
 
   useEffect(() => {
     touchNavTuningRef.current = touchNavTuning || TOUCH_NAV_TUNING;
@@ -960,14 +1080,41 @@ export default function CesiumMap({
       if (googleUltraQualityTimeoutRef.current) {
         window.clearTimeout(googleUltraQualityTimeoutRef.current);
       }
+      if (desktopQualityRestoreTimeoutRef.current) {
+        window.clearTimeout(desktopQualityRestoreTimeoutRef.current);
+      }
+      if (desktopUltraRestoreTimeoutRef.current) {
+        window.clearTimeout(desktopUltraRestoreTimeoutRef.current);
+      }
       if (mobileQualityRestoreTimeoutRef.current) {
         window.clearTimeout(mobileQualityRestoreTimeoutRef.current);
+      }
+      if (mobileUltraRestoreTimeoutRef.current) {
+        window.clearTimeout(mobileUltraRestoreTimeoutRef.current);
+      }
+      if (qualityRecoverySafetyTimeoutRef.current) {
+        window.clearTimeout(qualityRecoverySafetyTimeoutRef.current);
+      }
+      if (satelliteLoadWatchdogTimeoutRef.current) {
+        window.clearTimeout(satelliteLoadWatchdogTimeoutRef.current);
       }
       if (longPressTimerRef.current) {
         window.clearTimeout(longPressTimerRef.current);
       }
     };
   }, []);
+
+  function clearQualityRecoverySafetyTimeout() {
+    if (!qualityRecoverySafetyTimeoutRef.current) return;
+    window.clearTimeout(qualityRecoverySafetyTimeoutRef.current);
+    qualityRecoverySafetyTimeoutRef.current = null;
+  }
+
+  function clearSatelliteLoadWatchdogTimeout() {
+    if (!satelliteLoadWatchdogTimeoutRef.current) return;
+    window.clearTimeout(satelliteLoadWatchdogTimeoutRef.current);
+    satelliteLoadWatchdogTimeoutRef.current = null;
+  }
 
   function startModeTransition(targetMode) {
     if (modeTransitionTimeoutRef.current) {
@@ -1388,6 +1535,15 @@ function findPickedInteractiveData(
   }
 
   function getSatelliteViewLimitRectangle() {
+    const fallbackPoints = biens
+      .filter((bien) => bien.lat != null && bien.lon != null)
+      .map((bien) => ({ lon: bien.lon, lat: bien.lat }));
+    const fallbackRectangle = rectangleFromLonLatPoints(
+      fallbackPoints,
+      SATELLITE_ZONE_LIMIT_PADDING_DEGREES
+    );
+    if (fallbackRectangle) return fallbackRectangle;
+
     const boundaryLines = extractBoundaryLines(boundaryGeoJson);
     if (boundaryLines.length > 0) {
       const points = boundaryLines.flatMap((ring) =>
@@ -1402,14 +1558,7 @@ function findPickedInteractiveData(
       );
       if (boundaryRectangle) return boundaryRectangle;
     }
-
-    const fallbackPoints = biens
-      .filter((bien) => bien.lat != null && bien.lon != null)
-      .map((bien) => ({ lon: bien.lon, lat: bien.lat }));
-    return rectangleFromLonLatPoints(
-      fallbackPoints,
-      SATELLITE_ZONE_LIMIT_PADDING_DEGREES
-    );
+    return null;
   }
 
   function persistCurrentCameraInZoneCache(viewer) {
@@ -1428,7 +1577,24 @@ function findPickedInteractiveData(
     const zoneCacheKey = activeZoneCacheKeyRef.current;
     if (!zoneCacheKey) return false;
     const entry = readZoneCacheEntry(zoneCacheKey);
-    const restored = restoreSerializableCameraState(viewer, entry?.camera);
+    const cachedCamera = entry?.camera;
+    if (!cachedCamera) return false;
+
+    const expectedRectangle = satelliteViewLimitRectangleRef.current || getBiensBounds();
+    if (
+      expectedRectangle &&
+      !isSerializedCameraInsideRectangle(cachedCamera, expectedRectangle)
+    ) {
+      updateZoneCacheEntry(zoneCacheKey, (previousEntry) => {
+        if (!previousEntry || typeof previousEntry !== "object") return {};
+        const rest = { ...previousEntry };
+        delete rest.camera;
+        return rest;
+      });
+      return false;
+    }
+
+    const restored = restoreSerializableCameraState(viewer, cachedCamera);
     if (restored) {
       zoneCameraRestoreDoneRef.current = true;
       viewer.scene.requestRender();
@@ -1526,6 +1692,23 @@ function findPickedInteractiveData(
     });
 
     viewerRef.current = viewer;
+    const creditContainer = viewer.cesiumWidget?.creditContainer;
+    if (creditContainer) {
+      creditContainer.style.left = "auto";
+      creditContainer.style.right = isMobile ? "4px" : "6px";
+      creditContainer.style.bottom = isMobile ? "4px" : "6px";
+      creditContainer.style.top = "auto";
+      creditContainer.style.transformOrigin = "right bottom";
+      creditContainer.style.transform = isMobile ? "scale(0.58)" : "scale(0.64)";
+      creditContainer.style.opacity = "0.4";
+      creditContainer.style.padding = "0 2px";
+      creditContainer.style.borderRadius = "6px";
+      creditContainer.style.background = "rgba(15, 23, 42, 0.18)";
+      creditContainer.style.backdropFilter = "none";
+      creditContainer.style.fontSize = "9px";
+      creditContainer.style.lineHeight = "1";
+      creditContainer.style.zIndex = "5";
+    }
     viewer.container.style.touchAction = "none";
     viewer.scene.canvas.style.touchAction = "none";
     viewer.scene.canvas.style.webkitUserSelect = "none";
@@ -1822,6 +2005,14 @@ function findPickedInteractiveData(
 
     const touchCanvas = viewer.scene.canvas;
     const enableCustomTouchGestures = isMobile && hasTouchInput();
+    const screenSpaceController = viewer.scene.screenSpaceCameraController;
+
+    if (enableCustomTouchGestures) {
+      // Custom touch pan is handled below. Disable Cesium one-finger translate
+      // to avoid duplicate movement and inconsistent sensitivity by mode.
+      screenSpaceController.translateEventTypes = [];
+      screenSpaceController.inertiaTranslate = 0;
+    }
 
     const stopPanInertia = () => {
       const state = touchPanInertiaRef.current;
@@ -1839,48 +2030,11 @@ function findPickedInteractiveData(
       touchPanInertiaRef.current.worldDirection = new Cesium.Cartesian3();
     };
 
-    const moveCameraForTouchPan = (deltaX, deltaY, moveScale, resolvedMode) => {
+    const moveCameraForTouchPan = (deltaX, deltaY, moveScale) => {
       const rightAmount = -deltaX * moveScale;
       const upAmount = deltaY * moveScale;
-
-      if (resolvedMode !== "google3d") {
-        viewer.camera.moveRight(rightAmount);
-        viewer.camera.moveUp(upAmount);
-        viewer.scene.requestRender();
-        return;
-      }
-
-      const camera = viewer.camera;
-      const surfaceNormal = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(
-        camera.positionWC,
-        new Cesium.Cartesian3()
-      );
-
-      const toSurfaceTangent = (axis) => {
-        const verticalComponent = Cesium.Cartesian3.multiplyByScalar(
-          surfaceNormal,
-          Cesium.Cartesian3.dot(axis, surfaceNormal),
-          new Cesium.Cartesian3()
-        );
-        const tangent = Cesium.Cartesian3.subtract(
-          axis,
-          verticalComponent,
-          new Cesium.Cartesian3()
-        );
-        const magnitude = Cesium.Cartesian3.magnitude(tangent);
-        if (magnitude < 1e-6) return null;
-        return Cesium.Cartesian3.divideByScalar(tangent, magnitude, tangent);
-      };
-
-      const panRightAxis = toSurfaceTangent(camera.rightWC);
-      const panUpAxis = toSurfaceTangent(camera.upWC);
-
-      if (panRightAxis) {
-        camera.move(panRightAxis, rightAmount);
-      }
-      if (panUpAxis) {
-        camera.move(panUpAxis, upAmount);
-      }
+      viewer.camera.moveRight(rightAmount);
+      viewer.camera.moveUp(upAmount);
       viewer.scene.requestRender();
     };
 
@@ -1897,17 +2051,18 @@ function findPickedInteractiveData(
         resolvedMode,
         currentHeight: cameraHeight,
         syncHeight,
-        isSatellite3D: isTiltedRef.current,
       });
       const basePanFactor = Cesium.Math.clamp(effectiveSpeed / 10, 0.01, 8);
 
       // Keep identical pan tuning in plan and satellite to avoid jumpy terrain-pick deltas.
       const moveScale = Cesium.Math.clamp(
-        basePanFactor * PLAN_PAN_SPEED_MULTIPLIER,
+        basePanFactor *
+          PLAN_PAN_SPEED_MULTIPLIER *
+          MOBILE_TOUCH_PAN_SENSITIVITY_MULTIPLIER,
         0.02,
         12
       );
-      moveCameraForTouchPan(deltaX, deltaY, moveScale, resolvedMode);
+      moveCameraForTouchPan(deltaX, deltaY, moveScale);
     };
 
     const updatePanVelocity = (deltaX, deltaY, deltaTimeMs) => {
@@ -1926,34 +2081,12 @@ function findPickedInteractiveData(
         state.velocityY * (1 - smoothing) + instantVelocityY * smoothing;
     };
 
-    const updatePanWorldVelocity = (direction, movedDistance, deltaTimeMs) => {
-      if (!direction || !Number.isFinite(movedDistance) || movedDistance <= 0) return;
-      if (!Number.isFinite(deltaTimeMs) || deltaTimeMs <= 0 || deltaTimeMs > 80) return;
-
-      const state = touchPanInertiaRef.current;
-      const smoothing = TOUCH_PAN_INERTIA.velocitySmoothing;
-      const instantWorldVelocity = movedDistance / deltaTimeMs;
-
-      state.worldVelocity =
-        state.worldVelocity * (1 - smoothing) + instantWorldVelocity * smoothing;
-      state.worldDirection = Cesium.Cartesian3.clone(
-        direction,
-        state.worldDirection || new Cesium.Cartesian3()
-      );
-    };
-
     const startPanInertia = () => {
       const state = touchPanInertiaRef.current;
       stopPanInertia();
 
-      const resolvedMode = resolveMode(mapModeRef.current);
-      const useWorldInertia =
-        resolvedMode === "google3d" &&
-        state.worldVelocity >= TOUCH_PAN_INERTIA.minStartWorldSpeedMetersPerMs &&
-        Cesium.Cartesian3.magnitude(state.worldDirection || new Cesium.Cartesian3()) > 0;
-
       const initialPixelSpeed = Math.hypot(state.velocityX, state.velocityY);
-      if (!useWorldInertia && initialPixelSpeed < TOUCH_PAN_INERTIA.minStartSpeedPxPerMs) {
+      if (initialPixelSpeed < TOUCH_PAN_INERTIA.minStartSpeedPxPerMs) {
         resetPanInertia();
         return;
       }
@@ -1972,7 +2105,6 @@ function findPickedInteractiveData(
         );
         state.velocityX *= decay;
         state.velocityY *= decay;
-        state.worldVelocity *= decay;
 
         if (elapsed >= TOUCH_PAN_INERTIA.maxDurationMs) {
           resetPanInertia();
@@ -1981,29 +2113,14 @@ function findPickedInteractiveData(
 
         const tuning = touchNavTuningRef.current;
         const currentMode = resolveMode(mapModeRef.current);
-
-        if (
-          useWorldInertia &&
-          currentMode === "google3d" &&
-          state.worldVelocity >= TOUCH_PAN_INERTIA.minStopWorldSpeedMetersPerMs
-        ) {
-          const moveDistance = state.worldVelocity * frameDeltaMs;
-          const moveDirection = Cesium.Cartesian3.normalize(
-            state.worldDirection,
-            new Cesium.Cartesian3()
-          );
-          viewer.camera.move(moveDirection, moveDistance);
-          viewer.scene.requestRender();
-        } else {
-          const speed = Math.hypot(state.velocityX, state.velocityY);
-          if (speed < TOUCH_PAN_INERTIA.minStopSpeedPxPerMs) {
-            resetPanInertia();
-            return;
-          }
-          const deltaX = state.velocityX * frameDeltaMs;
-          const deltaY = state.velocityY * frameDeltaMs;
-          applyPanInertiaDelta(deltaX, deltaY, currentMode, tuning);
+        const speed = Math.hypot(state.velocityX, state.velocityY);
+        if (speed < TOUCH_PAN_INERTIA.minStopSpeedPxPerMs) {
+          resetPanInertia();
+          return;
         }
+        const deltaX = state.velocityX * frameDeltaMs;
+        const deltaY = state.velocityY * frameDeltaMs;
+        applyPanInertiaDelta(deltaX, deltaY, currentMode, tuning);
 
         state.rafId = window.requestAnimationFrame(step);
       };
@@ -2024,6 +2141,7 @@ function findPickedInteractiveData(
     };
 
     const handleTouchStart = (event) => {
+      event.preventDefault();
       const tuning = touchNavTuningRef.current;
       if (event.touches.length === 1) {
         resetPanInertia();
@@ -2094,6 +2212,7 @@ function findPickedInteractiveData(
     };
 
     const handleTouchMove = (event) => {
+      event.preventDefault();
       const tuning = touchNavTuningRef.current;
       if (event.touches.length === 1) {
         const firstTouch = event.touches[0];
@@ -2151,17 +2270,18 @@ function findPickedInteractiveData(
           resolvedMode,
           currentHeight: cameraHeight,
           syncHeight,
-          isSatellite3D: isTiltedRef.current,
         });
         const basePanFactor = Cesium.Math.clamp(effectiveSpeed / 10, 0.01, 8);
         touchPanInertiaRef.current.worldVelocity = 0;
         mobileTouchPanRef.current.lastSurface = null;
         const moveScale = Cesium.Math.clamp(
-          basePanFactor * PLAN_PAN_SPEED_MULTIPLIER,
+          basePanFactor *
+            PLAN_PAN_SPEED_MULTIPLIER *
+            MOBILE_TOUCH_PAN_SENSITIVITY_MULTIPLIER,
           0.02,
           12
         );
-        moveCameraForTouchPan(deltaX, deltaY, moveScale, resolvedMode);
+        moveCameraForTouchPan(deltaX, deltaY, moveScale);
         return;
       }
 
@@ -2253,6 +2373,7 @@ function findPickedInteractiveData(
     };
 
     const handleTouchEnd = (event) => {
+      event.preventDefault();
       if (event.touches.length < 2) {
         if (mobileTouchRotateRef.current.usingLookAt) {
           viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
@@ -2295,16 +2416,16 @@ function findPickedInteractiveData(
 
     if (enableCustomTouchGestures) {
       touchCanvas.addEventListener("touchstart", handleTouchStart, {
-        passive: true,
+        passive: false,
       });
       touchCanvas.addEventListener("touchmove", handleTouchMove, {
-        passive: true,
+        passive: false,
       });
       touchCanvas.addEventListener("touchend", handleTouchEnd, {
-        passive: true,
+        passive: false,
       });
       touchCanvas.addEventListener("touchcancel", handleTouchEnd, {
-        passive: true,
+        passive: false,
       });
     }
 
@@ -2428,9 +2549,140 @@ function findPickedInteractiveData(
       }
     };
 
+    const clearMobileUltraRestoreTimeout = () => {
+      if (mobileUltraRestoreTimeoutRef.current) {
+        window.clearTimeout(mobileUltraRestoreTimeoutRef.current);
+        mobileUltraRestoreTimeoutRef.current = null;
+      }
+    };
+
+    const resetAdaptiveQualityStats = () => {
+      adaptiveQualityStateRef.current.lastFrameAt = 0;
+      adaptiveQualityStateRef.current.sampleStartAt = 0;
+      adaptiveQualityStateRef.current.sampleFrameCount = 0;
+      adaptiveQualityStateRef.current.sampleFrameMsTotal = 0;
+      adaptiveQualityStateRef.current.dropFrameStreak = 0;
+    };
+
+    const scheduleQualityRecoverySafety = () => {
+      clearQualityRecoverySafetyTimeout();
+      qualityRecoverySafetyTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        if (isMobile && !isIOSDevice) {
+          clearMobileQualityRestoreTimeout();
+          clearMobileUltraRestoreTimeout();
+          applyMobileIdleQuality();
+          return;
+        }
+        if (!isMobile) {
+          clearDesktopQualityRestoreTimeouts();
+          applyDesktopIdleQuality();
+          if (modeRef.current === "google3d") {
+            desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+              if (cancelled) return;
+              applyDesktopUltraQuality();
+            }, DESKTOP_QUALITY_ULTRA_DELAY_MS);
+          }
+        }
+      }, SATELLITE_MOVE_RECOVERY_DELAY_MS);
+    };
+
+    const startSatelliteLoadWatchdog = () => {
+      clearSatelliteLoadWatchdogTimeout();
+      satelliteLoadWatchdogTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        if (modeRef.current !== "google3d") return;
+        if (isSatelliteReadyRef.current) return;
+        if (tilesetRef.current?.tilesLoaded) return;
+
+        const timeoutError = createTimeoutError(
+          "Le flux satellite n'a pas charge de tuiles initiales a temps.",
+          "GOOGLE_TILESET_WATCHDOG_TIMEOUT"
+        );
+        console.warn("Watchdog satellite:", timeoutError);
+        setSatelliteIssueMessage(buildSatelliteFailureMessage(timeoutError));
+        setSatelliteReadySafely(false);
+        enableOsm();
+        onSetMapModeRef.current?.("osm");
+      }, SATELLITE_LOAD_WATCHDOG_MS);
+    };
+
+    const clearDesktopQualityRestoreTimeouts = () => {
+      if (desktopQualityRestoreTimeoutRef.current) {
+        window.clearTimeout(desktopQualityRestoreTimeoutRef.current);
+        desktopQualityRestoreTimeoutRef.current = null;
+      }
+      if (desktopUltraRestoreTimeoutRef.current) {
+        window.clearTimeout(desktopUltraRestoreTimeoutRef.current);
+        desktopUltraRestoreTimeoutRef.current = null;
+      }
+    };
+
+    const allowMobileUltraQuality = canEnableMobileUltraQuality(isIOSDevice);
+
+    const applyDesktopMovingQuality = (tileset = tilesetRef.current) => {
+      if (isMobile) return;
+
+      adaptiveQualityStateRef.current.isUltraActive = false;
+      viewer.scene.msaaSamples = DESKTOP_MOVING_MSAA_SAMPLES;
+      viewer.resolutionScale = DESKTOP_MOVING_RESOLUTION_SCALE;
+      viewer.scene.globe.maximumScreenSpaceError = DESKTOP_GLOBE_SSE_MOVING;
+
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_MOVING_SSE;
+        tileset.dynamicScreenSpaceError = true;
+        tileset.foveatedScreenSpaceError = true;
+        tileset.cullRequestsWhileMoving = false;
+      }
+
+      if (osmImageryLayerRef.current && modeRef.current === "google3d") {
+        osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
+      }
+
+      viewer.scene.requestRender();
+    };
+
+    const applyDesktopIdleQuality = (tileset = tilesetRef.current) => {
+      if (isMobile) return;
+
+      adaptiveQualityStateRef.current.isUltraActive = false;
+      viewer.scene.msaaSamples = DESKTOP_MSAA_SAMPLES;
+      viewer.resolutionScale = getPreferredResolutionScale(false, isIOSDevice);
+      viewer.scene.globe.maximumScreenSpaceError = DESKTOP_GLOBE_SSE_IDLE;
+
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_IDLE_SSE;
+        tileset.dynamicScreenSpaceError = false;
+        tileset.foveatedScreenSpaceError = false;
+        tileset.cullRequestsWhileMoving = false;
+      }
+
+      if (osmImageryLayerRef.current && modeRef.current === "google3d") {
+        osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
+      }
+
+      viewer.scene.requestRender();
+    };
+
+    const applyDesktopUltraQuality = (tileset = tilesetRef.current) => {
+      if (isMobile) return;
+
+      adaptiveQualityStateRef.current.isUltraActive = true;
+      viewer.scene.globe.maximumScreenSpaceError = DESKTOP_GLOBE_SSE_ULTRA;
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_ULTRA_SSE;
+        tileset.dynamicScreenSpaceError = false;
+        tileset.foveatedScreenSpaceError = false;
+        tileset.cullRequestsWhileMoving = false;
+      }
+
+      applyUltraViewerQuality();
+    };
+
     const applyMobileMovingQuality = (tileset = tilesetRef.current) => {
       if (!isMobile || isIOSDevice) return;
 
+      adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = MOBILE_MOVING_MSAA_SAMPLES;
       viewer.resolutionScale = MOBILE_MOVING_RESOLUTION_SCALE;
       viewer.scene.globe.maximumScreenSpaceError = MOBILE_GLOBE_SSE_MOVING;
@@ -2439,7 +2691,7 @@ function findPickedInteractiveData(
         tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_MOVING_SSE;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = true;
+        tileset.cullRequestsWhileMoving = false;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
@@ -2452,15 +2704,46 @@ function findPickedInteractiveData(
     const applyMobileIdleQuality = (tileset = tilesetRef.current) => {
       if (!isMobile || isIOSDevice) return;
 
+      adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
       viewer.resolutionScale = MOBILE_RESOLUTION_SCALE;
       viewer.scene.globe.maximumScreenSpaceError = MOBILE_GLOBE_SSE_IDLE;
 
       if (tileset && modeRef.current === "google3d") {
         tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_IDLE_SSE;
-        tileset.dynamicScreenSpaceError = true;
-        tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = true;
+        tileset.dynamicScreenSpaceError = false;
+        tileset.foveatedScreenSpaceError = false;
+        tileset.cullRequestsWhileMoving = false;
+      }
+
+      if (osmImageryLayerRef.current && modeRef.current === "google3d") {
+        osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
+      }
+
+      viewer.scene.requestRender();
+    };
+
+    const applyMobileUltraQuality = (tileset = tilesetRef.current) => {
+      if (!isMobile || isIOSDevice || !allowMobileUltraQuality) return;
+
+      adaptiveQualityStateRef.current.isUltraActive = true;
+      viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
+      if (typeof window === "undefined") {
+        viewer.resolutionScale = MOBILE_ULTRA_RESOLUTION_SCALE;
+      } else {
+        const devicePixelRatio = Number(window.devicePixelRatio) || 1;
+        viewer.resolutionScale = Math.max(
+          MOBILE_RESOLUTION_SCALE,
+          Math.min(MOBILE_ULTRA_RESOLUTION_SCALE, devicePixelRatio * 0.86)
+        );
+      }
+      viewer.scene.globe.maximumScreenSpaceError = MOBILE_GLOBE_SSE_ULTRA;
+
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_ULTRA_SSE;
+        tileset.dynamicScreenSpaceError = false;
+        tileset.foveatedScreenSpaceError = false;
+        tileset.cullRequestsWhileMoving = false;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
@@ -2475,9 +2758,7 @@ function findPickedInteractiveData(
         applyMobileIdleQuality();
         return;
       }
-      viewer.scene.msaaSamples = DESKTOP_MSAA_SAMPLES;
-      viewer.resolutionScale = getPreferredResolutionScale(false, isIOSDevice);
-      viewer.scene.requestRender();
+      applyDesktopIdleQuality();
     };
 
     const applyUltraViewerQuality = () => {
@@ -2496,7 +2777,7 @@ function findPickedInteractiveData(
         tileset.maximumScreenSpaceError = MOBILE_GOOGLE_TILESET_FAST_SSE;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = true;
+        tileset.cullRequestsWhileMoving = false;
         viewer.scene.requestRender();
         googleQualityTimeoutRef.current = window.setTimeout(() => {
           if (cancelled || !tilesetRef.current) return;
@@ -2506,17 +2787,16 @@ function findPickedInteractiveData(
         return;
       }
 
-      applyBalancedViewerQuality();
-      tileset.maximumScreenSpaceError = GOOGLE_TILESET_FAST_SSE;
-      tileset.dynamicScreenSpaceError = false;
-      tileset.foveatedScreenSpaceError = false;
+      clearDesktopQualityRestoreTimeouts();
+      applyDesktopMovingQuality(tileset);
+      tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_MOVING_SSE;
+      tileset.dynamicScreenSpaceError = true;
+      tileset.foveatedScreenSpaceError = true;
+      tileset.cullRequestsWhileMoving = false;
       viewer.scene.requestRender();
       googleQualityTimeoutRef.current = window.setTimeout(() => {
         if (cancelled || !tilesetRef.current) return;
-        tilesetRef.current.maximumScreenSpaceError = GOOGLE_TILESET_PREMIUM_SSE;
-        tilesetRef.current.dynamicScreenSpaceError = false;
-        tilesetRef.current.foveatedScreenSpaceError = false;
-        viewer.scene.requestRender();
+        applyDesktopIdleQuality(tilesetRef.current);
       }, GOOGLE_TILESET_FAST_PHASE_MS);
 
       // Defer ultra quality a bit so initial view and mode switch stay responsive.
@@ -2524,12 +2804,95 @@ function findPickedInteractiveData(
       const ultraDelayMs = Math.max(900, GOOGLE_TILESET_ULTRA_PHASE_MS - sinceBootMs);
       googleUltraQualityTimeoutRef.current = window.setTimeout(() => {
         if (cancelled || !tilesetRef.current || modeRef.current !== "google3d") return;
-        tilesetRef.current.maximumScreenSpaceError = GOOGLE_TILESET_ULTRA_SSE;
-        tilesetRef.current.dynamicScreenSpaceError = false;
-        tilesetRef.current.foveatedScreenSpaceError = false;
-        applyUltraViewerQuality();
-        viewer.scene.requestRender();
+        applyDesktopUltraQuality(tilesetRef.current);
       }, ultraDelayMs);
+    };
+
+    const handleAdaptiveFrameQuality = () => {
+      if (cancelled) return;
+      if (modeRef.current !== "google3d") {
+        adaptiveQualityStateRef.current.isUltraActive = false;
+        resetAdaptiveQualityStats();
+        return;
+      }
+      if (!isSatelliteReadyRef.current && !tilesetRef.current?.tilesLoaded) {
+        resetAdaptiveQualityStats();
+        return;
+      }
+      if (adaptiveQualityStateRef.current.isMoving) {
+        resetAdaptiveQualityStats();
+        return;
+      }
+
+      const now = performance.now();
+      if (!adaptiveQualityStateRef.current.lastFrameAt) {
+        adaptiveQualityStateRef.current.lastFrameAt = now;
+        adaptiveQualityStateRef.current.sampleStartAt = now;
+        return;
+      }
+
+      const frameDeltaMs = now - adaptiveQualityStateRef.current.lastFrameAt;
+      adaptiveQualityStateRef.current.lastFrameAt = now;
+      if (!Number.isFinite(frameDeltaMs) || frameDeltaMs <= 0) return;
+
+      adaptiveQualityStateRef.current.sampleFrameCount += 1;
+      adaptiveQualityStateRef.current.sampleFrameMsTotal += frameDeltaMs;
+
+      if (adaptiveQualityStateRef.current.isUltraActive) {
+        if (frameDeltaMs > ADAPTIVE_QUALITY_DROP_FRAME_MS) {
+          adaptiveQualityStateRef.current.dropFrameStreak += 1;
+        } else {
+          adaptiveQualityStateRef.current.dropFrameStreak = Math.max(
+            0,
+            adaptiveQualityStateRef.current.dropFrameStreak - 1
+          );
+        }
+
+        if (
+          adaptiveQualityStateRef.current.dropFrameStreak >=
+          ADAPTIVE_QUALITY_DROP_STREAK_LIMIT
+        ) {
+          adaptiveQualityStateRef.current.dropFrameStreak = 0;
+          if (isMobile && !isIOSDevice) {
+            clearMobileUltraRestoreTimeout();
+            applyMobileIdleQuality();
+          } else if (!isMobile) {
+            applyDesktopIdleQuality();
+          }
+          resetAdaptiveQualityStats();
+          return;
+        }
+      }
+
+      if (
+        now - adaptiveQualityStateRef.current.sampleStartAt <
+        ADAPTIVE_QUALITY_SAMPLE_WINDOW_MS
+      ) {
+        return;
+      }
+
+      const frameCount = adaptiveQualityStateRef.current.sampleFrameCount;
+      const totalFrameMs = adaptiveQualityStateRef.current.sampleFrameMsTotal;
+      resetAdaptiveQualityStats();
+      adaptiveQualityStateRef.current.lastFrameAt = now;
+      adaptiveQualityStateRef.current.sampleStartAt = now;
+      if (!frameCount || !totalFrameMs) return;
+
+      const avgFrameMs = totalFrameMs / frameCount;
+      const avgFps = avgFrameMs > 0 ? 1000 / avgFrameMs : 0;
+      if (!Number.isFinite(avgFps) || avgFps <= 0) return;
+      if (adaptiveQualityStateRef.current.isUltraActive) return;
+
+      if (isMobile && !isIOSDevice) {
+        if (allowMobileUltraQuality && avgFps >= ADAPTIVE_QUALITY_RAISE_FPS_MOBILE) {
+          applyMobileUltraQuality();
+        }
+        return;
+      }
+
+      if (!isMobile && avgFps >= ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP) {
+        applyDesktopUltraQuality();
+      }
     };
 
     async function ensureGoogleTileset() {
@@ -2547,7 +2910,7 @@ function findPickedInteractiveData(
             preloadFlightDestinations: true,
             skipLevelOfDetail: false,
             dynamicScreenSpaceError: isMobile && !isIOSDevice,
-            cullRequestsWhileMoving: isMobile && !isIOSDevice,
+            cullRequestsWhileMoving: false,
             cullWithChildrenBounds: true,
             preferLeaves: true,
             foveatedScreenSpaceError: isMobile && !isIOSDevice,
@@ -2572,7 +2935,7 @@ function findPickedInteractiveData(
             tileset.preloadFlightDestinations = true;
             tileset.skipLevelOfDetail = false;
             tileset.dynamicScreenSpaceError = isMobile && !isIOSDevice;
-            tileset.cullRequestsWhileMoving = isMobile && !isIOSDevice;
+            tileset.cullRequestsWhileMoving = false;
             tileset.preferLeaves = true;
             tileset.foveatedScreenSpaceError = isMobile && !isIOSDevice;
             tileset.progressiveResolutionHeightFraction =
@@ -2590,7 +2953,7 @@ function findPickedInteractiveData(
                 ? MOBILE_GOOGLE_TILESET_PREMIUM_SSE
                 : GOOGLE_TILESET_PREMIUM_SSE;
             tilesetRef.current = tileset;
-            setSatelliteReadySafely(true);
+            setSatelliteReadySafely(Boolean(tileset.tilesLoaded));
             if (!viewer.scene.primitives.contains(tileset)) {
               viewer.scene.primitives.add(tileset);
             }
@@ -2632,22 +2995,29 @@ function findPickedInteractiveData(
 
         satelliteWarmupPromiseRef.current = ensureGoogleTileset()
           .then((tileset) => {
-            setSatelliteReadySafely(true);
-            return waitForGoogleTilesetReady(tileset).then(() => {
-              setSatelliteReadySafely(true);
-              setTilesReadyVersion((value) => value + 1);
-              viewer.scene.requestRender();
+            return waitForGoogleTilesetReady(tileset).then((didLoad) => {
+              if (didLoad || tileset.tilesLoaded) {
+                setSatelliteReadySafely(true);
+                setTilesReadyVersion((value) => value + 1);
+                viewer.scene.requestRender();
+              }
               return tileset;
             });
           })
           .catch((error) => {
             setSatelliteReadySafely(false);
+            // If warmup fails quickly (network/token), allow manual retry
+            // instead of keeping the toggle stuck on "Satellite...".
+            setSatelliteWarmupBlockExpiredSafely(true);
             throw error;
           })
           .finally(() => {
             if (satelliteWarmupBlockTimeoutRef.current) {
               window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
               satelliteWarmupBlockTimeoutRef.current = null;
+            }
+            if (!tilesetRef.current) {
+              setSatelliteWarmupBlockExpiredSafely(true);
             }
             satelliteWarmupPromiseRef.current = null;
           });
@@ -2657,8 +3027,15 @@ function findPickedInteractiveData(
     }
 
     function enableOsm() {
+      clearSatelliteLoadWatchdogTimeout();
       clearGoogleQualityTimeout();
+      clearDesktopQualityRestoreTimeouts();
       clearMobileQualityRestoreTimeout();
+      clearMobileUltraRestoreTimeout();
+      clearQualityRecoverySafetyTimeout();
+      adaptiveQualityStateRef.current.isUltraActive = false;
+      adaptiveQualityStateRef.current.isMoving = false;
+      resetAdaptiveQualityStats();
       applyBalancedViewerQuality();
       viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
       if (tilesetRef.current) {
@@ -2677,6 +3054,7 @@ function findPickedInteractiveData(
       setIsTilted(false);
       tiltToggleBaseRangeRef.current = null;
       modeRef.current = "osm";
+      setSatelliteReadySafely(false);
       setTilesReadyVersion((value) => value + 1);
     }
 
@@ -2696,7 +3074,9 @@ function findPickedInteractiveData(
       if (osmImageryLayerRef.current) {
         osmImageryLayerRef.current.show = true;
         osmImageryLayerRef.current.alpha =
-          isMobile && !isIOSDevice ? MOBILE_GOOGLE_OSM_ALPHA : 1;
+          isMobile
+            ? MOBILE_GOOGLE_OSM_ALPHA
+            : DESKTOP_GOOGLE_OSM_ALPHA;
       }
       if (worldTerrainProviderRef.current) {
         viewer.terrainProvider = worldTerrainProviderRef.current;
@@ -2707,6 +3087,7 @@ function findPickedInteractiveData(
       viewer.scene.requestRender();
 
       modeRef.current = "google3d";
+      startSatelliteLoadWatchdog();
       const zoneCacheKey = activeZoneCacheKeyRef.current;
       if (zoneCacheKey) {
         updateZoneCacheEntry(zoneCacheKey, (previousEntry) => ({
@@ -2718,10 +3099,12 @@ function findPickedInteractiveData(
 
       // Do not block the mode switch on initial tile loading. When tiles become
       // ready, trigger one more refresh so markers can settle on detailed mesh.
-      waitForGoogleTilesetReady(tileset).then(() => {
+      waitForGoogleTilesetReady(tileset).then((didLoad) => {
         if (cancelled) return;
-        setSatelliteReadySafely(true);
-        if (modeRef.current === "google3d") {
+        if ((didLoad || tileset.tilesLoaded) && modeRef.current === "google3d") {
+          clearSatelliteLoadWatchdogTimeout();
+          setSatelliteIssueMessage("");
+          setSatelliteReadySafely(true);
           if (isMobile && !isIOSDevice) {
             applyMobileIdleQuality(tileset);
           }
@@ -2768,6 +3151,8 @@ function findPickedInteractiveData(
         cameraState.roll = 0;
         setIsTilted(false);
         tiltToggleBaseRangeRef.current = null;
+      } else {
+        setSatelliteIssueMessage("");
       }
       startModeTransition(requestedMode);
 
@@ -2779,6 +3164,7 @@ function findPickedInteractiveData(
         }
       } catch (error) {
         console.error("Erreur changement de mode carte :", error);
+        setSatelliteIssueMessage(buildSatelliteFailureMessage(error));
         enableOsm();
         if (requestedMode === "google3d") {
           onSetMapModeRef.current?.("osm");
@@ -2792,18 +3178,58 @@ function findPickedInteractiveData(
       }
     }
 
+    const handleDesktopMoveStart = () => {
+      if (isMobile) return;
+      adaptiveQualityStateRef.current.isMoving = true;
+      clearMobileUltraRestoreTimeout();
+      clearDesktopQualityRestoreTimeouts();
+      applyDesktopMovingQuality();
+      scheduleQualityRecoverySafety();
+    };
+
+    const handleDesktopMoveEnd = () => {
+      if (isMobile) return;
+      adaptiveQualityStateRef.current.isMoving = false;
+      clearQualityRecoverySafetyTimeout();
+      clearDesktopQualityRestoreTimeouts();
+
+      desktopQualityRestoreTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        applyDesktopIdleQuality();
+
+        if (modeRef.current !== "google3d") return;
+        desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled) return;
+          applyDesktopUltraQuality();
+        }, DESKTOP_QUALITY_ULTRA_DELAY_MS);
+      }, DESKTOP_QUALITY_RESTORE_DELAY_MS);
+    };
+
     const handleMobileMoveStart = () => {
       if (!isMobile || isIOSDevice) return;
+      adaptiveQualityStateRef.current.isMoving = true;
+      clearMobileUltraRestoreTimeout();
       clearMobileQualityRestoreTimeout();
       applyMobileMovingQuality();
+      scheduleQualityRecoverySafety();
     };
 
     const handleMobileMoveEnd = () => {
       if (!isMobile || isIOSDevice) return;
+      adaptiveQualityStateRef.current.isMoving = false;
+      clearQualityRecoverySafetyTimeout();
       clearMobileQualityRestoreTimeout();
+      clearMobileUltraRestoreTimeout();
       mobileQualityRestoreTimeoutRef.current = window.setTimeout(() => {
         if (cancelled) return;
         applyMobileIdleQuality();
+        if (!allowMobileUltraQuality || modeRef.current !== "google3d") return;
+        mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled) return;
+          if (adaptiveQualityStateRef.current.isMoving) return;
+          if (modeRef.current !== "google3d") return;
+          applyMobileUltraQuality();
+        }, MOBILE_QUALITY_ULTRA_DELAY_MS);
       }, MOBILE_QUALITY_RESTORE_DELAY_MS);
     };
 
@@ -2811,7 +3237,13 @@ function findPickedInteractiveData(
       viewer.camera.moveStart.addEventListener(handleMobileMoveStart);
       viewer.camera.moveEnd.addEventListener(handleMobileMoveEnd);
       applyMobileIdleQuality();
+    } else if (!isMobile) {
+      viewer.camera.moveStart.addEventListener(handleDesktopMoveStart);
+      viewer.camera.moveEnd.addEventListener(handleDesktopMoveEnd);
+      applyDesktopIdleQuality();
     }
+
+    viewer.scene.postRender.addEventListener(handleAdaptiveFrameQuality);
 
     // Warm up Google tiles in the background after first paint so reload stays snappy.
     if (canUseGoogle3D && CESIUM_ION_TOKEN) {
@@ -2828,7 +3260,17 @@ function findPickedInteractiveData(
     return () => {
       cancelled = true;
       clearGoogleQualityTimeout();
+      clearDesktopQualityRestoreTimeouts();
       clearMobileQualityRestoreTimeout();
+      clearMobileUltraRestoreTimeout();
+      clearQualityRecoverySafetyTimeout();
+      clearSatelliteLoadWatchdogTimeout();
+      adaptiveQualityStateRef.current.isMoving = false;
+      adaptiveQualityStateRef.current.isUltraActive = false;
+      resetAdaptiveQualityStats();
+      if (!viewer.isDestroyed()) {
+        viewer.scene.postRender.removeEventListener(handleAdaptiveFrameQuality);
+      }
       if (modeTransitionTimeoutRef.current) {
         window.clearTimeout(modeTransitionTimeoutRef.current);
         modeTransitionTimeoutRef.current = null;
@@ -2843,6 +3285,9 @@ function findPickedInteractiveData(
       if (isMobile && !isIOSDevice && !viewer.isDestroyed()) {
         viewer.camera.moveStart.removeEventListener(handleMobileMoveStart);
         viewer.camera.moveEnd.removeEventListener(handleMobileMoveEnd);
+      } else if (!isMobile && !viewer.isDestroyed()) {
+        viewer.camera.moveStart.removeEventListener(handleDesktopMoveStart);
+        viewer.camera.moveEnd.removeEventListener(handleDesktopMoveEnd);
       }
       setModeTransition({
         active: false,
@@ -3613,37 +4058,36 @@ function findPickedInteractiveData(
       ? "Passage a la vue satellite..."
       : "Passage a la vue plan...";
   const isSatelliteTogglePending =
+    isMobile &&
     canUseGoogle3D &&
     currentResolvedMode !== "google3d" &&
     !isSatelliteReady &&
     !isSatelliteWarmupBlockExpired;
   const isMapModeToggleDisabled =
-    !canUseGoogle3D || isMapModeTransitioning || isSatelliteTogglePending;
+    !canUseGoogle3D || isMapModeTransitioning;
   const mapModeButtonLabel =
     currentResolvedMode === "google3d"
       ? "Vue plan"
       : isSatelliteTogglePending
         ? "Satellite..."
         : "Vue satellite";
-  const mapModeButtonTitle = !canUseGoogle3D
-    ? "Ajoute un token Cesium ion pour activer Google 3D"
-    : currentResolvedMode === "google3d"
-      ? "Passer a la vue plan"
-      : isSatelliteTogglePending
-        ? "Vue satellite en cours de chargement..."
-        : !isSatelliteReady
-          ? "Prechargement long detecte. Premier basculement possible mais peut prendre quelques secondes."
-        : "Passer a la vue satellite";
+  const mapModeButtonTitle = satelliteIssueMessage
+    ? satelliteIssueMessage
+    : !canUseGoogle3D
+      ? "Ajoute un token Cesium ion pour activer Google 3D"
+      : currentResolvedMode === "google3d"
+        ? "Passer a la vue plan"
+        : isSatelliteTogglePending
+          ? "Vue satellite en cours de chargement..."
+          : !isSatelliteReady
+            ? "Prechargement long detecte. Premier basculement possible mais peut prendre quelques secondes."
+          : "Passer a la vue satellite";
 
   function handleToggleMapMode() {
     if (!canUseGoogle3D) return;
     if (isMapModeTransitioning) return;
-    if (
-      currentResolvedMode !== "google3d" &&
-      !isSatelliteReady &&
-      !isSatelliteWarmupBlockExpired
-    ) {
-      return;
+    if (currentResolvedMode !== "google3d") {
+      setSatelliteIssueMessage("");
     }
     onToggleMapMode?.();
   }
@@ -3717,6 +4161,31 @@ function findPickedInteractiveData(
           }}
         >
           {topLeftOverlay}
+        </div>
+      ) : null}
+
+      {satelliteIssueMessage ? (
+        <div
+          style={{
+            position: "absolute",
+            top: isMobile ? 64 : 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 8,
+            maxWidth: "min(92vw, 640px)",
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid rgba(248, 113, 113, 0.46)",
+            background: "rgba(127, 29, 29, 0.9)",
+            color: "#fee2e2",
+            fontSize: 13,
+            fontWeight: 600,
+            textAlign: "center",
+            boxShadow: "0 12px 26px rgba(127, 29, 29, 0.32)",
+            pointerEvents: "none",
+          }}
+        >
+          {satelliteIssueMessage}
         </div>
       ) : null}
 

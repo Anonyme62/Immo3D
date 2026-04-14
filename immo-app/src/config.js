@@ -8,6 +8,7 @@ const bundledCesiumIonToken = Object.values(bundledTokenModules).find(
   (value) => typeof value === "string" && value.trim()
 ) || "";
 
+const runtimeApiBaseUrl = window.__IMMO3D_RUNTIME_CONFIG__?.apiBaseUrl || "";
 const runtimeCesiumIonToken =
   window.__IMMO3D_RUNTIME_CONFIG__?.cesiumIonToken || "";
 
@@ -30,7 +31,7 @@ function defaultApiBaseUrl() {
 }
 
 export const API_BASE_URL = normalizeBaseUrl(
-  import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl()
+  runtimeApiBaseUrl || import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl()
 );
 
 export const CESIUM_ION_TOKEN = (

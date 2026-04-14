@@ -37,6 +37,15 @@ import { countBienCategories, filterBiens } from "./utils/bienFilters";
 import { formatPrix, formatSurface, getBienBadge } from "./utils/bienFormat";
 import { downloadKmlExport } from "./utils/kmlExport";
 
+function isLikelyIOSDevice() {
+  if (typeof navigator === "undefined") return false;
+  const userAgent = String(navigator.userAgent || "").toLowerCase();
+  const isClassicIOS = /iphone|ipad|ipod/.test(userAgent);
+  const isIPadDesktopMode =
+    navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1;
+  return isClassicIOS || isIPadDesktopMode;
+}
+
 function App() {
   const noteTimerRef = useRef(null);
   const isBackgroundRefreshingRef = useRef(false);
@@ -51,6 +60,16 @@ function App() {
   const HAPTICS_STORAGE_KEY = "immo3d_haptics_enabled";
   const FILTERS_BY_ZONE_STORAGE_KEY = "immo3d_filters_by_zone";
   const MAP_MODE_STORAGE_KEY = "immo3d_map_mode";
+  const FILTER_STATE_KEYS = [
+    "showAllBiens",
+    "showFavorites",
+    "showSetAside",
+    "showProfessionnels",
+    "showParticuliers",
+    "showBlacklist",
+    "showSansAdresse",
+    "showNouveaux",
+  ];
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 980);
   const [themeMode, setThemeMode] = useState(() => {
@@ -115,7 +134,14 @@ function App() {
     if (!storedValue) return {};
     try {
       const parsed = JSON.parse(storedValue);
-      return parsed && typeof parsed === "object" ? parsed : {};
+      if (!parsed || typeof parsed !== "object") return {};
+      const sanitizedByZone = {};
+      Object.entries(parsed).forEach(([zoneKey, filterState]) => {
+        const normalizedZoneKey = normalizeZoneKey(zoneKey);
+        if (!normalizedZoneKey) return;
+        sanitizedByZone[normalizedZoneKey] = sanitizeFilterState(filterState);
+      });
+      return sanitizedByZone;
     } catch {
       return {};
     }
@@ -129,6 +155,8 @@ function App() {
   const [showBlacklist, setShowBlacklist] = useState(true);
   const [showSansAdresse, setShowSansAdresse] = useState(true);
   const [showNouveaux, setShowNouveaux] = useState(true);
+  const isIOSDevice = useMemo(() => isLikelyIOSDevice(), []);
+  const canUseGoogle3D = Boolean(CESIUM_ION_TOKEN);
 
   const boundaryQuery = useMemo(
     () => inferBoundaryQuery(activeZoneRecherche, biens),
@@ -184,6 +212,24 @@ function App() {
     return String(value || "").trim().toLowerCase();
   }
 
+  function sanitizeFilterState(nextFilterState) {
+    const defaults = getDefaultFilterState();
+    const source =
+      nextFilterState && typeof nextFilterState === "object" ? nextFilterState : defaults;
+    const sanitized = { ...defaults };
+    FILTER_STATE_KEYS.forEach((key) => {
+      sanitized[key] = Boolean(source[key]);
+    });
+    const hasAnyEnabledFilter = FILTER_STATE_KEYS.some((key) => sanitized[key]);
+    return hasAnyEnabledFilter ? sanitized : defaults;
+  }
+
+  function areFilterStatesEqual(a, b) {
+    const left = sanitizeFilterState(a);
+    const right = sanitizeFilterState(b);
+    return FILTER_STATE_KEYS.every((key) => left[key] === right[key]);
+  }
+
   function getCurrentFilterState() {
     return {
       showAllBiens,
@@ -231,9 +277,15 @@ function App() {
   }, [hapticsEnabled]);
 
   useEffect(() => {
-    const safeMode = mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
+    const safeMode = mapMode === "google3d" && canUseGoogle3D ? "google3d" : "osm";
     localStorage.setItem(MAP_MODE_STORAGE_KEY, safeMode);
-  }, [mapMode]);
+  }, [mapMode, canUseGoogle3D]);
+
+  useEffect(() => {
+    if (canUseGoogle3D) return;
+    if (mapMode !== "google3d") return;
+    setMapMode("osm");
+  }, [canUseGoogle3D, mapMode]);
 
   useEffect(() => {
     localStorage.removeItem("immo3d_touch_nav_tuning");
@@ -250,7 +302,9 @@ function App() {
     const zoneKey = normalizeZoneKey(activeZoneRecherche);
     if (!zoneKey) return;
 
-    const savedFilterState = filtersByZone[zoneKey] || getDefaultFilterState();
+    const savedFilterState = sanitizeFilterState(
+      filtersByZone[zoneKey] || getDefaultFilterState()
+    );
     applyFilterState(savedFilterState);
   }, [activeZoneRecherche, filtersByZone]);
 
@@ -602,6 +656,48 @@ function App() {
   }, [biens, search, showAllBiens, showFavorites, showSetAside, showProfessionnels, showParticuliers, showBlacklist, showSansAdresse, showNouveaux, selectedBien?.id]);
 
   const counts = useMemo(() => countBienCategories(biens), [biens]);
+
+  useEffect(() => {
+    const zoneKey = normalizeZoneKey(activeZoneRecherche);
+    if (!canUseApp || !zoneKey) return;
+    if (biens.length === 0 || biensFiltres.length > 0) return;
+    if (search.trim()) return;
+
+    const zoneFilterState = sanitizeFilterState(
+      filtersByZone[zoneKey] || getCurrentFilterState()
+    );
+    if (zoneFilterState.showAllBiens) return;
+
+    const defaultState = getDefaultFilterState();
+    if (areFilterStatesEqual(zoneFilterState, defaultState)) return;
+
+    applyFilterState(defaultState);
+    setFiltersByZone((previousMap) => {
+      const previousState = sanitizeFilterState(previousMap[zoneKey]);
+      if (areFilterStatesEqual(previousState, defaultState)) {
+        return previousMap;
+      }
+      return {
+        ...previousMap,
+        [zoneKey]: defaultState,
+      };
+    });
+  }, [
+    canUseApp,
+    activeZoneRecherche,
+    biens.length,
+    biensFiltres.length,
+    search,
+    filtersByZone,
+    showAllBiens,
+    showFavorites,
+    showSetAside,
+    showProfessionnels,
+    showParticuliers,
+    showBlacklist,
+    showSansAdresse,
+    showNouveaux,
+  ]);
 
   useEffect(() => {
     if (biensFiltres.length === 0) {
@@ -987,19 +1083,22 @@ function App() {
     if (!zoneKey) return;
 
     setFiltersByZone((previousMap) => {
-      const baseState = previousMap[zoneKey] || getCurrentFilterState();
+      const baseState = sanitizeFilterState(
+        previousMap[zoneKey] || getCurrentFilterState()
+      );
+      const nextState = sanitizeFilterState({
+        ...baseState,
+        [key]: value,
+      });
       return {
         ...previousMap,
-        [zoneKey]: {
-          ...baseState,
-          [key]: value,
-        },
+        [zoneKey]: nextState,
       };
     });
   }
 
   function toggleMapMode() {
-    if (!CESIUM_ION_TOKEN) return;
+    if (!canUseGoogle3D) return;
     triggerHapticFeedback("light");
     setMapMode((value) => (value === "google3d" ? "osm" : "google3d"));
   }
@@ -1322,7 +1421,7 @@ function App() {
                 background: "var(--map-shell-bg)",
               }}
             >
-              <CesiumMap
+                <CesiumMap
                 biens={biensFiltres}
                 customMarkers={customMarkers}
                 selectedBienId={selectedBien?.id ?? null}
@@ -1334,10 +1433,11 @@ function App() {
                 onAddCustomMarker={handleAddCustomMarker}
                 onUpdateCustomMarker={handleUpdateCustomMarker}
                 onDeleteCustomMarker={handleDeleteCustomMarker}
-                mapMode={mapMode}
-                canUseGoogle3D={Boolean(CESIUM_ION_TOKEN)}
-                onToggleMapMode={toggleMapMode}
-                onSetMapMode={setMapMode}
+                  mapMode={mapMode}
+                  canUseGoogle3D={canUseGoogle3D}
+                  isIOSDevice={isIOSDevice}
+                  onToggleMapMode={toggleMapMode}
+                  onSetMapMode={setMapMode}
                 hapticsEnabled={hapticsEnabled}
                 allBiens={biens}
                 searchZone={activeZoneRecherche}
@@ -1399,7 +1499,7 @@ function App() {
                 background: "var(--map-shell-bg)",
               }}
             >
-              <CesiumMap
+                <CesiumMap
                 biens={biensFiltres}
                 customMarkers={customMarkers}
                 selectedBienId={selectedBien?.id ?? null}
@@ -1413,10 +1513,11 @@ function App() {
                 onAddCustomMarker={handleAddCustomMarker}
                 onUpdateCustomMarker={handleUpdateCustomMarker}
                 onDeleteCustomMarker={handleDeleteCustomMarker}
-                mapMode={mapMode}
-                canUseGoogle3D={Boolean(CESIUM_ION_TOKEN)}
-                onToggleMapMode={toggleMapMode}
-                onSetMapMode={setMapMode}
+                  mapMode={mapMode}
+                  canUseGoogle3D={canUseGoogle3D}
+                  isIOSDevice={isIOSDevice}
+                  onToggleMapMode={toggleMapMode}
+                  onSetMapMode={setMapMode}
                 hapticsEnabled={hapticsEnabled}
                 allBiens={biens}
                 searchZone={activeZoneRecherche}

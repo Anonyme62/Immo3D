@@ -1,4 +1,4 @@
-const CACHE_NAME = "immo3d-shell-v1";
+const CACHE_NAME = "immo3d-shell-v2";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -54,20 +54,14 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      return fetch(request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200) {
-          return networkResponse;
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const clonedResponse = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clonedResponse)).catch(() => {});
         }
-
-        const clonedResponse = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, clonedResponse)).catch(() => {});
         return networkResponse;
-      });
-    }),
+      })
+      .catch(() => caches.match(request)),
   );
 });

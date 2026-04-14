@@ -43,8 +43,11 @@ async function apiFetch(path, options = {}) {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
       signal: abortController.signal,
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        Pragma: "no-cache",
         ...(csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)
           ? { "X-CSRF-Token": csrfToken }
           : {}),
