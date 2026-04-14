@@ -10,6 +10,7 @@ import {
   getBoundary,
   deleteCustomMarker,
   getAuthStatus,
+  getHealth,
   getBiens,
   getCustomMarkers,
   loginYanport,
@@ -24,7 +25,7 @@ import {
 } from "./api";
 import AppMenu from "./components/AppMenu";
 import BiensSidebar from "./components/BiensSidebar";
-import { CESIUM_ION_TOKEN } from "./config";
+import { APP_BUILD_REF, APP_BUILD_VERSION, CESIUM_ION_TOKEN } from "./config";
 import LoginScreen from "./components/LoginScreen";
 import SelectedBienPanel from "./components/SelectedBienPanel";
 import SubscriptionScreen from "./components/SubscriptionScreen";
@@ -33,8 +34,14 @@ import {
   mergeTouchNavTuning,
 } from "./config/touchNavigationTuning";
 import { countBienCategories, filterBiens } from "./utils/bienFilters";
-import { formatPrix, formatSurface, getBienBadge } from "./utils/bienFormat";
+import {
+  formatPrix,
+  formatSurface,
+  getBienBadge,
+  getSelectedBienPhotos,
+} from "./utils/bienFormat";
 import { downloadKmlExport } from "./utils/kmlExport";
+import { getMapPerfTelemetry } from "./utils/mapPerfTelemetry";
 
 const CesiumMap = lazy(() => import("./CesiumMap"));
 
@@ -71,10 +78,31 @@ function readSafeAreaBottomInsetPx() {
 }
 
 const MOBILE_QUALITY_PROFILE_OPTIONS = ["auto", "high", "ultra", "perf"];
+const DESKTOP_QUALITY_PROFILE_OPTIONS = ["auto", "high", "ultra", "perf"];
 
 function normalizeMobileQualityProfile(value) {
   return MOBILE_QUALITY_PROFILE_OPTIONS.includes(value) ? value : "auto";
 }
+
+function normalizeDesktopQualityProfile(value) {
+  return DESKTOP_QUALITY_PROFILE_OPTIONS.includes(value) ? value : "auto";
+}
+
+function areStringArraysEqual(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function getBienPreviewPhoto(bien) {
+  const photos = getSelectedBienPhotos(bien);
+  return Array.isArray(photos) && photos.length > 0 ? photos[0] : "";
+}
+
+const MOBILE_BIEN_CARD_HEIGHT = 134;
 
 function App() {
   const noteTimerRef = useRef(null);
@@ -89,6 +117,7 @@ function App() {
   const STYLE_STORAGE_KEY = "immo3d_style_mode";
   const HAPTICS_STORAGE_KEY = "immo3d_haptics_enabled";
   const MOBILE_QUALITY_PROFILE_STORAGE_KEY = "immo3d_mobile_quality_profile";
+  const DESKTOP_QUALITY_PROFILE_STORAGE_KEY = "immo3d_desktop_quality_profile";
   const FILTERS_BY_ZONE_STORAGE_KEY = "immo3d_filters_by_zone";
   const MAP_MODE_STORAGE_KEY = "immo3d_map_mode";
   const FILTER_STATE_KEYS = [
@@ -135,6 +164,7 @@ function App() {
   const [activeZoneRecherche, setActiveZoneRecherche] = useState("");
   const [recentSearches, setRecentSearches] = useState([]);
   const [noteDraft, setNoteDraft] = useState("");
+  const [notePhotosDraft, setNotePhotosDraft] = useState([]);
   const [noteStatus, setNoteStatus] = useState("");
   const [mapMode, setMapMode] = useState("osm");
   const [syncVersion, setSyncVersion] = useState(0);
@@ -160,6 +190,16 @@ function App() {
     normalizeMobileQualityProfile(
       localStorage.getItem(MOBILE_QUALITY_PROFILE_STORAGE_KEY)
     )
+  );
+  const [desktopQualityProfile, setDesktopQualityProfile] = useState(() =>
+    normalizeDesktopQualityProfile(
+      localStorage.getItem(DESKTOP_QUALITY_PROFILE_STORAGE_KEY)
+    )
+  );
+  const [backendHealthInfo, setBackendHealthInfo] = useState(null);
+  const [backendHealthError, setBackendHealthError] = useState("");
+  const [mapPerfTelemetry, setMapPerfTelemetry] = useState(() =>
+    getMapPerfTelemetry()
   );
   const touchNavTuning = useMemo(
     () => mergeTouchNavTuning(TOUCH_NAV_TUNING),
@@ -320,6 +360,10 @@ function App() {
   }, [mobileQualityProfile]);
 
   useEffect(() => {
+    localStorage.setItem(DESKTOP_QUALITY_PROFILE_STORAGE_KEY, desktopQualityProfile);
+  }, [desktopQualityProfile]);
+
+  useEffect(() => {
     const safeMode = mapMode === "google3d" && canUseGoogle3D ? "google3d" : "osm";
     localStorage.setItem(MAP_MODE_STORAGE_KEY, safeMode);
   }, [mapMode, canUseGoogle3D]);
@@ -358,6 +402,27 @@ function App() {
   useEffect(() => {
     localStorage.removeItem("immo3d_touch_nav_tuning");
   }, []);
+
+  useEffect(() => {
+    if (!settingsPanelOpen) return undefined;
+
+    let cancelled = false;
+    setMapPerfTelemetry(getMapPerfTelemetry());
+    setBackendHealthError("");
+    getHealth()
+      .then((data) => {
+        if (cancelled) return;
+        setBackendHealthInfo(data || null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setBackendHealthError(error?.message || "Impossible de lire /health");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsPanelOpen]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -607,9 +672,13 @@ function App() {
       const data = await getBiens(nextZoneRecherche);
       const nextBiens = Array.isArray(data) ? data : [];
       const currentSelectedBienId = selectedBien?.id ?? null;
+      const selectedNotePhotos = Array.isArray(selectedBien?.note_photos)
+        ? selectedBien.note_photos
+        : [];
       const isEditingCurrentNote =
         currentSelectedBienId !== null &&
-        noteDraft !== (selectedBien?.note || "");
+        (noteDraft !== (selectedBien?.note || "") ||
+          !areStringArraysEqual(notePhotosDraft, selectedNotePhotos));
 
       setBiens(nextBiens);
 
@@ -624,6 +693,11 @@ function App() {
         setSelectedBien(refreshedSelectedBien);
         if (!isEditingCurrentNote) {
           setNoteDraft(refreshedSelectedBien.note || "");
+          setNotePhotosDraft(
+            Array.isArray(refreshedSelectedBien.note_photos)
+              ? refreshedSelectedBien.note_photos
+              : []
+          );
         }
       }
     } catch (error) {
@@ -698,7 +772,16 @@ function App() {
       document.removeEventListener("visibilitychange", handleAppVisible);
       window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [canUseApp, zoneRecherche, loading, selectedBien?.id, selectedBien?.note, noteDraft]);
+  }, [
+    canUseApp,
+    zoneRecherche,
+    loading,
+    selectedBien?.id,
+    selectedBien?.note,
+    selectedBien?.note_photos,
+    noteDraft,
+    notePhotosDraft,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -773,14 +856,11 @@ function App() {
       return;
     }
 
-    if (!selectedBien) {
-      setSelectedBien(biensFiltres[0]);
-      return;
-    }
+    if (!selectedBien) return;
 
     const selectedStillVisible = biensFiltres.find((bien) => bien.id === selectedBien.id);
     if (!selectedStillVisible) {
-      setSelectedBien(biensFiltres[0]);
+      setSelectedBien(null);
     } else {
       setSelectedBien(selectedStillVisible);
     }
@@ -788,6 +868,7 @@ function App() {
 
   useEffect(() => {
     setNoteDraft(selectedBien?.note || "");
+    setNotePhotosDraft(Array.isArray(selectedBien?.note_photos) ? selectedBien.note_photos : []);
     setNoteStatus("");
   }, [selectedBien]);
 
@@ -1124,19 +1205,50 @@ function App() {
 
     setSelectedBien((prev) => (prev ? { ...prev, note: value } : prev));
 
+    scheduleNoteSave(
+      bienId,
+      value,
+      Array.isArray(notePhotosDraft) ? notePhotosDraft : []
+    );
+  }
+
+  function scheduleNoteSave(bienId, noteValue, photosValue) {
+    const safePhotos = Array.isArray(photosValue) ? photosValue : [];
+
     if (noteTimerRef.current) {
       clearTimeout(noteTimerRef.current);
     }
 
     noteTimerRef.current = setTimeout(async () => {
       try {
-        await saveNote(bienId, value);
+        await saveNote(bienId, noteValue, safePhotos);
         setNoteStatus("Note enregistree");
       } catch (error) {
         console.error("Erreur sauvegarde note :", error);
         setNoteStatus(error.message || "Erreur d'enregistrement");
       }
     }, 600);
+  }
+
+  function handleNotePhotosChange(nextPhotos) {
+    if (!selectedBien) return;
+    const bienId = selectedBien.id;
+    const safePhotos = Array.isArray(nextPhotos) ? nextPhotos : [];
+
+    setNotePhotosDraft(safePhotos);
+    setNoteStatus("Enregistrement...");
+
+    setBiens((prevBiens) =>
+      prevBiens.map((bien) =>
+        bien.id === bienId ? { ...bien, note_photos: safePhotos } : bien
+      )
+    );
+
+    setSelectedBien((prev) =>
+      prev ? { ...prev, note_photos: safePhotos } : prev
+    );
+
+    scheduleNoteSave(bienId, noteDraft, safePhotos);
   }
 
   function handleFilterChange(key, value) {
@@ -1520,6 +1632,7 @@ function App() {
                   searchZone={activeZoneRecherche}
                   touchNavTuning={touchNavTuning}
                   mobileQualityProfile={mobileQualityProfile}
+                  desktopQualityProfile={desktopQualityProfile}
                   isMobile={false}
                   syncVersion={syncVersion}
                   focusBienId={focusBienId}
@@ -1546,8 +1659,10 @@ function App() {
               <SelectedBienPanel
                 selectedBien={selectedBien}
                 noteDraft={noteDraft}
+                notePhotos={notePhotosDraft}
                 noteStatus={noteStatus}
                 onNoteChange={handleNoteChange}
+                onNotePhotosChange={handleNotePhotosChange}
                 onAddBlacklist={blacklisterBien}
                 onRemoveBlacklist={retirerBlacklist}
                 onAddFavorite={ajouterFavori}
@@ -1604,6 +1719,7 @@ function App() {
                   searchZone={activeZoneRecherche}
                   touchNavTuning={touchNavTuning}
                   mobileQualityProfile={mobileQualityProfile}
+                  desktopQualityProfile={desktopQualityProfile}
                   isMobile
                   syncVersion={syncVersion}
                   focusBienId={focusBienId}
@@ -1689,8 +1805,10 @@ function App() {
                 <SelectedBienPanel
                   selectedBien={selectedBien}
                   noteDraft={noteDraft}
+                  notePhotos={notePhotosDraft}
                   noteStatus={noteStatus}
                   onNoteChange={handleNoteChange}
+                  onNotePhotosChange={handleNotePhotosChange}
                   onAddBlacklist={blacklisterBien}
                   onRemoveBlacklist={retirerBlacklist}
                   onAddFavorite={ajouterFavori}
@@ -1713,8 +1831,17 @@ function App() {
         onClose={() => setSettingsPanelOpen(false)}
         onOpenSubscriptionPortal={ouvrirPortailAbonnement}
         mobileQualityProfile={mobileQualityProfile}
+        desktopQualityProfile={desktopQualityProfile}
+        appBuildVersion={APP_BUILD_VERSION}
+        appBuildRef={APP_BUILD_REF}
+        backendHealthInfo={backendHealthInfo}
+        backendHealthError={backendHealthError}
+        mapPerfTelemetry={mapPerfTelemetry}
         onChangeMobileQualityProfile={(nextProfile) =>
           setMobileQualityProfile(normalizeMobileQualityProfile(nextProfile))
+        }
+        onChangeDesktopQualityProfile={(nextProfile) =>
+          setDesktopQualityProfile(normalizeDesktopQualityProfile(nextProfile))
         }
       />
     </div>
@@ -2010,6 +2137,11 @@ function MobileSearchOverlay({
           {filteredBiens.map((bien) => {
             const isSelected = selectedBienId === bien.id;
             const badge = getBienBadge(bien);
+            const previewPhoto = getBienPreviewPhoto(bien);
+            const publicationText =
+              bien.anciennete !== null && bien.anciennete !== undefined
+                ? `Publie il y a ${bien.anciennete} jours`
+                : "Publication inconnue";
             return (
               <button
                 key={bien.id}
@@ -2018,6 +2150,7 @@ function MobileSearchOverlay({
                   width: "100%",
                   textAlign: "left",
                   marginBottom: 10,
+                  height: MOBILE_BIEN_CARD_HEIGHT,
                   borderRadius: 16,
                   border: isSelected
                     ? "1px solid var(--text-primary)"
@@ -2025,37 +2158,84 @@ function MobileSearchOverlay({
                   background: "var(--panel-bg)",
                   padding: 12,
                   cursor: "pointer",
+                  overflow: "hidden",
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                  }}
-                >
-                  <strong>{formatPrix(bien.prix)}</strong>
-                  <span
+                <div style={{ display: "flex", gap: 10, alignItems: "stretch", height: "100%" }}>
+                  <div
                     style={{
-                      ...badge.style,
-                      padding: "5px 8px",
-                      borderRadius: 999,
-                      fontSize: 11,
-                      fontWeight: 700,
+                      width: "48%",
+                      minWidth: "48%",
+                      height: "100%",
+                      borderRadius: 12,
+                      border: "1px solid var(--border-color)",
+                      background: "var(--panel-muted-bg)",
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    {badge.label}
-                  </span>
-                </div>
-                <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-secondary)" }}>
-                  {bien.adresse || ""}
-                </div>
-                <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
-                  {formatSurface(bien.surface)} •{" "}
-                  {bien.anciennete !== null && bien.anciennete !== undefined
-                    ? `${bien.anciennete} jours`
-                    : "? jours"}
+                    {previewPhoto ? (
+                      <img
+                        src={previewPhoto}
+                        alt="Apercu bien"
+                        loading="lazy"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 12, color: "var(--text-muted)", padding: 8 }}>
+                        Pas de photo
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span
+                      style={{
+                        ...badge.style,
+                        padding: "4px 8px",
+                        borderRadius: 999,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        alignSelf: "flex-start",
+                      }}
+                    >
+                      {badge.label}
+                    </span>
+                    <strong style={{ fontSize: 14 }}>{formatPrix(bien.prix)}</strong>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {bien.agence || "Agence inconnue"}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {formatSurface(bien.surface)}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {publicationText}
+                    </div>
+                  </div>
                 </div>
               </button>
             );
@@ -2267,9 +2447,23 @@ function SettingsOverlay({
   onClose,
   onOpenSubscriptionPortal,
   mobileQualityProfile = "auto",
+  desktopQualityProfile = "auto",
+  appBuildVersion = "dev",
+  appBuildRef = "local",
+  backendHealthInfo = null,
+  backendHealthError = "",
+  mapPerfTelemetry = null,
   onChangeMobileQualityProfile,
+  onChangeDesktopQualityProfile,
 }) {
   const normalizedMobileQualityProfile = normalizeMobileQualityProfile(mobileQualityProfile);
+  const normalizedDesktopQualityProfile = normalizeDesktopQualityProfile(desktopQualityProfile);
+  const modeSwitchStats = mapPerfTelemetry?.modeSwitch || null;
+  const markerRefineStats = mapPerfTelemetry?.markerRefine || null;
+  const satelliteReadyStats = mapPerfTelemetry?.satelliteReady || null;
+  const backendBuildVersion = backendHealthInfo?.build_version || "n/a";
+  const backendBuildRef = backendHealthInfo?.build_ref || "n/a";
+  const backendStatus = backendHealthInfo?.status || "n/a";
   return (
     <div
       style={{
@@ -2296,6 +2490,8 @@ function SettingsOverlay({
           top: "50%",
           transform: open ? "translate(-50%, -50%)" : "translate(-50%, -45%)",
           width: "min(92vw, 420px)",
+          maxHeight: "calc(100vh - 28px)",
+          overflowY: "auto",
           borderRadius: 20,
           border: "1px solid var(--border-color)",
           background: "var(--panel-bg)",
@@ -2380,6 +2576,102 @@ function SettingsOverlay({
             background: "var(--panel-muted-bg)",
           }}
         >
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Qualite desktop</div>
+          <div
+            style={{
+              color: "var(--text-secondary)",
+              fontSize: 13,
+              lineHeight: 1.45,
+              marginBottom: 10,
+            }}
+          >
+            Auto est equilibre. Haute et Tres haute poussent les details 3D sur PC.
+            Perf reduit la charge GPU pour les machines modestes.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+            {[
+              { value: "auto", label: "Auto" },
+              { value: "high", label: "Haute" },
+              { value: "ultra", label: "Tres haute" },
+              { value: "perf", label: "Perf" },
+            ].map((option) => {
+              const active = normalizedDesktopQualityProfile === option.value;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => onChangeDesktopQualityProfile?.(option.value)}
+                  style={{
+                    height: 38,
+                    borderRadius: 11,
+                    border: active
+                      ? "1px solid var(--text-primary)"
+                      : "1px solid var(--border-color)",
+                    background: active ? "var(--text-primary)" : "var(--panel-bg)",
+                    color: active ? "var(--panel-bg)" : "var(--text-primary)",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            border: "1px solid var(--border-color)",
+            borderRadius: 16,
+            padding: 12,
+            background: "var(--panel-muted-bg)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Build & diagnostic</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>
+            Front: v{appBuildVersion} ({appBuildRef})
+            <br />
+            Back: {backendStatus} - v{backendBuildVersion} ({backendBuildRef})
+            {backendHealthError ? (
+              <>
+                <br />
+                /health: {backendHealthError}
+              </>
+            ) : null}
+            {modeSwitchStats ? (
+              <>
+                <br />
+                Switch vue: {modeSwitchStats.success || 0}/{modeSwitchStats.total || 0} reussis
+                (moyenne {modeSwitchStats.avgDurationMs ?? "-"} ms)
+              </>
+            ) : null}
+            {satelliteReadyStats ? (
+              <>
+                <br />
+                Satellite ready: premier {satelliteReadyStats.firstReadyMs ?? "-"} ms, dernier{" "}
+                {satelliteReadyStats.lastReadyMs ?? "-"} ms
+              </>
+            ) : null}
+            {markerRefineStats ? (
+              <>
+                <br />
+                Raffinage reperes: {markerRefineStats.runs || 0} runs, moyenne{" "}
+                {markerRefineStats.avgDurationMs ?? "-"} ms
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            border: "1px solid var(--border-color)",
+            borderRadius: 16,
+            padding: 12,
+            background: "var(--panel-muted-bg)",
+          }}
+        >
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Abonnement</div>
           <div style={{ color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.45 }}>
             Preparation de l'espace abonnement. Tu peux deja ouvrir Stripe pour gerer ton abonnement.
@@ -2433,6 +2725,35 @@ function FilterLinesIcon() {
       <circle cx="17" cy="19" r="1.25" fill="var(--panel-bg, #ffffff)" />
     </svg>
   );
+}
+
+function mobileInfoChipStyle(tone = "neutral") {
+  const palette = {
+    neutral: {
+      background: "var(--panel-subtle)",
+      color: "var(--text-primary)",
+      border: "1px solid var(--border-color)",
+    },
+    success: {
+      background: "#dcfce7",
+      color: "#166534",
+      border: "1px solid #bbf7d0",
+    },
+    warning: {
+      background: "#fef3c7",
+      color: "#92400e",
+      border: "1px solid #fde68a",
+    },
+  };
+  const selected = palette[tone] || palette.neutral;
+  return {
+    ...selected,
+    padding: "3px 7px",
+    borderRadius: 999,
+    fontSize: 10,
+    fontWeight: 700,
+    lineHeight: 1.2,
+  };
 }
 
 function CloseIcon() {

@@ -88,7 +88,7 @@ http://IP_DU_RASPBERRY:10000/health
 Tu dois obtenir :
 
 ```json
-{"status":"ok"}
+{"status":"ok","build_version":"...","build_ref":"..."}
 ```
 
 ## 4. Lier `app.pigepro.fr`
@@ -143,3 +143,30 @@ Sur cette machine, la prochaine etape logique est :
 3. installer l'app `PigePro`
 4. verifier `/health` en local
 5. ensuite brancher `app.pigepro.fr`
+
+## 8. Mise a jour HA en une seule commande
+
+Depuis le terminal SSH Home Assistant, lance:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anonyme62/Immo3D/main/pigepro_haos/update_haos.sh | REF=main sh
+```
+
+Si tu veux forcer un commit precis:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anonyme62/Immo3D/main/pigepro_haos/update_haos.sh | REF=02c1c9c sh
+```
+
+Le script inclut maintenant:
+
+- `cd /` de securite avant nettoyage (evite le bug "Unable to read current working directory")
+- retries clone/checkout + rebuild/start
+- verification finale `state: started`
+- verification de coherence `version runtime` vs `version cible config.yaml`
+
+Resultat attendu en fin de sortie:
+
+- `state: started`
+- `version: ...`
+- `version_latest: ...`

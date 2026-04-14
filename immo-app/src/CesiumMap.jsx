@@ -7,7 +7,12 @@ import {
 } from "./api";
 import { CESIUM_ION_TOKEN } from "./config";
 import { TOUCH_NAV_TUNING } from "./config/touchNavigationTuning";
-import { formatMarkerPrix } from "./utils/bienFormat";
+import {
+  formatMarkerPrix,
+  formatSurface,
+  getBienBadge,
+  getSelectedBienPhotos,
+} from "./utils/bienFormat";
 import {
   buildAddressAnchorAssignments,
   buildCoordinateStackAssignments,
@@ -17,6 +22,7 @@ import {
   getMarkerLabelOffset,
   getMarkerVisualState,
 } from "./utils/mapMarkerStyle";
+import { recordMapPerfEvent } from "./utils/mapPerfTelemetry";
 
 const GOOGLE_TILES_ASSET_ID = 2275207;
 
@@ -34,6 +40,9 @@ const GOOGLE_TILESET_PREMIUM_SSE = 6;
 const GOOGLE_TILESET_FAST_PHASE_MS = 420;
 const GOOGLE_TILESET_ULTRA_PHASE_MS = 2600;
 const GOOGLE_WARMUP_START_DELAY_MS = 220;
+const SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_DESKTOP = 260;
+const SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_MOBILE = 760;
+const SATELLITE_PREDICTIVE_WARMUP_FRESH_MS = 1000 * 60 * 3;
 const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
 const SATELLITE_LOAD_WATCHDOG_MS = 15000;
 const DESKTOP_RESOLUTION_SCALE = 1.22;
@@ -62,6 +71,8 @@ const DESKTOP_GLOBE_SSE_IDLE = 1.05;
 const DESKTOP_GLOBE_SSE_ULTRA = 0.9;
 const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
 const DESKTOP_QUALITY_ULTRA_DELAY_MS = 780;
+const MODE_TRANSITION_MIN_VISIBLE_MS = 620;
+const MODE_TRANSITION_VISUAL_FADE_OUT_MS = 260;
 const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
 const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
 const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
@@ -77,6 +88,86 @@ const ADAPTIVE_QUALITY_RAISE_FPS_MOBILE = 52;
 const ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP = 57;
 const MOBILE_QUALITY_PROFILE_DEFAULT = "auto";
 const MOBILE_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
+const DESKTOP_QUALITY_PROFILE_DEFAULT = "auto";
+const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
+const DESKTOP_QUALITY_PROFILE_CONFIG = {
+  auto: {
+    movingResolutionScale: DESKTOP_MOVING_RESOLUTION_SCALE,
+    movingGlobeSse: DESKTOP_GLOBE_SSE_MOVING,
+    movingTilesetSse: DESKTOP_GOOGLE_TILESET_MOVING_SSE,
+    movingMsaa: DESKTOP_MOVING_MSAA_SAMPLES,
+    idleResolutionScale: DESKTOP_RESOLUTION_SCALE,
+    idleGlobeSse: DESKTOP_GLOBE_SSE_IDLE,
+    idleTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
+    idleMsaa: DESKTOP_MSAA_SAMPLES,
+    ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
+    ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
+    ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
+    ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
+    fastTilesetSse: DESKTOP_GOOGLE_TILESET_MOVING_SSE,
+    premiumTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
+    adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
+    idleRestoreDelayMs: DESKTOP_QUALITY_RESTORE_DELAY_MS,
+    ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
+  },
+  high: {
+    movingResolutionScale: 1.08,
+    movingGlobeSse: 1.22,
+    movingTilesetSse: 8.6,
+    movingMsaa: 4,
+    idleResolutionScale: 1.34,
+    idleGlobeSse: 0.92,
+    idleTilesetSse: 4.6,
+    idleMsaa: 6,
+    ultraResolutionScaleCap: 1.56,
+    ultraGlobeSse: 0.74,
+    ultraTilesetSse: 3.0,
+    ultraMsaa: 8,
+    fastTilesetSse: 7.2,
+    premiumTilesetSse: 4.2,
+    adaptiveRaiseFps: 50,
+    idleRestoreDelayMs: 100,
+    ultraRestoreDelayMs: 520,
+  },
+  ultra: {
+    movingResolutionScale: 1.16,
+    movingGlobeSse: 0.96,
+    movingTilesetSse: 6.2,
+    movingMsaa: 6,
+    idleResolutionScale: 1.52,
+    idleGlobeSse: 0.7,
+    idleTilesetSse: 3.0,
+    idleMsaa: 8,
+    ultraResolutionScaleCap: 1.78,
+    ultraGlobeSse: 0.56,
+    ultraTilesetSse: 2.2,
+    ultraMsaa: 8,
+    fastTilesetSse: 5.4,
+    premiumTilesetSse: 3.2,
+    adaptiveRaiseFps: 42,
+    idleRestoreDelayMs: 80,
+    ultraRestoreDelayMs: 380,
+  },
+  perf: {
+    movingResolutionScale: 0.86,
+    movingGlobeSse: 1.95,
+    movingTilesetSse: 18,
+    movingMsaa: 2,
+    idleResolutionScale: 1.0,
+    idleGlobeSse: 1.45,
+    idleTilesetSse: 9.5,
+    idleMsaa: 2,
+    ultraResolutionScaleCap: 1.0,
+    ultraGlobeSse: 1.45,
+    ultraTilesetSse: 9.5,
+    ultraMsaa: 2,
+    fastTilesetSse: 14,
+    premiumTilesetSse: 9.5,
+    adaptiveRaiseFps: Number.POSITIVE_INFINITY,
+    idleRestoreDelayMs: 120,
+    ultraRestoreDelayMs: 1200,
+  },
+};
 const MOBILE_QUALITY_PROFILE_CONFIG = {
   auto: {
     movingResolutionScale: MOBILE_MOVING_RESOLUTION_SCALE,
@@ -96,54 +187,54 @@ const MOBILE_QUALITY_PROFILE_CONFIG = {
     ultraRestoreDelayMs: MOBILE_QUALITY_ULTRA_DELAY_MS,
   },
   high: {
-    movingResolutionScale: 0.88,
-    movingGlobeSse: 2.0,
-    movingTilesetSse: 18,
-    idleResolutionScale: 1.06,
-    idleGlobeSse: 1.38,
-    idleTilesetSse: 7.4,
-    ultraResolutionScaleCap: 1.14,
-    ultraGlobeSse: 1.14,
-    ultraTilesetSse: 5.9,
-    fastTilesetSse: 14,
-    premiumTilesetSse: 8.2,
+    movingResolutionScale: 0.9,
+    movingGlobeSse: 1.85,
+    movingTilesetSse: 14,
+    idleResolutionScale: 1.14,
+    idleGlobeSse: 1.2,
+    idleTilesetSse: 6.8,
+    ultraResolutionScaleCap: 1.24,
+    ultraGlobeSse: 0.98,
+    ultraTilesetSse: 4.8,
+    fastTilesetSse: 11.2,
+    premiumTilesetSse: 7.2,
     enableUltra: true,
-    adaptiveRaiseFps: 56,
-    idleRestoreDelayMs: 150,
-    ultraRestoreDelayMs: 700,
+    adaptiveRaiseFps: 50,
+    idleRestoreDelayMs: 130,
+    ultraRestoreDelayMs: 620,
   },
   ultra: {
-    movingResolutionScale: 0.96,
-    movingGlobeSse: 1.55,
-    movingTilesetSse: 11.2,
-    idleResolutionScale: 1.18,
-    idleGlobeSse: 1.02,
-    idleTilesetSse: 5.2,
-    ultraResolutionScaleCap: 1.34,
-    ultraGlobeSse: 0.86,
-    ultraTilesetSse: 3.7,
-    fastTilesetSse: 9.6,
-    premiumTilesetSse: 5.4,
+    movingResolutionScale: 1.0,
+    movingGlobeSse: 1.3,
+    movingTilesetSse: 9.0,
+    idleResolutionScale: 1.28,
+    idleGlobeSse: 0.86,
+    idleTilesetSse: 4.2,
+    ultraResolutionScaleCap: 1.48,
+    ultraGlobeSse: 0.72,
+    ultraTilesetSse: 2.8,
+    fastTilesetSse: 7.4,
+    premiumTilesetSse: 4.4,
     enableUltra: true,
-    adaptiveRaiseFps: 42,
-    idleRestoreDelayMs: 120,
-    ultraRestoreDelayMs: 580,
+    adaptiveRaiseFps: 34,
+    idleRestoreDelayMs: 100,
+    ultraRestoreDelayMs: 420,
   },
   perf: {
-    movingResolutionScale: 0.76,
-    movingGlobeSse: 2.6,
-    movingTilesetSse: 24,
-    idleResolutionScale: 0.9,
-    idleGlobeSse: 1.95,
-    idleTilesetSse: 11.5,
-    ultraResolutionScaleCap: 0.95,
-    ultraGlobeSse: 1.95,
-    ultraTilesetSse: 11.5,
-    fastTilesetSse: 18.8,
-    premiumTilesetSse: 12,
+    movingResolutionScale: 0.7,
+    movingGlobeSse: 3.0,
+    movingTilesetSse: 30,
+    idleResolutionScale: 0.82,
+    idleGlobeSse: 2.25,
+    idleTilesetSse: 16,
+    ultraResolutionScaleCap: 0.86,
+    ultraGlobeSse: 2.25,
+    ultraTilesetSse: 16,
+    fastTilesetSse: 24,
+    premiumTilesetSse: 16,
     enableUltra: false,
     adaptiveRaiseFps: Number.POSITIVE_INFINITY,
-    idleRestoreDelayMs: 120,
+    idleRestoreDelayMs: 80,
     ultraRestoreDelayMs: 1200,
   },
 };
@@ -160,7 +251,7 @@ const GLOBE_TILE_CACHE_SIZE_IOS = 650;
 const GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP = 1200;
 const GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE = 600;
 const GLOBE_LOADING_DESCENDANT_LIMIT_IOS = 220;
-const SATELLITE_CLAMP_TIMEOUT_MS = 900;
+const SATELLITE_CLAMP_TIMEOUT_MS = 1400;
 const SATELLITE_CLAMP_MAX_POSITIONS = 260;
 const SATELLITE_CLAMP_MAX_POSITIONS_MOBILE = 420;
 const PLAN_PAN_SPEED_MULTIPLIER = 0.605; // additional -20% from 0.756
@@ -176,10 +267,11 @@ const MOBILE_NEAR_ZOOM_PAN_BRAKE_MIN_FACTOR = 0.28;
 const MOBILE_NEAR_ZOOM_PAN_BRAKE_CURVE = 1.35;
 const SATELLITE_MIN_GROUND_CLEARANCE_METERS = 40; // hard floor at 40m above ground
 const SATELLITE_MARKER_HEIGHT_OFFSET_METERS = 1.7;
-const SATELLITE_MARKER_FALLBACK_HEIGHT_METERS = 40;
-const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = false;
+const SATELLITE_MARKER_FALLBACK_HEIGHT_METERS = 65;
+const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = true;
 const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE = true;
 const SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE = Number.POSITIVE_INFINITY;
+const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS = 140;
 const GOOGLE_EARTH_TOUCH_PROFILE = {
   google3dOrbitGainMultiplier: 1.28,
 };
@@ -215,6 +307,7 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   30000,
   0.58
 );
+const MOBILE_BIEN_CARD_HEIGHT = 134;
 
 function captureCamera(viewer) {
   return {
@@ -257,6 +350,89 @@ function normalizeMobileQualityProfile(value) {
     : MOBILE_QUALITY_PROFILE_DEFAULT;
 }
 
+function normalizeDesktopQualityProfile(value) {
+  return DESKTOP_QUALITY_PROFILE_VALUES.includes(value)
+    ? value
+    : DESKTOP_QUALITY_PROFILE_DEFAULT;
+}
+
+function getSatelliteMarkerLodBudget(
+  cameraHeight,
+  isMobile,
+  isMoving,
+  mobileQualityProfile = MOBILE_QUALITY_PROFILE_DEFAULT,
+  desktopQualityProfile = DESKTOP_QUALITY_PROFILE_DEFAULT
+) {
+  const profileMultiplier = isMobile
+    ? mobileQualityProfile === "perf"
+      ? 0.62
+      : mobileQualityProfile === "high"
+        ? 1.22
+        : mobileQualityProfile === "ultra"
+          ? 1.62
+          : 1
+    : desktopQualityProfile === "perf"
+      ? 0.75
+      : desktopQualityProfile === "high"
+        ? 1.25
+        : desktopQualityProfile === "ultra"
+          ? 1.62
+          : 1;
+  const applyMultiplier = (budget) => Math.max(1, Math.round(budget * profileMultiplier));
+  const applyBudget = (base) => ({
+    bienLabelBudget: applyMultiplier(base.bienLabelBudget),
+    bienPointBudget: applyMultiplier(base.bienPointBudget),
+    customLabelBudget: applyMultiplier(base.customLabelBudget),
+    customPointBudget: applyMultiplier(base.customPointBudget),
+  });
+  if (isMoving) {
+    const base = isMobile
+      ? { bienLabelBudget: 14, bienPointBudget: 40, customLabelBudget: 8, customPointBudget: 16 }
+      : { bienLabelBudget: 24, bienPointBudget: 62, customLabelBudget: 12, customPointBudget: 24 };
+    return applyBudget(base);
+  }
+
+  if (!Number.isFinite(cameraHeight)) {
+    const base = isMobile
+      ? { bienLabelBudget: 20, bienPointBudget: 54, customLabelBudget: 10, customPointBudget: 20 }
+      : { bienLabelBudget: 34, bienPointBudget: 86, customLabelBudget: 16, customPointBudget: 30 };
+    return applyBudget(base);
+  }
+
+  if (cameraHeight <= 260) {
+    const base = isMobile
+      ? { bienLabelBudget: 56, bienPointBudget: 130, customLabelBudget: 24, customPointBudget: 44 }
+      : { bienLabelBudget: 96, bienPointBudget: 190, customLabelBudget: 36, customPointBudget: 70 };
+    return applyBudget(base);
+  }
+
+  if (cameraHeight <= 780) {
+    const base = isMobile
+      ? { bienLabelBudget: 40, bienPointBudget: 96, customLabelBudget: 18, customPointBudget: 34 }
+      : { bienLabelBudget: 72, bienPointBudget: 150, customLabelBudget: 30, customPointBudget: 56 };
+    return applyBudget(base);
+  }
+
+  if (cameraHeight <= 1800) {
+    const base = isMobile
+      ? { bienLabelBudget: 30, bienPointBudget: 72, customLabelBudget: 14, customPointBudget: 28 }
+      : { bienLabelBudget: 54, bienPointBudget: 120, customLabelBudget: 24, customPointBudget: 46 };
+    return applyBudget(base);
+  }
+
+  if (cameraHeight <= 4200) {
+    const base = isMobile
+      ? { bienLabelBudget: 22, bienPointBudget: 54, customLabelBudget: 10, customPointBudget: 22 }
+      : { bienLabelBudget: 40, bienPointBudget: 92, customLabelBudget: 18, customPointBudget: 36 };
+    return applyBudget(base);
+  }
+
+  const base = isMobile
+    ? { bienLabelBudget: 14, bienPointBudget: 36, customLabelBudget: 8, customPointBudget: 16 }
+    : { bienLabelBudget: 28, bienPointBudget: 72, customLabelBudget: 14, customPointBudget: 28 };
+  return applyBudget(base);
+}
+
 function getMobileQualityProfile(value, allowUltraFromDevice) {
   const normalized = normalizeMobileQualityProfile(value);
   const baseProfile =
@@ -266,6 +442,14 @@ function getMobileQualityProfile(value, allowUltraFromDevice) {
     ...baseProfile,
     enableUltra: Boolean(baseProfile.enableUltra && allowUltraFromDevice),
   };
+}
+
+function getDesktopQualityProfile(value) {
+  const normalized = normalizeDesktopQualityProfile(value);
+  return (
+    DESKTOP_QUALITY_PROFILE_CONFIG[normalized] ||
+    DESKTOP_QUALITY_PROFILE_CONFIG[DESKTOP_QUALITY_PROFILE_DEFAULT]
+  );
 }
 
 function getPreferredResolutionScale(isMobile, isIOSDevice = false) {
@@ -288,6 +472,15 @@ function getUltraResolutionScale(isIOSDevice = false) {
     DESKTOP_RESOLUTION_SCALE,
     Math.min(DESKTOP_ULTRA_RESOLUTION_SCALE, devicePixelRatio * 1.02)
   );
+}
+
+function getDesktopProfileResolutionScale(targetScale, fallbackScale = DESKTOP_RESOLUTION_SCALE) {
+  const safeTarget = Number(targetScale);
+  if (!Number.isFinite(safeTarget) || safeTarget <= 0) return fallbackScale;
+  if (typeof window === "undefined") return safeTarget;
+  const devicePixelRatio = Number(window.devicePixelRatio) || 1;
+  const hardCap = Math.max(1, devicePixelRatio * 1.25);
+  return Math.max(0.72, Math.min(safeTarget, hardCap));
 }
 
 function canEnableMobileUltraQuality(isIOSDevice = false) {
@@ -534,6 +727,18 @@ function waitForGoogleTilesetReady(tileset) {
     return Promise.resolve(true);
   }
 
+  const initialTilesLoadedEvent = tileset.initialTilesLoaded;
+  const loadProgressEvent = tileset.tileLoadProgressEvent;
+  const hasInitialTilesEvent =
+    initialTilesLoadedEvent &&
+    typeof initialTilesLoadedEvent.addEventListener === "function";
+  const hasLoadProgressEvent =
+    loadProgressEvent && typeof loadProgressEvent.addEventListener === "function";
+
+  if (!hasInitialTilesEvent && !hasLoadProgressEvent) {
+    return Promise.resolve(Boolean(tileset.tilesLoaded));
+  }
+
   return new Promise((resolve) => {
     let finished = false;
 
@@ -541,11 +746,17 @@ function waitForGoogleTilesetReady(tileset) {
       complete(true);
     }
 
+    function handleTileLoadProgress(remainingTiles = 1) {
+      if (remainingTiles > 0 && !tileset.tilesLoaded) return;
+      complete(true);
+    }
+
     function complete(didLoad = false) {
       if (finished) return;
       finished = true;
       window.clearTimeout(timeoutId);
-      tileset.initialTilesLoaded.removeEventListener(handleInitialTilesLoaded);
+      initialTilesLoadedEvent?.removeEventListener?.(handleInitialTilesLoaded);
+      loadProgressEvent?.removeEventListener?.(handleTileLoadProgress);
       resolve(didLoad);
     }
 
@@ -554,7 +765,12 @@ function waitForGoogleTilesetReady(tileset) {
       GOOGLE_TILESET_READY_TIMEOUT_MS
     );
 
-    tileset.initialTilesLoaded.addEventListener(handleInitialTilesLoaded);
+    if (hasInitialTilesEvent) {
+      initialTilesLoadedEvent.addEventListener(handleInitialTilesLoaded);
+    }
+    if (hasLoadProgressEvent) {
+      loadProgressEvent.addEventListener(handleTileLoadProgress);
+    }
   });
 }
 
@@ -921,6 +1137,11 @@ function computeEffectivePanSpeed({
   return speedAtSync * baseFactor * nearZoomBrakeFactor;
 }
 
+function getBienPreviewPhoto(bien) {
+  const photos = getSelectedBienPhotos(bien);
+  return Array.isArray(photos) && photos.length > 0 ? photos[0] : "";
+}
+
 export default function CesiumMap({
   biens,
   allBiens = [],
@@ -938,6 +1159,7 @@ export default function CesiumMap({
   hapticsEnabled = true,
   touchNavTuning = TOUCH_NAV_TUNING,
   mobileQualityProfile = MOBILE_QUALITY_PROFILE_DEFAULT,
+  desktopQualityProfile = DESKTOP_QUALITY_PROFILE_DEFAULT,
   isMobile = false,
   isIOSDevice = false,
   isStandalonePwa = false,
@@ -984,6 +1206,8 @@ export default function CesiumMap({
   const markerDataByIdRef = useRef(new Map());
   const modeRef = useRef(null);
   const modeTransitionTimeoutRef = useRef(null);
+  const modeTransitionVisualTimeoutRef = useRef(null);
+  const modeTransitionStartedAtRef = useRef(0);
   const tiltTransitionTimeoutRef = useRef(null);
   const tiltTransitionLockRef = useRef(false);
   const googleQualityTimeoutRef = useRef(null);
@@ -1010,16 +1234,25 @@ export default function CesiumMap({
   const zoneCameraRestoreDoneRef = useRef(false);
   const hasInitialFlyRef = useRef(false);
   const mapModeRef = useRef(canUseGoogle3D ? mapMode : "osm");
+  const hasRecordedFirstSatelliteReadyRef = useRef(false);
   const componentMountedRef = useRef(true);
   const touchNavTuningRef = useRef(touchNavTuning || TOUCH_NAV_TUNING);
   const mobileQualityProfileRef = useRef(
     normalizeMobileQualityProfile(mobileQualityProfile)
+  );
+  const desktopQualityProfileRef = useRef(
+    normalizeDesktopQualityProfile(desktopQualityProfile)
   );
   const isTiltedRef = useRef(false);
   const ignoreNextClickRef = useRef(false);
   const longPressTimerRef = useRef(null);
   const longPressStartRef = useRef({ x: 0, y: 0, active: false });
   const markerStackByBienIdRef = useRef(new Map());
+  const customMarkerEntitiesRef = useRef([]);
+  const markerLodRuntimeRef = useRef({
+    nextUpdateAt: 0,
+    lastSignature: "",
+  });
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -1074,6 +1307,11 @@ export default function CesiumMap({
   const [modeTransition, setModeTransition] = useState({
     active: false,
     target: null,
+  });
+  const [modeTransitionVisual, setModeTransitionVisual] = useState({
+    visible: false,
+    fading: false,
+    snapshotDataUrl: "",
   });
   const isSatelliteReadyRef = useRef(false);
   const isTouchNavigationDevice = isMobile && hasTouchInput();
@@ -1130,6 +1368,11 @@ export default function CesiumMap({
     mobileQualityProfileRef.current =
       normalizeMobileQualityProfile(mobileQualityProfile);
   }, [mobileQualityProfile]);
+
+  useEffect(() => {
+    desktopQualityProfileRef.current =
+      normalizeDesktopQualityProfile(desktopQualityProfile);
+  }, [desktopQualityProfile]);
 
   useEffect(() => {
     const zoneCacheKey = buildZoneCacheKey(searchZone);
@@ -1242,6 +1485,9 @@ export default function CesiumMap({
       if (satelliteLoadWatchdogTimeoutRef.current) {
         window.clearTimeout(satelliteLoadWatchdogTimeoutRef.current);
       }
+      if (modeTransitionVisualTimeoutRef.current) {
+        window.clearTimeout(modeTransitionVisualTimeoutRef.current);
+      }
       if (longPressTimerRef.current) {
         window.clearTimeout(longPressTimerRef.current);
       }
@@ -1260,11 +1506,38 @@ export default function CesiumMap({
     satelliteLoadWatchdogTimeoutRef.current = null;
   }
 
+  function clearModeTransitionVisualTimeout() {
+    if (!modeTransitionVisualTimeoutRef.current) return;
+    window.clearTimeout(modeTransitionVisualTimeoutRef.current);
+    modeTransitionVisualTimeoutRef.current = null;
+  }
+
+  function captureTransitionSnapshot() {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed()) return "";
+    try {
+      viewer.scene.requestRender();
+      const canvas = viewer.canvas;
+      if (!canvas || typeof canvas.toDataURL !== "function") return "";
+      return canvas.toDataURL("image/jpeg", 0.62);
+    } catch {
+      // CORS-tainted canvases can fail to export; fallback to blur-only overlay.
+      return "";
+    }
+  }
+
   function startModeTransition(targetMode) {
     if (modeTransitionTimeoutRef.current) {
       window.clearTimeout(modeTransitionTimeoutRef.current);
       modeTransitionTimeoutRef.current = null;
     }
+    clearModeTransitionVisualTimeout();
+    modeTransitionStartedAtRef.current = Date.now();
+    setModeTransitionVisual({
+      visible: true,
+      fading: false,
+      snapshotDataUrl: captureTransitionSnapshot(),
+    });
 
     setModeTransition({
       active: true,
@@ -1275,6 +1548,33 @@ export default function CesiumMap({
   function finishModeTransition() {
     if (modeTransitionTimeoutRef.current) {
       window.clearTimeout(modeTransitionTimeoutRef.current);
+    }
+    clearModeTransitionVisualTimeout();
+    const elapsedMs = Date.now() - (modeTransitionStartedAtRef.current || 0);
+    const delayBeforeFadeMs = Math.max(0, MODE_TRANSITION_MIN_VISIBLE_MS - elapsedMs);
+    const startFadeOut = () => {
+      setModeTransitionVisual((previous) => {
+        if (!previous.visible) return previous;
+        return {
+          ...previous,
+          fading: true,
+        };
+      });
+      modeTransitionVisualTimeoutRef.current = window.setTimeout(() => {
+        setModeTransitionVisual({
+          visible: false,
+          fading: false,
+          snapshotDataUrl: "",
+        });
+        modeTransitionVisualTimeoutRef.current = null;
+      }, MODE_TRANSITION_VISUAL_FADE_OUT_MS);
+    };
+    if (delayBeforeFadeMs > 0) {
+      modeTransitionVisualTimeoutRef.current = window.setTimeout(() => {
+        startFadeOut();
+      }, delayBeforeFadeMs);
+    } else {
+      startFadeOut();
     }
 
     modeTransitionTimeoutRef.current = window.setTimeout(() => {
@@ -1292,6 +1592,14 @@ export default function CesiumMap({
       if (previousValue === nextReadyValue) {
         return previousValue;
       }
+      if (!previousValue && nextReadyValue) {
+        const readyDurationMs = Date.now() - appBootTimestampRef.current;
+        if (!hasRecordedFirstSatelliteReadyRef.current) {
+          recordMapPerfEvent("satellite_ready_first", { durationMs: readyDurationMs });
+          hasRecordedFirstSatelliteReadyRef.current = true;
+        }
+        recordMapPerfEvent("satellite_ready", { durationMs: readyDurationMs });
+      }
       return nextReadyValue;
     });
   }
@@ -1304,6 +1612,20 @@ export default function CesiumMap({
       }
       return nextValue;
     });
+  }
+
+  function setSceneGoogleTilesetsVisibility(viewer, visible, preferredTileset = null) {
+    if (!viewer || viewer.isDestroyed()) return;
+    const primitives = viewer.scene.primitives;
+    for (let index = 0; index < primitives.length; index += 1) {
+      const primitive = primitives.get(index);
+      if (!(primitive instanceof Cesium.Cesium3DTileset)) continue;
+      if (!visible) {
+        primitive.show = false;
+        continue;
+      }
+      primitive.show = primitive === preferredTileset;
+    }
   }
 
   function applyEntityVisualState(entity) {
@@ -2113,7 +2435,9 @@ function findPickedInteractiveData(
     }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
     handler.setInputAction((movement) => {
-      if (isMobile || !isAwaitingMarkerPlacementRef.current) {
+      const isPlacementModeActive =
+        Boolean(placingBienIdRef.current) || isAwaitingMarkerPlacementRef.current;
+      if (isMobile || !isPlacementModeActive) {
         hidePlacementGhost();
         return;
       }
@@ -2684,6 +3008,7 @@ function findPickedInteractiveData(
 
       viewerRef.current = null;
       entitiesRef.current = [];
+      customMarkerEntitiesRef.current = [];
       tilesetRef.current = null;
       tilesetPromiseRef.current = null;
       satelliteWarmupPromiseRef.current = null;
@@ -2750,21 +3075,21 @@ function findPickedInteractiveData(
     let cancelled = false;
     let warmupTimerId = null;
     let googleLateReadyTileset = null;
+    let googleLateReadyEvent = null;
     let googleLateReadyListener = null;
     let googleLateReadyTimeoutId = null;
     const useTouchNavigation = isMobile && hasTouchInput();
 
     const clearGoogleLateReadyListener = () => {
-      if (googleLateReadyTileset && googleLateReadyListener) {
+      if (googleLateReadyEvent && googleLateReadyListener) {
         try {
-          googleLateReadyTileset.tileLoadProgressEvent?.removeEventListener(
-            googleLateReadyListener
-          );
+          googleLateReadyEvent.removeEventListener(googleLateReadyListener);
         } catch (error) {
           console.warn("Nettoyage listener satellite ignore (non bloquant):", error);
         }
       }
       googleLateReadyTileset = null;
+      googleLateReadyEvent = null;
       googleLateReadyListener = null;
       if (googleLateReadyTimeoutId) {
         window.clearTimeout(googleLateReadyTimeoutId);
@@ -2830,7 +3155,7 @@ function findPickedInteractiveData(
             desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
               if (cancelled) return;
               applyDesktopUltraQuality();
-            }, DESKTOP_QUALITY_ULTRA_DELAY_MS);
+            }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
           }
         }
       }, SATELLITE_MOVE_RECOVERY_DELAY_MS);
@@ -2867,17 +3192,24 @@ function findPickedInteractiveData(
       mobileQualityProfileRef.current,
       allowMobileUltraFromDevice
     );
+    const selectedDesktopQualityProfile = getDesktopQualityProfile(
+      desktopQualityProfileRef.current
+    );
 
     const applyDesktopMovingQuality = (tileset = tilesetRef.current) => {
       if (isMobile) return;
 
       adaptiveQualityStateRef.current.isUltraActive = false;
-      viewer.scene.msaaSamples = DESKTOP_MOVING_MSAA_SAMPLES;
-      viewer.resolutionScale = DESKTOP_MOVING_RESOLUTION_SCALE;
-      viewer.scene.globe.maximumScreenSpaceError = DESKTOP_GLOBE_SSE_MOVING;
+      viewer.scene.msaaSamples = selectedDesktopQualityProfile.movingMsaa;
+      viewer.resolutionScale = getDesktopProfileResolutionScale(
+        selectedDesktopQualityProfile.movingResolutionScale,
+        DESKTOP_MOVING_RESOLUTION_SCALE
+      );
+      viewer.scene.globe.maximumScreenSpaceError =
+        selectedDesktopQualityProfile.movingGlobeSse;
 
       if (tileset && modeRef.current === "google3d") {
-        tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_MOVING_SSE;
+        tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.movingTilesetSse;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
         tileset.cullRequestsWhileMoving = false;
@@ -2894,12 +3226,16 @@ function findPickedInteractiveData(
       if (isMobile) return;
 
       adaptiveQualityStateRef.current.isUltraActive = false;
-      viewer.scene.msaaSamples = DESKTOP_MSAA_SAMPLES;
-      viewer.resolutionScale = getPreferredResolutionScale(false, isIOSDevice);
-      viewer.scene.globe.maximumScreenSpaceError = DESKTOP_GLOBE_SSE_IDLE;
+      viewer.scene.msaaSamples = selectedDesktopQualityProfile.idleMsaa;
+      viewer.resolutionScale = getDesktopProfileResolutionScale(
+        selectedDesktopQualityProfile.idleResolutionScale,
+        getPreferredResolutionScale(false, isIOSDevice)
+      );
+      viewer.scene.globe.maximumScreenSpaceError =
+        selectedDesktopQualityProfile.idleGlobeSse;
 
       if (tileset && modeRef.current === "google3d") {
-        tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_IDLE_SSE;
+        tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.idleTilesetSse;
         tileset.dynamicScreenSpaceError = false;
         tileset.foveatedScreenSpaceError = false;
         tileset.cullRequestsWhileMoving = false;
@@ -2916,9 +3252,10 @@ function findPickedInteractiveData(
       if (isMobile) return;
 
       adaptiveQualityStateRef.current.isUltraActive = true;
-      viewer.scene.globe.maximumScreenSpaceError = DESKTOP_GLOBE_SSE_ULTRA;
+      viewer.scene.globe.maximumScreenSpaceError =
+        selectedDesktopQualityProfile.ultraGlobeSse;
       if (tileset && modeRef.current === "google3d") {
-        tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_ULTRA_SSE;
+        tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.ultraTilesetSse;
         tileset.dynamicScreenSpaceError = false;
         tileset.foveatedScreenSpaceError = false;
         tileset.cullRequestsWhileMoving = false;
@@ -3014,8 +3351,11 @@ function findPickedInteractiveData(
 
     const applyUltraViewerQuality = () => {
       if (isMobile) return;
-      viewer.scene.msaaSamples = DESKTOP_ULTRA_MSAA_SAMPLES;
-      viewer.resolutionScale = getUltraResolutionScale(isIOSDevice);
+      viewer.scene.msaaSamples = selectedDesktopQualityProfile.ultraMsaa;
+      viewer.resolutionScale = getDesktopProfileResolutionScale(
+        selectedDesktopQualityProfile.ultraResolutionScaleCap,
+        getUltraResolutionScale(isIOSDevice)
+      );
       viewer.scene.requestRender();
     };
 
@@ -3041,13 +3381,15 @@ function findPickedInteractiveData(
 
       clearDesktopQualityRestoreTimeouts();
       applyDesktopMovingQuality(tileset);
-      tileset.maximumScreenSpaceError = DESKTOP_GOOGLE_TILESET_MOVING_SSE;
+      tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.fastTilesetSse;
       tileset.dynamicScreenSpaceError = true;
       tileset.foveatedScreenSpaceError = true;
       tileset.cullRequestsWhileMoving = false;
       viewer.scene.requestRender();
       googleQualityTimeoutRef.current = window.setTimeout(() => {
         if (cancelled || !tilesetRef.current) return;
+        tilesetRef.current.maximumScreenSpaceError =
+          selectedDesktopQualityProfile.premiumTilesetSse;
         applyDesktopIdleQuality(tilesetRef.current);
       }, GOOGLE_TILESET_FAST_PHASE_MS);
 
@@ -3145,7 +3487,7 @@ function findPickedInteractiveData(
         return;
       }
 
-      if (!isMobile && avgFps >= ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP) {
+      if (!isMobile && avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps) {
         applyDesktopUltraQuality();
       }
     };
@@ -3181,7 +3523,7 @@ function findPickedInteractiveData(
               : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES,
             maximumScreenSpaceError: isMobile
               ? selectedMobileQualityProfile.premiumTilesetSse
-              : GOOGLE_TILESET_PREMIUM_SSE,
+              : selectedDesktopQualityProfile.premiumTilesetSse,
           }
         )
           .then((tileset) => {
@@ -3204,7 +3546,7 @@ function findPickedInteractiveData(
               : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES;
             tileset.maximumScreenSpaceError = isMobile
               ? selectedMobileQualityProfile.premiumTilesetSse
-              : GOOGLE_TILESET_PREMIUM_SSE;
+              : selectedDesktopQualityProfile.premiumTilesetSse;
             tilesetRef.current = tileset;
             setSatelliteReadySafely(Boolean(tileset.tilesLoaded));
             if (!viewer.scene.primitives.contains(tileset)) {
@@ -3251,6 +3593,13 @@ function findPickedInteractiveData(
             return waitForGoogleTilesetReady(tileset).then((didLoad) => {
               if (didLoad || tileset.tilesLoaded) {
                 setSatelliteReadySafely(true);
+                const zoneCacheKey = activeZoneCacheKeyRef.current;
+                if (zoneCacheKey) {
+                  updateZoneCacheEntry(zoneCacheKey, (previousEntry) => ({
+                    ...previousEntry,
+                    google3dWarmAt: Date.now(),
+                  }));
+                }
                 setTilesReadyVersion((value) => value + 1);
                 viewer.scene.requestRender();
               }
@@ -3295,9 +3644,7 @@ function findPickedInteractiveData(
       resetAdaptiveQualityStats();
       applyBalancedViewerQuality();
       viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
-      if (tilesetRef.current) {
-        tilesetRef.current.show = false;
-      }
+      setSceneGoogleTilesetsVisibility(viewer, false);
 
       viewer.scene.globe.show = true;
       viewer.scene.skyBox.show = false;
@@ -3338,6 +3685,7 @@ function findPickedInteractiveData(
         viewer.terrainProvider = worldTerrainProviderRef.current;
       }
 
+      setSceneGoogleTilesetsVisibility(viewer, true, tileset);
       tileset.show = true;
       applyFastThenPremiumGoogleQuality(tileset);
       viewer.scene.requestRender();
@@ -3352,6 +3700,7 @@ function findPickedInteractiveData(
         clearSatelliteLoadWatchdogTimeout();
         setSatelliteIssueMessage("");
         setSatelliteReadySafely(true);
+        finishModeTransition();
         if (isMobile) {
           applyMobileIdleQuality(tileset);
         }
@@ -3370,7 +3719,29 @@ function findPickedInteractiveData(
         clearGoogleLateReadyListener();
         markSatelliteReady();
       };
-      tileset.tileLoadProgressEvent.addEventListener(googleLateReadyListener);
+      googleLateReadyEvent =
+        tileset.tileLoadProgressEvent &&
+        typeof tileset.tileLoadProgressEvent.addEventListener === "function"
+          ? tileset.tileLoadProgressEvent
+          : tileset.initialTilesLoaded &&
+              typeof tileset.initialTilesLoaded.addEventListener === "function"
+            ? tileset.initialTilesLoaded
+            : null;
+      if (googleLateReadyEvent) {
+        googleLateReadyEvent.addEventListener(googleLateReadyListener);
+      } else {
+        // Some Cesium builds expose no event here; poll tilesLoaded before releasing transition.
+        const fallbackReadyStartedAt = Date.now();
+        const pollFallbackReady = () => {
+          if (cancelled || modeRef.current !== "google3d") return;
+          if (tileset.tilesLoaded || Date.now() - fallbackReadyStartedAt >= 4200) {
+            markSatelliteReady();
+            return;
+          }
+          window.setTimeout(pollFallbackReady, 170);
+        };
+        pollFallbackReady();
+      }
       googleLateReadyTimeoutId = window.setTimeout(() => {
         clearGoogleLateReadyListener();
       }, SATELLITE_LOAD_WATCHDOG_MS + 4000);
@@ -3426,7 +3797,11 @@ function findPickedInteractiveData(
       if (!canUseGoogle3D && mapModeRef.current === "google3d") {
         onSetMapModeRef.current?.("osm");
       }
-      if (modeRef.current === requestedMode) return;
+      if (modeRef.current === requestedMode) {
+        finishModeTransition();
+        return;
+      }
+      const modeSwitchStartedAt = performance.now();
 
       const cameraState = captureCamera(viewer);
       if (requestedMode !== "google3d") {
@@ -3445,6 +3820,10 @@ function findPickedInteractiveData(
         } else {
           enableOsm();
         }
+        recordMapPerfEvent("mode_switch_success", {
+          targetMode: requestedMode,
+          durationMs: performance.now() - modeSwitchStartedAt,
+        });
       } catch (error) {
         console.error("Erreur changement de mode carte :", error);
         const satelliteStillActive =
@@ -3454,18 +3833,31 @@ function findPickedInteractiveData(
           mapModeRef.current = "google3d";
           setSatelliteIssueMessage("");
           setSatelliteReadySafely(true);
+          recordMapPerfEvent("mode_switch_success", {
+            targetMode: "google3d",
+            durationMs: performance.now() - modeSwitchStartedAt,
+            recovered: true,
+          });
         } else {
+          recordMapPerfEvent("mode_switch_failure", {
+            targetMode: requestedMode,
+            durationMs: performance.now() - modeSwitchStartedAt,
+            reason: String(error?.message || error?.code || "unknown"),
+          });
           setSatelliteIssueMessage(buildSatelliteFailureMessage(error));
           enableOsm();
           if (requestedMode === "google3d") {
             onSetMapModeRef.current?.("osm");
           }
+          finishModeTransition();
         }
       } finally {
         if (!cancelled) {
           restoreCamera(viewer, cameraState);
           viewer.scene.requestRender();
-          finishModeTransition();
+          if (requestedMode !== "google3d") {
+            finishModeTransition();
+          }
         }
       }
     }
@@ -3493,8 +3885,8 @@ function findPickedInteractiveData(
         desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
           if (cancelled) return;
           applyDesktopUltraQuality();
-        }, DESKTOP_QUALITY_ULTRA_DELAY_MS);
-      }, DESKTOP_QUALITY_RESTORE_DELAY_MS);
+        }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
+      }, selectedDesktopQualityProfile.idleRestoreDelayMs);
     };
 
     const handleMobileMoveStart = () => {
@@ -3537,14 +3929,29 @@ function findPickedInteractiveData(
 
     viewer.scene.postRender.addEventListener(handleAdaptiveFrameQuality);
 
-    // Keep mobile startup smooth: warmup runs only on desktop.
-    if (!isMobile && canUseGoogle3D && CESIUM_ION_TOKEN) {
+    const hasPredictiveZoneContext = Boolean(String(searchZone || "").trim()) || syncVersion > 0;
+    const activeZoneKey = activeZoneCacheKeyRef.current;
+    const activeZoneEntry = readZoneCacheEntry(activeZoneKey);
+    const activeZoneWarmAt = Number(activeZoneEntry?.google3dWarmAt) || 0;
+    const hasFreshZoneWarmup =
+      activeZoneWarmAt > 0 &&
+      Date.now() - activeZoneWarmAt < SATELLITE_PREDICTIVE_WARMUP_FRESH_MS;
+    const shouldRunPredictiveWarmup =
+      canUseGoogle3D &&
+      CESIUM_ION_TOKEN &&
+      (mapModeRef.current === "google3d" || hasPredictiveZoneContext || !isMobile) &&
+      !hasFreshZoneWarmup;
+
+    if (shouldRunPredictiveWarmup) {
+      const warmupDelayMs = isMobile
+        ? SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_MOBILE
+        : Math.max(GOOGLE_WARMUP_START_DELAY_MS, SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_DESKTOP);
       warmupTimerId = window.setTimeout(() => {
         if (cancelled) return;
         warmupGoogleUntilReady().catch((error) => {
           console.error("Erreur prechargement Google 3D :", error);
         });
-      }, GOOGLE_WARMUP_START_DELAY_MS);
+      }, warmupDelayMs);
     }
 
     applyMode();
@@ -3568,6 +3975,7 @@ function findPickedInteractiveData(
         window.clearTimeout(modeTransitionTimeoutRef.current);
         modeTransitionTimeoutRef.current = null;
       }
+      clearModeTransitionVisualTimeout();
       if (warmupTimerId) {
         window.clearTimeout(warmupTimerId);
       }
@@ -3587,7 +3995,14 @@ function findPickedInteractiveData(
         target: null,
       });
     };
-  }, [mapMode, canUseGoogle3D, mobileQualityProfile]);
+  }, [
+    mapMode,
+    canUseGoogle3D,
+    mobileQualityProfile,
+    desktopQualityProfile,
+    searchZone,
+    syncVersion,
+  ]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -3599,6 +4014,7 @@ function findPickedInteractiveData(
       const currentSelectedBienId = selectedBienIdRef.current;
       viewer.entities.removeAll();
       entitiesRef.current = [];
+      customMarkerEntitiesRef.current = [];
       markerDataByIdRef.current = new Map();
       markerStackByBienIdRef.current = new Map();
 
@@ -3868,12 +4284,15 @@ function findPickedInteractiveData(
         });
 
         entity.customMarkerData = marker;
+        customMarkerEntitiesRef.current.push(entity);
         customEntitiesByIndex[markerIndex] = entity;
       });
 
       const refineMarkerHeightsWithClamp = async () => {
+        const refineStartedAt = performance.now();
         const clampedBienPositions = [...finalBienPositions];
         const clampedCustomPositions = [...finalCustomPositions];
+        const totalClampCandidateCount = rawBienPositions.length + rawCustomPositions.length;
         try {
           const maxClampPositions = isMobile
             ? SATELLITE_CLAMP_MAX_POSITIONS_MOBILE
@@ -3952,6 +4371,10 @@ function findPickedInteractiveData(
         if (cancelled) return;
         applyBienEntityPositions(clampedBienPositions);
         applyCustomEntityPositions(clampedCustomPositions);
+        recordMapPerfEvent("marker_refine_complete", {
+          durationMs: performance.now() - refineStartedAt,
+          count: totalClampCandidateCount,
+        });
         viewer.scene.requestRender();
       };
 
@@ -4001,6 +4424,194 @@ function findPickedInteractiveData(
     });
     viewer.scene.requestRender();
   }, [selectedBienId]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    let cancelled = false;
+
+    const applyMarkerLod = () => {
+      if (cancelled || !viewer || viewer.isDestroyed()) return;
+
+      const now = performance.now();
+      if (now < markerLodRuntimeRef.current.nextUpdateAt) return;
+      markerLodRuntimeRef.current.nextUpdateAt =
+        now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
+
+      const isSatelliteMode =
+        modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
+      const bienEntities = entitiesRef.current;
+      const customEntities = customMarkerEntitiesRef.current;
+
+      if (!Array.isArray(bienEntities) || bienEntities.length === 0) return;
+
+      const selectedId = selectedBienIdRef.current;
+      let changed = false;
+
+      if (!isSatelliteMode) {
+        const signature = `osm|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
+        if (markerLodRuntimeRef.current.lastSignature === signature) return;
+        markerLodRuntimeRef.current.lastSignature = signature;
+
+        bienEntities.forEach((entity) => {
+          const shouldShowPoint = entity.showPointByPriority !== false;
+          if (entity.point?.show !== shouldShowPoint) {
+            entity.point.show = shouldShowPoint;
+            changed = true;
+          }
+          if (entity.label?.show !== true) {
+            entity.label.show = true;
+            changed = true;
+          }
+        });
+
+        customEntities.forEach((entity) => {
+          if (entity.point?.show !== true) {
+            entity.point.show = true;
+            changed = true;
+          }
+          if (entity.label?.show !== true) {
+            entity.label.show = true;
+            changed = true;
+          }
+        });
+
+        if (changed) viewer.scene.requestRender();
+        return;
+      }
+
+      const cameraPosition = viewer.camera?.positionWC;
+      if (!cameraPosition) return;
+      const cameraHeight = getCameraHeight(viewer);
+      const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
+      const currentMobileProfile = normalizeMobileQualityProfile(
+        mobileQualityProfileRef.current
+      );
+      const currentDesktopProfile = normalizeDesktopQualityProfile(
+        desktopQualityProfileRef.current
+      );
+      const lodBudget = getSatelliteMarkerLodBudget(
+        cameraHeight,
+        isMobile,
+        isMoving,
+        currentMobileProfile,
+        currentDesktopProfile
+      );
+      const cameraBucket = Number.isFinite(cameraHeight)
+        ? Math.round(Math.min(12000, cameraHeight) / 140)
+        : -1;
+      const signature = [
+        "sat",
+        isMoving ? 1 : 0,
+        cameraBucket,
+        lodBudget.bienLabelBudget,
+        lodBudget.bienPointBudget,
+        lodBudget.customLabelBudget,
+        lodBudget.customPointBudget,
+        isMobile ? currentMobileProfile : currentDesktopProfile,
+        bienEntities.length,
+        customEntities.length,
+        selectedId ?? "",
+      ].join("|");
+      if (markerLodRuntimeRef.current.lastSignature === signature) return;
+      markerLodRuntimeRef.current.lastSignature = signature;
+
+      const bienRanked = bienEntities
+        .map((entity) => ({
+          entity,
+          distanceSquared: Cesium.Cartesian3.distanceSquared(
+            cameraPosition,
+            entity.position?.getValue?.(viewer.clock.currentTime) || cameraPosition
+          ),
+        }))
+        .sort((left, right) => left.distanceSquared - right.distanceSquared);
+      const customRanked = customEntities
+        .map((entity) => ({
+          entity,
+          distanceSquared: Cesium.Cartesian3.distanceSquared(
+            cameraPosition,
+            entity.position?.getValue?.(viewer.clock.currentTime) || cameraPosition
+          ),
+        }))
+        .sort((left, right) => left.distanceSquared - right.distanceSquared);
+
+      const bienLabelVisibleSet = new Set(
+        bienRanked.slice(0, lodBudget.bienLabelBudget).map((entry) => entry.entity)
+      );
+      const bienPointVisibleSet = new Set(
+        bienRanked.slice(0, lodBudget.bienPointBudget).map((entry) => entry.entity)
+      );
+      const customLabelVisibleSet = new Set(
+        customRanked.slice(0, lodBudget.customLabelBudget).map((entry) => entry.entity)
+      );
+      const customPointVisibleSet = new Set(
+        customRanked.slice(0, lodBudget.customPointBudget).map((entry) => entry.entity)
+      );
+
+      bienEntities.forEach((entity) => {
+        const bienId = entity.bienData?.id;
+        const isSelected = bienId != null && bienId === selectedId;
+        const shouldShowPointBase = entity.showPointByPriority !== false;
+        const shouldShowPoint =
+          isSelected || (shouldShowPointBase && bienPointVisibleSet.has(entity));
+        const shouldShowLabel = isSelected || bienLabelVisibleSet.has(entity);
+        if (entity.point?.show !== shouldShowPoint) {
+          entity.point.show = shouldShowPoint;
+          changed = true;
+        }
+        if (entity.label?.show !== shouldShowLabel) {
+          entity.label.show = shouldShowLabel;
+          changed = true;
+        }
+      });
+
+      customEntities.forEach((entity) => {
+        const shouldShowPoint = customPointVisibleSet.has(entity);
+        const shouldShowLabel = customLabelVisibleSet.has(entity);
+        if (entity.point?.show !== shouldShowPoint) {
+          entity.point.show = shouldShowPoint;
+          changed = true;
+        }
+        if (entity.label?.show !== shouldShowLabel) {
+          entity.label.show = shouldShowLabel;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        viewer.scene.requestRender();
+      }
+    };
+
+    const invalidateMarkerLod = () => {
+      markerLodRuntimeRef.current.nextUpdateAt = 0;
+      markerLodRuntimeRef.current.lastSignature = "";
+      applyMarkerLod();
+    };
+
+    viewer.scene.postRender.addEventListener(applyMarkerLod);
+    viewer.camera.moveStart.addEventListener(invalidateMarkerLod);
+    viewer.camera.moveEnd.addEventListener(invalidateMarkerLod);
+    applyMarkerLod();
+
+    return () => {
+      cancelled = true;
+      markerLodRuntimeRef.current.nextUpdateAt = 0;
+      markerLodRuntimeRef.current.lastSignature = "";
+      if (!viewer.isDestroyed()) {
+        viewer.scene.postRender.removeEventListener(applyMarkerLod);
+        viewer.camera.moveStart.removeEventListener(invalidateMarkerLod);
+        viewer.camera.moveEnd.removeEventListener(invalidateMarkerLod);
+      }
+    };
+  }, [
+    isMobile,
+    tilesReadyVersion,
+    selectedBienId,
+    mobileQualityProfile,
+    desktopQualityProfile,
+  ]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -4478,8 +5089,15 @@ function findPickedInteractiveData(
   };
 
   const isMapModeTransitioning = modeTransition.active;
+  const isModeTransitionVisualVisible =
+    modeTransitionVisual.visible || isMapModeTransitioning;
+  const modeTransitionVisualOpacity =
+    modeTransitionVisual.visible && modeTransitionVisual.fading ? 0 : 1;
+  const hasModeTransitionSnapshot = Boolean(modeTransitionVisual.snapshotDataUrl);
+  const isLiveSatelliteMode =
+    modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
   const currentResolvedMode =
-    modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+    isLiveSatelliteMode
       ? "google3d"
       : canUseGoogle3D
         ? resolveMode(mapModeRef.current)
@@ -4504,8 +5122,7 @@ function findPickedInteractiveData(
   const showSatelliteButtonSpinner =
     !hasVisibleSatelliteIssue &&
     (isSatelliteTogglePending || isSatelliteSwitchingTo3D);
-  const isMapModeToggleDisabled =
-    !canUseGoogle3D || isMapModeTransitioning;
+  const isMapModeToggleDisabled = !canUseGoogle3D;
   const mapModeButtonLabel =
     currentResolvedMode === "google3d"
       ? "Vue plan"
@@ -4541,10 +5158,57 @@ function findPickedInteractiveData(
       : 68
     : 20;
 
+  function forcePlanModeImmediate(options = {}) {
+    const { keepTransition = false } = options;
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed()) return;
+
+    modeRef.current = "osm";
+    mapModeRef.current = "osm";
+
+    setSceneGoogleTilesetsVisibility(viewer, false);
+
+    viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
+    viewer.scene.globe.show = true;
+    viewer.scene.skyBox.show = false;
+    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
+
+    if (osmImageryLayerRef.current) {
+      osmImageryLayerRef.current.show = true;
+      osmImageryLayerRef.current.alpha = 1;
+    }
+
+    setIsTilted(false);
+    tiltToggleBaseRangeRef.current = null;
+    setSatelliteIssueMessage("");
+    setIsSatelliteReady(false);
+    if (!keepTransition) {
+      setModeTransition({
+        active: false,
+        target: null,
+      });
+    }
+    setTilesReadyVersion((value) => value + 1);
+    viewer.scene.requestRender();
+  }
+
   function handleToggleMapMode() {
     if (!canUseGoogle3D) return;
-    if (isMapModeTransitioning) return;
-    const nextMode = currentResolvedMode === "google3d" ? "osm" : "google3d";
+    if (isLiveSatelliteMode || mapMode === "google3d") {
+      startModeTransition("osm");
+      forcePlanModeImmediate({ keepTransition: true });
+      if (onSetMapModeRef.current) {
+        onSetMapModeRef.current("osm");
+      } else {
+        onToggleMapMode?.();
+      }
+      return;
+    }
+
+    const nextMode = "google3d";
+    if (isMapModeTransitioning) {
+      recordMapPerfEvent("mode_switch_queued", { targetMode: nextMode });
+    }
     if (nextMode === "google3d") {
       setSatelliteIssueMessage("");
     }
@@ -4584,13 +5248,61 @@ function findPickedInteractiveData(
           inset: 0,
           zIndex: 4,
           pointerEvents: "none",
-          opacity: isMapModeTransitioning ? 1 : 0,
-          transition: "opacity 220ms ease",
-          background:
-            "linear-gradient(180deg, rgba(8, 15, 28, 0.16) 0%, rgba(8, 15, 28, 0.28) 100%)",
-          backdropFilter: isMapModeTransitioning ? "blur(3px)" : "blur(0px)",
+          opacity: isModeTransitionVisualVisible ? modeTransitionVisualOpacity : 0,
+          transition: modeTransitionVisual.fading
+            ? `opacity ${MODE_TRANSITION_VISUAL_FADE_OUT_MS}ms ease`
+            : "opacity 120ms ease",
         }}
       >
+        {hasModeTransitionSnapshot ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              backgroundImage: `url(${modeTransitionVisual.snapshotDataUrl})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              filter: "blur(12px) saturate(1.04)",
+              transform: "scale(1.03)",
+              opacity: 0.92,
+            }}
+          />
+        ) : null}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              hasModeTransitionSnapshot
+                ? "linear-gradient(180deg, rgba(8, 15, 28, 0.20) 0%, rgba(8, 15, 28, 0.30) 100%)"
+                : "linear-gradient(180deg, rgba(240, 244, 250, 0.88) 0%, rgba(225, 232, 242, 0.92) 100%)",
+            backdropFilter: isModeTransitionVisualVisible ? "blur(4px)" : "blur(0px)",
+            WebkitBackdropFilter: isModeTransitionVisualVisible ? "blur(4px)" : "blur(0px)",
+          }}
+        />
+        {!hasModeTransitionSnapshot ? (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                opacity: 0.45,
+                backgroundImage:
+                  "radial-gradient(circle at 20% 22%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0) 40%), radial-gradient(circle at 78% 72%, rgba(148,163,184,0.20) 0%, rgba(148,163,184,0) 44%)",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: "-10% 0",
+                background:
+                  "linear-gradient(110deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.42) 48%, rgba(255,255,255,0) 100%)",
+                transform: "translateX(-60%)",
+                animation: "immoMapTransitionShine 900ms ease-out 1",
+              }}
+            />
+          </>
+        ) : null}
         <div
           style={{
             position: "absolute",
@@ -4599,18 +5311,28 @@ function findPickedInteractiveData(
             transform: "translateX(-50%)",
             padding: "10px 14px",
             borderRadius: 999,
-            border: "1px solid rgba(255,255,255,0.34)",
-            background: "rgba(15, 23, 42, 0.72)",
-            color: "#f8fafc",
+            border: hasModeTransitionSnapshot
+              ? "1px solid rgba(255,255,255,0.34)"
+              : "1px solid rgba(148, 163, 184, 0.5)",
+            background: hasModeTransitionSnapshot
+              ? "rgba(15, 23, 42, 0.72)"
+              : "rgba(255, 255, 255, 0.78)",
+            color: hasModeTransitionSnapshot ? "#f8fafc" : "#0f172a",
             fontWeight: 700,
             fontSize: 13,
             letterSpacing: "0.01em",
-            boxShadow: "0 12px 30px rgba(15, 23, 42, 0.18)",
-            opacity: isMapModeTransitioning ? 1 : 0,
+            boxShadow: hasModeTransitionSnapshot
+              ? "0 12px 30px rgba(15, 23, 42, 0.18)"
+              : "0 12px 28px rgba(15, 23, 42, 0.14)",
+            opacity: isModeTransitionVisualVisible ? 1 : 0,
             transition: "opacity 180ms ease",
             whiteSpace: "nowrap",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
           }}
         >
+          <LoadingSpinner size={13} />
           {modeTransitionLabel}
         </div>
       </div>
@@ -4627,6 +5349,13 @@ function findPickedInteractiveData(
           {topLeftOverlay}
         </div>
       ) : null}
+      <style>
+        {`@keyframes immoMapTransitionShine {
+          0% { transform: translateX(-62%); opacity: 0; }
+          18% { opacity: 0.95; }
+          100% { transform: translateX(58%); opacity: 0; }
+        }`}
+      </style>
 
       {hasVisibleSatelliteIssue ? (
         <div
@@ -4749,19 +5478,107 @@ function findPickedInteractiveData(
             <div style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 10 }}>
               Choisis l'annonce a ouvrir pour cette adresse.
             </div>
-            <div style={{ display: "grid", gap: 8, maxHeight: 240, overflowY: "auto" }}>
-              {stackedMarkerOptions.map((bien) => (
-                <button
-                  key={`stack-choice-${bien.id}`}
-                  onClick={() => selectStackedMarkerOption(bien)}
-                  style={stackedMarkerChoiceButtonStyle()}
-                >
-                  <span style={{ fontWeight: 700 }}>{formatMarkerPrix(bien.prix)}</span>
-                  <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-                    {bien.agence || "Agence inconnue"}
-                  </span>
-                </button>
-              ))}
+            <div style={{ display: "grid", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+              {stackedMarkerOptions.map((bien) => {
+                const previewPhoto = getBienPreviewPhoto(bien);
+                const badge = getBienBadge(bien);
+                const publicationText =
+                  bien.anciennete !== null && bien.anciennete !== undefined
+                    ? `Publie il y a ${bien.anciennete} jours`
+                    : "Publication inconnue";
+                return (
+                  <button
+                    key={`stack-choice-${bien.id}`}
+                    onClick={() => selectStackedMarkerOption(bien)}
+                    style={stackedMarkerChoiceButtonStyle(isMobile)}
+                  >
+                    <div style={{ display: "flex", gap: 8, alignItems: "stretch", height: "100%" }}>
+                      {isMobile ? (
+                        <div
+                          style={{
+                            width: "48%",
+                            minWidth: "48%",
+                            height: "100%",
+                            borderRadius: 10,
+                            border: "1px solid var(--border-color)",
+                            background: "var(--panel-muted-bg)",
+                            overflow: "hidden",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          {previewPhoto ? (
+                            <img
+                              src={previewPhoto}
+                              alt="Apercu annonce"
+                              loading="lazy"
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                display: "block",
+                              }}
+                            />
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "var(--text-muted)",
+                                padding: 8,
+                              }}
+                            >
+                              Pas de photo
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
+                      <div
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          height: "100%",
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "space-between",
+                          textAlign: "left",
+                        }}
+                      >
+                        <span
+                          style={{
+                            ...badge.style,
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            alignSelf: "flex-start",
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                        <span style={{ fontWeight: 700 }}>{formatMarkerPrix(bien.prix)}</span>
+                        <span
+                          style={{
+                            color: "var(--text-secondary)",
+                            fontSize: 12,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {bien.agence || "Agence inconnue"}
+                        </span>
+                        <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                          {formatSurface(bien.surface)}
+                        </span>
+                        <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                          {publicationText}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -5125,9 +5942,10 @@ function stackedMarkerCloseButtonStyle() {
   };
 }
 
-function stackedMarkerChoiceButtonStyle() {
+function stackedMarkerChoiceButtonStyle(isMobile = false) {
   return {
     width: "100%",
+    height: isMobile ? MOBILE_BIEN_CARD_HEIGHT : "auto",
     textAlign: "left",
     display: "grid",
     gap: 4,
@@ -5137,6 +5955,7 @@ function stackedMarkerChoiceButtonStyle() {
     color: "var(--text-primary)",
     padding: "10px 12px",
     cursor: "pointer",
+    overflow: "hidden",
   };
 }
 
