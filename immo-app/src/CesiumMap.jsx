@@ -28,7 +28,7 @@ if (!CESIUM_ION_TOKEN) {
 
 Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
-const GOOGLE_TILESET_READY_TIMEOUT_MS = 1400;
+const GOOGLE_TILESET_READY_TIMEOUT_MS = 9000;
 const GOOGLE_TILESET_SWITCH_TIMEOUT_MS = 4800;
 const GOOGLE_TILESET_PREMIUM_SSE = 6;
 const GOOGLE_TILESET_FAST_PHASE_MS = 420;
@@ -76,7 +76,7 @@ const ADAPTIVE_QUALITY_DROP_STREAK_LIMIT = 7;
 const ADAPTIVE_QUALITY_RAISE_FPS_MOBILE = 52;
 const ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP = 57;
 const MOBILE_QUALITY_PROFILE_DEFAULT = "auto";
-const MOBILE_QUALITY_PROFILE_VALUES = ["auto", "high", "perf"];
+const MOBILE_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
 const MOBILE_QUALITY_PROFILE_CONFIG = {
   auto: {
     movingResolutionScale: MOBILE_MOVING_RESOLUTION_SCALE,
@@ -112,6 +112,23 @@ const MOBILE_QUALITY_PROFILE_CONFIG = {
     idleRestoreDelayMs: 150,
     ultraRestoreDelayMs: 700,
   },
+  ultra: {
+    movingResolutionScale: 0.96,
+    movingGlobeSse: 1.55,
+    movingTilesetSse: 11.2,
+    idleResolutionScale: 1.18,
+    idleGlobeSse: 1.02,
+    idleTilesetSse: 5.2,
+    ultraResolutionScaleCap: 1.34,
+    ultraGlobeSse: 0.86,
+    ultraTilesetSse: 3.7,
+    fastTilesetSse: 9.6,
+    premiumTilesetSse: 5.4,
+    enableUltra: true,
+    adaptiveRaiseFps: 42,
+    idleRestoreDelayMs: 120,
+    ultraRestoreDelayMs: 580,
+  },
   perf: {
     movingResolutionScale: 0.76,
     movingGlobeSse: 2.6,
@@ -145,6 +162,7 @@ const GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE = 600;
 const GLOBE_LOADING_DESCENDANT_LIMIT_IOS = 220;
 const SATELLITE_CLAMP_TIMEOUT_MS = 900;
 const SATELLITE_CLAMP_MAX_POSITIONS = 260;
+const SATELLITE_CLAMP_MAX_POSITIONS_MOBILE = 420;
 const PLAN_PAN_SPEED_MULTIPLIER = 0.605; // additional -20% from 0.756
 const MOBILE_TOUCH_PAN_SENSITIVITY_MULTIPLIER = 3; // +200% on mobile touch pan
 const MOBILE_SATELLITE_PAN_COMPENSATION = 0.38; // match satellite feel to plan
@@ -160,6 +178,7 @@ const SATELLITE_MIN_GROUND_CLEARANCE_METERS = 40; // hard floor at 40m above gro
 const SATELLITE_MARKER_HEIGHT_OFFSET_METERS = 1.7;
 const SATELLITE_MARKER_FALLBACK_HEIGHT_METERS = 40;
 const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = false;
+const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE = true;
 const SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE = Number.POSITIVE_INFINITY;
 const GOOGLE_EARTH_TOUCH_PROFILE = {
   google3dOrbitGainMultiplier: 1.28,
@@ -921,6 +940,7 @@ export default function CesiumMap({
   mobileQualityProfile = MOBILE_QUALITY_PROFILE_DEFAULT,
   isMobile = false,
   isIOSDevice = false,
+  isStandalonePwa = false,
   syncVersion = 0,
   focusBienId = null,
   focusBienVersion = 0,
@@ -964,6 +984,8 @@ export default function CesiumMap({
   const markerDataByIdRef = useRef(new Map());
   const modeRef = useRef(null);
   const modeTransitionTimeoutRef = useRef(null);
+  const tiltTransitionTimeoutRef = useRef(null);
+  const tiltTransitionLockRef = useRef(false);
   const googleQualityTimeoutRef = useRef(null);
   const googleUltraQualityTimeoutRef = useRef(null);
   const desktopQualityRestoreTimeoutRef = useRef(null);
@@ -1029,6 +1051,7 @@ export default function CesiumMap({
     shared: null,
   });
   const [isTilted, setIsTilted] = useState(false);
+  const [isTiltTransitioning, setIsTiltTransitioning] = useState(false);
   const [selectedCustomMarkerId, setSelectedCustomMarkerId] = useState(null);
   const [pendingMarkerPosition, setPendingMarkerPosition] = useState(null);
   const [markerDraftNote, setMarkerDraftNote] = useState("");
@@ -1091,8 +1114,8 @@ export default function CesiumMap({
   }, [placingBienId]);
 
   useEffect(() => {
-    mapModeRef.current = canUseGoogle3D ? mapMode : "osm";
-  }, [mapMode, canUseGoogle3D]);
+    mapModeRef.current = canUseGoogle3D ? resolveMode(mapMode) : "osm";
+  }, [mapMode, canUseGoogle3D, tilesReadyVersion]);
 
   useEffect(() => {
     isSatelliteReadyRef.current = isSatelliteReady;
@@ -1139,6 +1162,35 @@ export default function CesiumMap({
   }, [isTilted]);
 
   useEffect(() => {
+    const liveMode =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+        ? "google3d"
+        : canUseGoogle3D
+          ? resolveMode(mapModeRef.current)
+          : "osm";
+    if (liveMode === "google3d") return;
+    tiltTransitionLockRef.current = false;
+    setIsTiltTransitioning(false);
+    if (tiltTransitionTimeoutRef.current) {
+      window.clearTimeout(tiltTransitionTimeoutRef.current);
+      tiltTransitionTimeoutRef.current = null;
+    }
+  }, [mapMode, canUseGoogle3D, tilesReadyVersion]);
+
+  useEffect(() => {
+    const liveSatelliteActive =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
+    if (!liveSatelliteActive) return;
+    if (mapMode !== "google3d") return;
+    if (satelliteIssueMessage) {
+      setSatelliteIssueMessage("");
+    }
+    if (mapModeRef.current !== "google3d") {
+      mapModeRef.current = "google3d";
+    }
+  }, [mapMode, canUseGoogle3D, satelliteIssueMessage, tilesReadyVersion]);
+
+  useEffect(() => {
     isAwaitingMarkerPlacementRef.current = isAwaitingMarkerPlacement;
     if (!isAwaitingMarkerPlacement) {
       hidePlacementGhost();
@@ -1158,6 +1210,9 @@ export default function CesiumMap({
       componentMountedRef.current = false;
       if (modeTransitionTimeoutRef.current) {
         window.clearTimeout(modeTransitionTimeoutRef.current);
+      }
+      if (tiltTransitionTimeoutRef.current) {
+        window.clearTimeout(tiltTransitionTimeoutRef.current);
       }
       if (satelliteWarmupBlockTimeoutRef.current) {
         window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
@@ -1432,6 +1487,17 @@ function openMarkerEditorAtPosition(position) {
   }
 
 function getClickPosition(scene, clickPosition) {
+  if (scene?.pickPositionSupported) {
+    try {
+      const pickedPosition = scene.pickPosition(clickPosition);
+      if (Cesium.defined(pickedPosition)) {
+        return pickedPosition;
+      }
+    } catch {
+      // Fallback below when depth picking is not available for this frame.
+    }
+  }
+
   const ray = scene.camera.getPickRay(clickPosition);
   const globePosition = ray ? scene.globe.pick(ray, scene) : null;
   return globePosition || scene.camera.pickEllipsoid(clickPosition, scene.globe.ellipsoid);
@@ -1856,6 +1922,13 @@ function findPickedInteractiveData(
       });
     };
     const saveCameraStateOnMoveEnd = () => {
+      if (!isTiltedRef.current && resolveMode(mapModeRef.current) === "google3d") {
+        const currentHeight =
+          Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)?.height;
+        if (Number.isFinite(currentHeight)) {
+          tiltToggleBaseRangeRef.current = Math.max(currentHeight, 160);
+        }
+      }
       persistCurrentCameraInZoneCache(viewer);
     };
     if (isMobile) {
@@ -2280,14 +2353,15 @@ function findPickedInteractiveData(
           firstTouch.clientX - canvasRect.left,
           firstTouch.clientY - canvasRect.top
         );
+        const resolvedMode = resolveMode(mapModeRef.current);
         mobileTouchPanRef.current.active = true;
         mobileTouchPanRef.current.lastX = firstTouch.clientX;
         mobileTouchPanRef.current.lastY = firstTouch.clientY;
         mobileTouchPanRef.current.lastTimestamp = performance.now();
-        mobileTouchPanRef.current.lastSurface = getClickPosition(
-          viewer.scene,
-          firstTouchPosition
-        );
+        mobileTouchPanRef.current.lastSurface =
+          resolvedMode === "google3d"
+            ? null
+            : getClickPosition(viewer.scene, firstTouchPosition);
         mobileTouchRotateRef.current.active = false;
         startLongPressTimer(firstTouch);
         return;
@@ -2352,14 +2426,15 @@ function findPickedInteractiveData(
             firstTouch.clientX - canvasRect.left,
             firstTouch.clientY - canvasRect.top
           );
+          const resolvedMode = resolveMode(mapModeRef.current);
           mobileTouchPanRef.current.active = true;
           mobileTouchPanRef.current.lastX = firstTouch.clientX;
           mobileTouchPanRef.current.lastY = firstTouch.clientY;
           mobileTouchPanRef.current.lastTimestamp = performance.now();
-          mobileTouchPanRef.current.lastSurface = getClickPosition(
-            viewer.scene,
-            firstTouchPosition
-          );
+          mobileTouchPanRef.current.lastSurface =
+            resolvedMode === "google3d"
+              ? null
+              : getClickPosition(viewer.scene, firstTouchPosition);
           return;
         }
 
@@ -2388,21 +2463,26 @@ function findPickedInteractiveData(
 
         const resolvedMode = resolveMode(mapModeRef.current);
         updatePanVelocity(deltaX, deltaY, deltaTimeMs);
-        const canvasRect = touchCanvas.getBoundingClientRect();
-        const touchPosition = new Cesium.Cartesian2(
-          firstTouch.clientX - canvasRect.left,
-          firstTouch.clientY - canvasRect.top
-        );
-        const previousSurface = mobileTouchPanRef.current.lastSurface;
-        const currentSurface = getClickPosition(viewer.scene, touchPosition);
+        const useSurfaceDrag = resolvedMode !== "google3d";
+        if (useSurfaceDrag) {
+          const canvasRect = touchCanvas.getBoundingClientRect();
+          const touchPosition = new Cesium.Cartesian2(
+            firstTouch.clientX - canvasRect.left,
+            firstTouch.clientY - canvasRect.top
+          );
+          const previousSurface = mobileTouchPanRef.current.lastSurface;
+          const currentSurface = getClickPosition(viewer.scene, touchPosition);
 
-        if (moveCameraForSurfaceDrag(previousSurface, currentSurface)) {
-          touchPanInertiaRef.current.worldVelocity = 0;
+          if (moveCameraForSurfaceDrag(previousSurface, currentSurface)) {
+            touchPanInertiaRef.current.worldVelocity = 0;
+            mobileTouchPanRef.current.lastSurface = currentSurface;
+            return;
+          }
+
           mobileTouchPanRef.current.lastSurface = currentSurface;
-          return;
+        } else {
+          mobileTouchPanRef.current.lastSurface = null;
         }
-
-        mobileTouchPanRef.current.lastSurface = currentSurface;
         const modeKey = getModeKey(resolvedMode);
         const cameraHeight = getCameraHeight(viewer) || 1200;
         const syncHeight =
@@ -2548,14 +2628,15 @@ function findPickedInteractiveData(
           firstTouch.clientX - canvasRect.left,
           firstTouch.clientY - canvasRect.top
         );
+        const resolvedMode = resolveMode(mapModeRef.current);
         mobileTouchPanRef.current.active = true;
         mobileTouchPanRef.current.lastX = firstTouch.clientX;
         mobileTouchPanRef.current.lastY = firstTouch.clientY;
         mobileTouchPanRef.current.lastTimestamp = performance.now();
-        mobileTouchPanRef.current.lastSurface = getClickPosition(
-          viewer.scene,
-          firstTouchPosition
-        );
+        mobileTouchPanRef.current.lastSurface =
+          resolvedMode === "google3d"
+            ? null
+            : getClickPosition(viewer.scene, firstTouchPosition);
         startLongPressTimer(firstTouch);
       }
     };
@@ -2667,10 +2748,31 @@ function findPickedInteractiveData(
 
     let cancelled = false;
     let warmupTimerId = null;
+    let googleLateReadyTileset = null;
+    let googleLateReadyListener = null;
+    let googleLateReadyTimeoutId = null;
+
+    const clearGoogleLateReadyListener = () => {
+      if (googleLateReadyTileset && googleLateReadyListener) {
+        try {
+          googleLateReadyTileset.tileLoadProgressEvent?.removeEventListener(
+            googleLateReadyListener
+          );
+        } catch (error) {
+          console.warn("Nettoyage listener satellite ignore (non bloquant):", error);
+        }
+      }
+      googleLateReadyTileset = null;
+      googleLateReadyListener = null;
+      if (googleLateReadyTimeoutId) {
+        window.clearTimeout(googleLateReadyTimeoutId);
+        googleLateReadyTimeoutId = null;
+      }
+    };
 
     if (canUseGoogle3D && CESIUM_ION_TOKEN) {
       setSatelliteReadySafely(Boolean(tilesetRef.current));
-      setSatelliteWarmupBlockExpiredSafely(false);
+      setSatelliteWarmupBlockExpiredSafely(isMobile);
     } else {
       setSatelliteReadySafely(false);
       setSatelliteWarmupBlockExpiredSafely(false);
@@ -2713,7 +2815,7 @@ function findPickedInteractiveData(
       clearQualityRecoverySafetyTimeout();
       qualityRecoverySafetyTimeoutRef.current = window.setTimeout(() => {
         if (cancelled) return;
-        if (isMobile && !isIOSDevice) {
+        if (isMobile) {
           clearMobileQualityRestoreTimeout();
           clearMobileUltraRestoreTimeout();
           applyMobileIdleQuality();
@@ -2739,16 +2841,11 @@ function findPickedInteractiveData(
         if (modeRef.current !== "google3d") return;
         if (isSatelliteReadyRef.current) return;
         if (tilesetRef.current?.tilesLoaded) return;
-
-        const timeoutError = createTimeoutError(
-          "Le flux satellite n'a pas charge de tuiles initiales a temps.",
-          "GOOGLE_TILESET_WATCHDOG_TIMEOUT"
+        // Non-blocking watchdog: keep satellite mode active to avoid false
+        // fallbacks on slow networks/devices.
+        console.warn(
+          "Watchdog satellite: chargement long detecte, on reste en vue satellite."
         );
-        console.warn("Watchdog satellite:", timeoutError);
-        setSatelliteIssueMessage(buildSatelliteFailureMessage(timeoutError));
-        setSatelliteReadySafely(false);
-        enableOsm();
-        onSetMapModeRef.current?.("osm");
       }, SATELLITE_LOAD_WATCHDOG_MS);
     };
 
@@ -2829,7 +2926,7 @@ function findPickedInteractiveData(
     };
 
     const applyMobileMovingQuality = (tileset = tilesetRef.current) => {
-      if (!isMobile || isIOSDevice) return;
+      if (!isMobile) return;
 
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = MOBILE_MOVING_MSAA_SAMPLES;
@@ -2851,7 +2948,7 @@ function findPickedInteractiveData(
     };
 
     const applyMobileIdleQuality = (tileset = tilesetRef.current) => {
-      if (!isMobile || isIOSDevice) return;
+      if (!isMobile) return;
 
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
@@ -2873,7 +2970,7 @@ function findPickedInteractiveData(
     };
 
     const applyMobileUltraQuality = (tileset = tilesetRef.current) => {
-      if (!isMobile || isIOSDevice || !selectedMobileQualityProfile.enableUltra) return;
+      if (!isMobile || !selectedMobileQualityProfile.enableUltra) return;
 
       adaptiveQualityStateRef.current.isUltraActive = true;
       viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
@@ -2923,7 +3020,7 @@ function findPickedInteractiveData(
     const applyFastThenPremiumGoogleQuality = (tileset) => {
       if (!tileset) return;
       clearGoogleQualityTimeout();
-      if (isMobile && !isIOSDevice) {
+      if (isMobile) {
         clearMobileQualityRestoreTimeout();
         applyMobileMovingQuality(tileset);
         tileset.maximumScreenSpaceError = selectedMobileQualityProfile.fastTilesetSse;
@@ -3006,7 +3103,7 @@ function findPickedInteractiveData(
           ADAPTIVE_QUALITY_DROP_STREAK_LIMIT
         ) {
           adaptiveQualityStateRef.current.dropFrameStreak = 0;
-          if (isMobile && !isIOSDevice) {
+          if (isMobile) {
             clearMobileUltraRestoreTimeout();
             applyMobileIdleQuality();
           } else if (!isMobile) {
@@ -3036,7 +3133,7 @@ function findPickedInteractiveData(
       if (!Number.isFinite(avgFps) || avgFps <= 0) return;
       if (adaptiveQualityStateRef.current.isUltraActive) return;
 
-      if (isMobile && !isIOSDevice) {
+      if (isMobile) {
         if (
           selectedMobileQualityProfile.enableUltra &&
           avgFps >= selectedMobileQualityProfile.adaptiveRaiseFps
@@ -3080,10 +3177,9 @@ function findPickedInteractiveData(
             maximumCacheOverflowBytes: isMobile
               ? GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES
               : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES,
-            maximumScreenSpaceError:
-              isMobile && !isIOSDevice
-                ? selectedMobileQualityProfile.premiumTilesetSse
-                : GOOGLE_TILESET_PREMIUM_SSE,
+            maximumScreenSpaceError: isMobile
+              ? selectedMobileQualityProfile.premiumTilesetSse
+              : GOOGLE_TILESET_PREMIUM_SSE,
           }
         )
           .then((tileset) => {
@@ -3104,10 +3200,9 @@ function findPickedInteractiveData(
             tileset.maximumCacheOverflowBytes = isMobile
               ? GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES
               : GOOGLE_TILESET_DESKTOP_CACHE_OVERFLOW_BYTES;
-            tileset.maximumScreenSpaceError =
-              isMobile && !isIOSDevice
-                ? selectedMobileQualityProfile.premiumTilesetSse
-                : GOOGLE_TILESET_PREMIUM_SSE;
+            tileset.maximumScreenSpaceError = isMobile
+              ? selectedMobileQualityProfile.premiumTilesetSse
+              : GOOGLE_TILESET_PREMIUM_SSE;
             tilesetRef.current = tileset;
             setSatelliteReadySafely(Boolean(tileset.tilesLoaded));
             if (!viewer.scene.primitives.contains(tileset)) {
@@ -3183,6 +3278,10 @@ function findPickedInteractiveData(
     }
 
     function enableOsm() {
+      // Switch mode immediately to prevent late satellite callbacks from running
+      // during the OSM transition.
+      modeRef.current = "osm";
+      clearGoogleLateReadyListener();
       clearSatelliteLoadWatchdogTimeout();
       clearGoogleQualityTimeout();
       clearDesktopQualityRestoreTimeouts();
@@ -3209,7 +3308,6 @@ function findPickedInteractiveData(
 
       setIsTilted(false);
       tiltToggleBaseRangeRef.current = null;
-      modeRef.current = "osm";
       setSatelliteReadySafely(false);
       setTilesReadyVersion((value) => value + 1);
     }
@@ -3243,7 +3341,38 @@ function findPickedInteractiveData(
       viewer.scene.requestRender();
 
       modeRef.current = "google3d";
+      if (mapModeRef.current !== "google3d") {
+        mapModeRef.current = "google3d";
+        onSetMapModeRef.current?.("google3d");
+      }
       startSatelliteLoadWatchdog();
+      const markSatelliteReady = () => {
+        clearSatelliteLoadWatchdogTimeout();
+        setSatelliteIssueMessage("");
+        setSatelliteReadySafely(true);
+        if (isMobile) {
+          applyMobileIdleQuality(tileset);
+        }
+        setTilesReadyVersion((value) => value + 1);
+        viewer.scene.requestRender();
+      };
+
+      clearGoogleLateReadyListener();
+      googleLateReadyTileset = tileset;
+      googleLateReadyListener = (remainingTiles = 1) => {
+        if (remainingTiles > 0 && !tileset.tilesLoaded) return;
+        if (cancelled || modeRef.current !== "google3d") {
+          clearGoogleLateReadyListener();
+          return;
+        }
+        clearGoogleLateReadyListener();
+        markSatelliteReady();
+      };
+      tileset.tileLoadProgressEvent.addEventListener(googleLateReadyListener);
+      googleLateReadyTimeoutId = window.setTimeout(() => {
+        clearGoogleLateReadyListener();
+      }, SATELLITE_LOAD_WATCHDOG_MS + 4000);
+
       const zoneCacheKey = activeZoneCacheKeyRef.current;
       if (zoneCacheKey) {
         updateZoneCacheEntry(zoneCacheKey, (previousEntry) => ({
@@ -3258,14 +3387,8 @@ function findPickedInteractiveData(
       waitForGoogleTilesetReady(tileset).then((didLoad) => {
         if (cancelled) return;
         if ((didLoad || tileset.tilesLoaded) && modeRef.current === "google3d") {
-          clearSatelliteLoadWatchdogTimeout();
-          setSatelliteIssueMessage("");
-          setSatelliteReadySafely(true);
-          if (isMobile && !isIOSDevice) {
-            applyMobileIdleQuality(tileset);
-          }
-          setTilesReadyVersion((value) => value + 1);
-          viewer.scene.requestRender();
+          clearGoogleLateReadyListener();
+          markSatelliteReady();
         }
       });
     }
@@ -3295,8 +3418,10 @@ function findPickedInteractiveData(
     }
 
     async function applyMode() {
-      const requestedMode = canUseGoogle3D ? resolveMode(mapMode) : "osm";
-      if (!canUseGoogle3D && mapMode === "google3d") {
+      const requestedMode = canUseGoogle3D
+        ? resolveMode(mapModeRef.current)
+        : "osm";
+      if (!canUseGoogle3D && mapModeRef.current === "google3d") {
         onSetMapModeRef.current?.("osm");
       }
       if (modeRef.current === requestedMode) return;
@@ -3320,10 +3445,19 @@ function findPickedInteractiveData(
         }
       } catch (error) {
         console.error("Erreur changement de mode carte :", error);
-        setSatelliteIssueMessage(buildSatelliteFailureMessage(error));
-        enableOsm();
-        if (requestedMode === "google3d") {
-          onSetMapModeRef.current?.("osm");
+        const satelliteStillActive =
+          modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
+        if (requestedMode === "google3d" && satelliteStillActive) {
+          modeRef.current = "google3d";
+          mapModeRef.current = "google3d";
+          setSatelliteIssueMessage("");
+          setSatelliteReadySafely(true);
+        } else {
+          setSatelliteIssueMessage(buildSatelliteFailureMessage(error));
+          enableOsm();
+          if (requestedMode === "google3d") {
+            onSetMapModeRef.current?.("osm");
+          }
         }
       } finally {
         if (!cancelled) {
@@ -3362,7 +3496,7 @@ function findPickedInteractiveData(
     };
 
     const handleMobileMoveStart = () => {
-      if (!isMobile || isIOSDevice) return;
+      if (!isMobile) return;
       adaptiveQualityStateRef.current.isMoving = true;
       clearMobileUltraRestoreTimeout();
       clearMobileQualityRestoreTimeout();
@@ -3371,7 +3505,7 @@ function findPickedInteractiveData(
     };
 
     const handleMobileMoveEnd = () => {
-      if (!isMobile || isIOSDevice) return;
+      if (!isMobile) return;
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       clearMobileQualityRestoreTimeout();
@@ -3389,7 +3523,7 @@ function findPickedInteractiveData(
       }, selectedMobileQualityProfile.idleRestoreDelayMs);
     };
 
-    if (isMobile && !isIOSDevice) {
+    if (isMobile) {
       viewer.camera.moveStart.addEventListener(handleMobileMoveStart);
       viewer.camera.moveEnd.addEventListener(handleMobileMoveEnd);
       applyMobileIdleQuality();
@@ -3401,8 +3535,8 @@ function findPickedInteractiveData(
 
     viewer.scene.postRender.addEventListener(handleAdaptiveFrameQuality);
 
-    // Warm up Google tiles in the background after first paint so reload stays snappy.
-    if (canUseGoogle3D && CESIUM_ION_TOKEN) {
+    // Keep mobile startup smooth: warmup runs only on desktop.
+    if (!isMobile && canUseGoogle3D && CESIUM_ION_TOKEN) {
       warmupTimerId = window.setTimeout(() => {
         if (cancelled) return;
         warmupGoogleUntilReady().catch((error) => {
@@ -3415,6 +3549,7 @@ function findPickedInteractiveData(
 
     return () => {
       cancelled = true;
+      clearGoogleLateReadyListener();
       clearGoogleQualityTimeout();
       clearDesktopQualityRestoreTimeouts();
       clearMobileQualityRestoreTimeout();
@@ -3438,7 +3573,7 @@ function findPickedInteractiveData(
         window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
         satelliteWarmupBlockTimeoutRef.current = null;
       }
-      if (isMobile && !isIOSDevice && !viewer.isDestroyed()) {
+      if (isMobile && !viewer.isDestroyed()) {
         viewer.camera.moveStart.removeEventListener(handleMobileMoveStart);
         viewer.camera.moveEnd.removeEventListener(handleMobileMoveEnd);
       } else if (!isMobile && !viewer.isDestroyed()) {
@@ -3505,7 +3640,9 @@ function findPickedInteractiveData(
         });
       });
       markerStackByBienIdRef.current = stackByBienId;
-      const isOsmMode = modeRef.current === "osm";
+      const isOsmMode = !(
+        modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+      );
       const rawBienPositions = biensAvecCoordonnees.map((bien) =>
         Cesium.Cartesian3.fromDegrees(bien.lon, bien.lat, 0)
       );
@@ -3550,16 +3687,48 @@ function findPickedInteractiveData(
         );
       }
 
-      if (
+      const shouldUseMeshClampForMarkers =
         !isOsmMode &&
-        SATELLITE_USE_MESH_CLAMP_FOR_MARKERS &&
-        tilesetRef.current?.tilesLoaded
-      ) {
+        tilesetRef.current?.tilesLoaded &&
+        (SATELLITE_USE_MESH_CLAMP_FOR_MARKERS ||
+          (isMobile && SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE));
+
+      const selectClosestPositionIndexes = (positions, limit) => {
+        if (!Array.isArray(positions) || positions.length === 0) return [];
+        const safeLimit = Math.max(0, Math.min(limit, positions.length));
+        if (safeLimit === 0) return [];
+        if (safeLimit >= positions.length) {
+          return positions.map((_, index) => index);
+        }
+
+        const cameraPosition = viewer.camera?.positionWC;
+        if (!cameraPosition) {
+          return positions.slice(0, safeLimit).map((_, index) => index);
+        }
+
+        return positions
+          .map((position, index) => ({
+            index,
+            distanceSquared: Cesium.Cartesian3.distanceSquared(cameraPosition, position),
+          }))
+          .sort((left, right) => left.distanceSquared - right.distanceSquared)
+          .slice(0, safeLimit)
+          .map((entry) => entry.index);
+      };
+
+      if (shouldUseMeshClampForMarkers) {
         try {
+          const maxClampPositions = isMobile
+            ? SATELLITE_CLAMP_MAX_POSITIONS_MOBILE
+            : SATELLITE_CLAMP_MAX_POSITIONS;
+
           if (rawBienPositions.length > 0) {
-            const sampleBienPositions = rawBienPositions.slice(
-              0,
-              SATELLITE_CLAMP_MAX_POSITIONS
+            const bienIndexesToClamp = selectClosestPositionIndexes(
+              rawBienPositions,
+              maxClampPositions
+            );
+            const sampleBienPositions = bienIndexesToClamp.map(
+              (index) => rawBienPositions[index]
             );
             const clampedBiens = await withPromiseTimeout(
               viewer.scene.clampToHeightMostDetailed(sampleBienPositions),
@@ -3568,7 +3737,8 @@ function findPickedInteractiveData(
               "CLAMP_TIMEOUT_BIENS"
             );
             if (!cancelled && Array.isArray(clampedBiens)) {
-              clampedBiens.forEach((position, index) => {
+              clampedBiens.forEach((position, sampledIndex) => {
+                const index = bienIndexesToClamp[sampledIndex];
                 const elevated = elevateCartesianPosition(position);
                 if (elevated) {
                   finalBienPositions[index] = elevated;
@@ -3584,9 +3754,12 @@ function findPickedInteractiveData(
           }
 
           if (rawCustomPositions.length > 0) {
-            const sampleCustomPositions = rawCustomPositions.slice(
-              0,
-              SATELLITE_CLAMP_MAX_POSITIONS
+            const customIndexesToClamp = selectClosestPositionIndexes(
+              rawCustomPositions,
+              maxClampPositions
+            );
+            const sampleCustomPositions = customIndexesToClamp.map(
+              (index) => rawCustomPositions[index]
             );
             const clampedCustomMarkers = await withPromiseTimeout(
               viewer.scene.clampToHeightMostDetailed(sampleCustomPositions),
@@ -3595,7 +3768,8 @@ function findPickedInteractiveData(
               "CLAMP_TIMEOUT_CUSTOM"
             );
             if (!cancelled && Array.isArray(clampedCustomMarkers)) {
-              clampedCustomMarkers.forEach((position, index) => {
+              clampedCustomMarkers.forEach((position, sampledIndex) => {
+                const index = customIndexesToClamp[sampledIndex];
                 const elevated = elevateCartesianPosition(position);
                 if (elevated) {
                   finalCustomPositions[index] = elevated;
@@ -3849,19 +4023,24 @@ function findPickedInteractiveData(
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
+    const liveMode =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+        ? "google3d"
+        : canUseGoogle3D
+          ? resolveMode(mapModeRef.current)
+          : "osm";
 
     if (isMobile) {
-      optimizeTouchNavigation(viewer, touchNavTuningRef.current, mapMode);
-      const resolvedMode = resolveMode(mapMode);
-      const modeKey = getModeKey(resolvedMode);
+      optimizeTouchNavigation(viewer, touchNavTuningRef.current, liveMode);
+      const modeKey = getModeKey(liveMode);
       if (!Number.isFinite(syncPanHeightRef.current[modeKey])) {
-        rememberSyncPanHeightForMode(viewer, resolvedMode);
+        rememberSyncPanHeightForMode(viewer, liveMode);
       }
     } else {
-      optimizeDesktopNavigation(viewer, touchNavTuningRef.current, mapMode);
+      optimizeDesktopNavigation(viewer, touchNavTuningRef.current, liveMode);
     }
     viewer.scene.requestRender();
-  }, [isMobile, mapMode, isTilted, touchNavTuning]);
+  }, [isMobile, mapMode, isTilted, touchNavTuning, canUseGoogle3D, tilesReadyVersion]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -4142,6 +4321,14 @@ function findPickedInteractiveData(
   const toggleTilt = () => {
     const viewer = viewerRef.current;
     if (!viewer) return;
+    if (tiltTransitionLockRef.current) return;
+    const liveMode =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+        ? "google3d"
+        : canUseGoogle3D
+          ? resolveMode(mapModeRef.current)
+          : "osm";
+    if (liveMode !== "google3d") return;
 
     const selectedBienData = selectedBienId
       ? markerDataByIdRef.current.get(selectedBienId) || null
@@ -4162,15 +4349,19 @@ function findPickedInteractiveData(
 
     if (!focusPosition) return;
 
-    const currentMode = resolveMode(mapMode);
+    const currentMode = liveMode;
     const cameraHeight =
       Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)?.height || 0;
     const minimumTopDownRange = currentMode === "google3d" ? 160 : 850;
     let topDownRange;
 
     if (!isTilted) {
-      // Entering 3D: lock a base range so repeated 2D<->3D toggles don't drift upward.
-      topDownRange = Math.max(cameraHeight, minimumTopDownRange);
+      // Entering 3D: prefer the last known top-down range to avoid cumulative drift.
+      const stableRange = Number(tiltToggleBaseRangeRef.current);
+      topDownRange = Math.max(
+        Number.isFinite(stableRange) ? stableRange : cameraHeight,
+        minimumTopDownRange
+      );
       tiltToggleBaseRangeRef.current = topDownRange;
     } else {
       // Returning to 2D: reuse the same base range captured when we entered 3D.
@@ -4190,6 +4381,23 @@ function findPickedInteractiveData(
       currentMode === "google3d" ? 55 : 140
     );
     const nextTiltedValue = !isTilted;
+    const releaseTiltTransition = () => {
+      if (tiltTransitionTimeoutRef.current) {
+        window.clearTimeout(tiltTransitionTimeoutRef.current);
+        tiltTransitionTimeoutRef.current = null;
+      }
+      tiltTransitionLockRef.current = false;
+      setIsTiltTransitioning(false);
+    };
+
+    tiltTransitionLockRef.current = true;
+    setIsTiltTransitioning(true);
+    if (tiltTransitionTimeoutRef.current) {
+      window.clearTimeout(tiltTransitionTimeoutRef.current);
+    }
+    tiltTransitionTimeoutRef.current = window.setTimeout(() => {
+      releaseTiltTransition();
+    }, 1100);
 
     viewer.camera.flyToBoundingSphere(boundingSphere, {
       offset: new Cesium.HeadingPitchRange(
@@ -4200,14 +4408,24 @@ function findPickedInteractiveData(
         nextTiltedValue ? obliqueRange : topDownRange
       ),
       duration: 0.8,
+      complete: releaseTiltTransition,
+      cancel: releaseTiltTransition,
     });
 
     setIsTilted(nextTiltedValue);
   };
 
   const isMapModeTransitioning = modeTransition.active;
-  const currentResolvedMode = resolveMode(mapMode);
+  const currentResolvedMode =
+    modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+      ? "google3d"
+      : canUseGoogle3D
+        ? resolveMode(mapModeRef.current)
+        : "osm";
+  const hasVisibleSatelliteIssue =
+    Boolean(satelliteIssueMessage) && currentResolvedMode !== "google3d";
   const canTiltCurrentView = currentResolvedMode === "google3d";
+  const isTiltToggleDisabled = isMapModeTransitioning || isTiltTransitioning;
   const desktopPlusBottom = canTiltCurrentView ? 148 : 84;
   const modeTransitionLabel =
     modeTransition.target === "google3d"
@@ -4219,6 +4437,11 @@ function findPickedInteractiveData(
     currentResolvedMode !== "google3d" &&
     !isSatelliteReady &&
     !isSatelliteWarmupBlockExpired;
+  const isSatelliteSwitchingTo3D =
+    isMapModeTransitioning && modeTransition.target === "google3d";
+  const showSatelliteButtonSpinner =
+    !hasVisibleSatelliteIssue &&
+    (isSatelliteTogglePending || isSatelliteSwitchingTo3D);
   const isMapModeToggleDisabled =
     !canUseGoogle3D || isMapModeTransitioning;
   const mapModeButtonLabel =
@@ -4228,7 +4451,9 @@ function findPickedInteractiveData(
         ? "Satellite..."
         : "Vue satellite";
   const mapModeButtonTitle = satelliteIssueMessage
-    ? satelliteIssueMessage
+    ? hasVisibleSatelliteIssue
+      ? satelliteIssueMessage
+      : "Passer a la vue plan"
     : !canUseGoogle3D
       ? "Ajoute un token Cesium ion pour activer Google 3D"
       : currentResolvedMode === "google3d"
@@ -4238,14 +4463,35 @@ function findPickedInteractiveData(
           : !isSatelliteReady
             ? "Prechargement long detecte. Premier basculement possible mais peut prendre quelques secondes."
           : "Passer a la vue satellite";
+  const mobileTopInset = isMobile
+    ? isStandalonePwa
+      ? "calc(env(safe-area-inset-top, 0px) + 8px)"
+      : 12
+    : 16;
+  const mobileBannerTop = isMobile
+    ? isStandalonePwa
+      ? "calc(env(safe-area-inset-top, 0px) + 56px)"
+      : 64
+    : 20;
+  const mobileTransitionTop = isMobile
+    ? isStandalonePwa
+      ? "calc(env(safe-area-inset-top, 0px) + 60px)"
+      : 68
+    : 20;
 
   function handleToggleMapMode() {
     if (!canUseGoogle3D) return;
     if (isMapModeTransitioning) return;
-    if (currentResolvedMode !== "google3d") {
+    const nextMode = currentResolvedMode === "google3d" ? "osm" : "google3d";
+    if (nextMode === "google3d") {
       setSatelliteIssueMessage("");
     }
-    onToggleMapMode?.();
+    mapModeRef.current = nextMode;
+    if (onSetMapModeRef.current) {
+      onSetMapModeRef.current(nextMode);
+    } else {
+      onToggleMapMode?.();
+    }
   }
 
   function handleStartMarkerCreation() {
@@ -4286,7 +4532,7 @@ function findPickedInteractiveData(
         <div
           style={{
             position: "absolute",
-            top: isMobile ? 68 : 20,
+            top: mobileTransitionTop,
             left: "50%",
             transform: "translateX(-50%)",
             padding: "10px 14px",
@@ -4311,7 +4557,7 @@ function findPickedInteractiveData(
         <div
           style={{
             position: "absolute",
-            top: isMobile ? 12 : 16,
+            top: mobileTopInset,
             left: isMobile ? 12 : 16,
             zIndex: 6,
           }}
@@ -4320,11 +4566,11 @@ function findPickedInteractiveData(
         </div>
       ) : null}
 
-      {satelliteIssueMessage ? (
+      {hasVisibleSatelliteIssue ? (
         <div
           style={{
             position: "absolute",
-            top: isMobile ? 64 : 20,
+            top: mobileBannerTop,
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 8,
@@ -4349,7 +4595,7 @@ function findPickedInteractiveData(
         <div
           style={{
             position: "absolute",
-            top: isMobile ? 64 : 20,
+            top: mobileBannerTop,
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 7,
@@ -4372,7 +4618,7 @@ function findPickedInteractiveData(
         <div
           style={{
             position: "absolute",
-            top: isMobile ? 64 : 20,
+            top: mobileBannerTop,
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 7,
@@ -4409,7 +4655,10 @@ function findPickedInteractiveData(
             )}
             title={mapModeButtonTitle}
           >
-            {mapModeButtonLabel}
+            <span style={mapModeButtonContentStyle()}>
+              {showSatelliteButtonSpinner ? <LoadingSpinner size={14} /> : null}
+              <span>{mapModeButtonLabel}</span>
+            </span>
           </button>
         </>
       ) : null}
@@ -4642,8 +4891,13 @@ function findPickedInteractiveData(
           {canTiltCurrentView ? (
             <button
               onClick={toggleTilt}
-              style={mobileFloatingCircleButtonStyle(false)}
-              title="Changer l'inclinaison"
+              disabled={isTiltToggleDisabled}
+              style={mobileFloatingCircleButtonStyle(false, isTiltToggleDisabled)}
+              title={
+                isTiltTransitioning
+                  ? "Changement d'inclinaison en cours..."
+                  : "Changer l'inclinaison"
+              }
             >
               {isTilted ? "2D" : "3D"}
             </button>
@@ -4667,15 +4921,23 @@ function findPickedInteractiveData(
             )}
             title={mapModeButtonTitle}
           >
-            {mapModeButtonLabel}
+            <span style={mapModeButtonContentStyle()}>
+              {showSatelliteButtonSpinner ? <LoadingSpinner size={14} /> : null}
+              <span>{mapModeButtonLabel}</span>
+            </span>
           </button>
         </div>
       ) : (
         canTiltCurrentView ? (
           <button
             onClick={toggleTilt}
-            style={desktopMapButtonStyle(84, true, true)}
-            title="Changer l'inclinaison"
+            disabled={isTiltToggleDisabled}
+            style={desktopMapButtonStyle(84, !isTiltToggleDisabled, true)}
+            title={
+              isTiltTransitioning
+                ? "Changement d'inclinaison en cours..."
+                : "Changer l'inclinaison"
+            }
           >
             {isTilted ? "2D" : "3D"}
           </button>
@@ -4719,6 +4981,33 @@ function FullscreenIcon({ expanded }) {
           <path d="M9 20L4 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </>
       )}
+    </svg>
+  );
+}
+
+function LoadingSpinner({ size = 14 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      style={{ display: "block", color: "currentColor" }}
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+        <animateTransform
+          attributeName="transform"
+          attributeType="XML"
+          type="rotate"
+          from="0 12 12"
+          to="360 12 12"
+          dur="0.8s"
+          repeatCount="indefinite"
+        />
+      </path>
     </svg>
   );
 }
@@ -4925,6 +5214,16 @@ function mobileFloatingControlsStyle() {
   };
 }
 
+function mapModeButtonContentStyle() {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 18,
+  };
+}
+
 function mobileFloatingPillButtonStyle(disabled = false) {
   return {
     minWidth: 132,
@@ -4947,7 +5246,7 @@ function mobileFloatingPillButtonStyle(disabled = false) {
   };
 }
 
-function mobileFloatingCircleButtonStyle(active) {
+function mobileFloatingCircleButtonStyle(active, disabled = false) {
   return {
     width: 52,
     minWidth: 52,
@@ -4956,7 +5255,8 @@ function mobileFloatingCircleButtonStyle(active) {
     background: active ? "var(--text-primary)" : "var(--control-bg)",
     color: active ? "var(--panel-bg)" : "var(--text-primary)",
     borderRadius: "50%",
-    cursor: "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -4981,6 +5281,9 @@ function desktopMapButtonStyle(bottom, enabled = true, circular = false) {
     fontWeight: 700,
     fontSize: 14,
     cursor: enabled ? "pointer" : "not-allowed",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     boxShadow: "var(--control-shadow)",
     padding: circular ? "0 12px" : "0 16px",
     opacity: enabled ? 1 : 0.55,

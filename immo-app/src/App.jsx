@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   addBlacklist,
   addSetAside,
@@ -24,7 +24,6 @@ import {
 } from "./api";
 import AppMenu from "./components/AppMenu";
 import BiensSidebar from "./components/BiensSidebar";
-import CesiumMap from "./CesiumMap";
 import { CESIUM_ION_TOKEN } from "./config";
 import LoginScreen from "./components/LoginScreen";
 import SelectedBienPanel from "./components/SelectedBienPanel";
@@ -37,6 +36,8 @@ import { countBienCategories, filterBiens } from "./utils/bienFilters";
 import { formatPrix, formatSurface, getBienBadge } from "./utils/bienFormat";
 import { downloadKmlExport } from "./utils/kmlExport";
 
+const CesiumMap = lazy(() => import("./CesiumMap"));
+
 function isLikelyIOSDevice() {
   if (typeof navigator === "undefined") return false;
   const userAgent = String(navigator.userAgent || "").toLowerCase();
@@ -46,7 +47,30 @@ function isLikelyIOSDevice() {
   return isClassicIOS || isIPadDesktopMode;
 }
 
-const MOBILE_QUALITY_PROFILE_OPTIONS = ["auto", "high", "perf"];
+function isStandaloneDisplayMode() {
+  if (typeof window === "undefined") return false;
+  const mediaStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches;
+  const iosStandalone = window.navigator?.standalone === true;
+  return Boolean(mediaStandalone || iosStandalone);
+}
+
+function readSafeAreaBottomInsetPx() {
+  if (typeof document === "undefined") return 0;
+  const probe = document.createElement("div");
+  probe.style.position = "fixed";
+  probe.style.left = "0";
+  probe.style.bottom = "0";
+  probe.style.height = "env(safe-area-inset-bottom, 0px)";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.zIndex = "-1";
+  document.body.appendChild(probe);
+  const inset = Math.max(0, probe.getBoundingClientRect().height || 0);
+  probe.remove();
+  return inset;
+}
+
+const MOBILE_QUALITY_PROFILE_OPTIONS = ["auto", "high", "ultra", "perf"];
 
 function normalizeMobileQualityProfile(value) {
   return MOBILE_QUALITY_PROFILE_OPTIONS.includes(value) ? value : "auto";
@@ -168,7 +192,10 @@ function App() {
   const [showSansAdresse, setShowSansAdresse] = useState(true);
   const [showNouveaux, setShowNouveaux] = useState(true);
   const isIOSDevice = useMemo(() => isLikelyIOSDevice(), []);
+  const isStandalonePwa = useMemo(() => isStandaloneDisplayMode(), []);
+  const isIOSStandalonePwa = isIOSDevice && isStandalonePwa;
   const canUseGoogle3D = Boolean(CESIUM_ION_TOKEN);
+  const mobileViewportHeight = "var(--immo3d-mobile-vh, 100svh)";
 
   const boundaryQuery = useMemo(
     () => inferBoundaryQuery(activeZoneRecherche, biens),
@@ -302,6 +329,31 @@ function App() {
     if (mapMode !== "google3d") return;
     setMapMode("osm");
   }, [canUseGoogle3D, mapMode]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    if (!isIOSStandalonePwa || typeof window === "undefined") {
+      document.documentElement.style.removeProperty("--immo3d-mobile-vh");
+      return undefined;
+    }
+
+    const syncViewportHeight = () => {
+      const safeAreaBottomInsetPx = readSafeAreaBottomInsetPx();
+      const viewportHeightPx = Math.round(window.innerHeight + safeAreaBottomInsetPx);
+      document.documentElement.style.setProperty("--immo3d-mobile-vh", `${viewportHeightPx}px`);
+    };
+
+    syncViewportHeight();
+    window.addEventListener("resize", syncViewportHeight);
+    window.addEventListener("orientationchange", syncViewportHeight);
+
+    return () => {
+      window.removeEventListener("resize", syncViewportHeight);
+      window.removeEventListener("orientationchange", syncViewportHeight);
+      document.documentElement.style.removeProperty("--immo3d-mobile-vh");
+    };
+  }, [isIOSStandalonePwa]);
 
   useEffect(() => {
     localStorage.removeItem("immo3d_touch_nav_tuning");
@@ -1350,7 +1402,7 @@ function App() {
         style={{
           ...getThemeVariables(themeMode, styleMode),
           height: isMobile ? "auto" : "100vh",
-          minHeight: "100svh",
+          minHeight: mobileViewportHeight,
           display: "flex",
           flexDirection: isMobile ? "column" : "row",
           fontFamily: "Arial, sans-serif",
@@ -1437,41 +1489,44 @@ function App() {
                 background: "var(--map-shell-bg)",
               }}
             >
+              <Suspense fallback={<MapLoadingFallback isMobile={false} />}>
                 <CesiumMap
-                biens={biensFiltres}
-                customMarkers={customMarkers}
-                selectedBienId={selectedBien?.id ?? null}
-                setSelectedBien={(bien) => {
-                  setPlacingBienId(null);
-                  setSelectedBien(bien);
-                  triggerHapticFeedback("light");
-                }}
-                onAddCustomMarker={handleAddCustomMarker}
-                onUpdateCustomMarker={handleUpdateCustomMarker}
-                onDeleteCustomMarker={handleDeleteCustomMarker}
+                  biens={biensFiltres}
+                  customMarkers={customMarkers}
+                  selectedBienId={selectedBien?.id ?? null}
+                  setSelectedBien={(bien) => {
+                    setPlacingBienId(null);
+                    setSelectedBien(bien);
+                    triggerHapticFeedback("light");
+                  }}
+                  onAddCustomMarker={handleAddCustomMarker}
+                  onUpdateCustomMarker={handleUpdateCustomMarker}
+                  onDeleteCustomMarker={handleDeleteCustomMarker}
                   mapMode={mapMode}
                   canUseGoogle3D={canUseGoogle3D}
                   isIOSDevice={isIOSDevice}
+                  isStandalonePwa={isIOSStandalonePwa}
                   onToggleMapMode={toggleMapMode}
                   onSetMapMode={setMapMode}
-                hapticsEnabled={hapticsEnabled}
-                allBiens={biens}
-                searchZone={activeZoneRecherche}
-                touchNavTuning={touchNavTuning}
-                mobileQualityProfile={mobileQualityProfile}
-                isMobile={false}
-                syncVersion={syncVersion}
-                focusBienId={focusBienId}
-                focusBienVersion={focusBienVersion}
-                onFocusHandled={handleMapFocusHandled}
-                mobilePanel="desktop"
-                placingBienId={placingBienId}
-                boundaryGeoJson={boundaryGeoJson}
-                placingBienLabel={
-                  biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
-                }
-                onPlaceBien={handlePlaceBienOnMap}
-              />
+                  hapticsEnabled={hapticsEnabled}
+                  allBiens={biens}
+                  searchZone={activeZoneRecherche}
+                  touchNavTuning={touchNavTuning}
+                  mobileQualityProfile={mobileQualityProfile}
+                  isMobile={false}
+                  syncVersion={syncVersion}
+                  focusBienId={focusBienId}
+                  focusBienVersion={focusBienVersion}
+                  onFocusHandled={handleMapFocusHandled}
+                  mobilePanel="desktop"
+                  placingBienId={placingBienId}
+                  boundaryGeoJson={boundaryGeoJson}
+                  placingBienLabel={
+                    biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
+                  }
+                  onPlaceBien={handlePlaceBienOnMap}
+                />
+              </Suspense>
             </div>
 
             <DesktopSidePanel
@@ -1510,75 +1565,79 @@ function App() {
             <div
               style={{
                 position: "relative",
-                minHeight: "100svh",
-                height: "100svh",
+                minHeight: mobileViewportHeight,
+                height: mobileViewportHeight,
                 overflow: "hidden",
                 background: "var(--map-shell-bg)",
               }}
             >
+              <Suspense fallback={<MapLoadingFallback isMobile />}>
                 <CesiumMap
-                biens={biensFiltres}
-                customMarkers={customMarkers}
-                selectedBienId={selectedBien?.id ?? null}
-                setSelectedBien={(bien) => {
-                  setPlacingBienId(null);
-                  setSelectedBien(bien);
-                  setMobileDetailOrigin("map");
-                  triggerHapticFeedback("light");
-                  setMobilePanel("detail");
-                }}
-                onAddCustomMarker={handleAddCustomMarker}
-                onUpdateCustomMarker={handleUpdateCustomMarker}
-                onDeleteCustomMarker={handleDeleteCustomMarker}
+                  biens={biensFiltres}
+                  customMarkers={customMarkers}
+                  selectedBienId={selectedBien?.id ?? null}
+                  setSelectedBien={(bien) => {
+                    setPlacingBienId(null);
+                    setSelectedBien(bien);
+                    setMobileDetailOrigin("map");
+                    triggerHapticFeedback("light");
+                    setMobilePanel("detail");
+                  }}
+                  onAddCustomMarker={handleAddCustomMarker}
+                  onUpdateCustomMarker={handleUpdateCustomMarker}
+                  onDeleteCustomMarker={handleDeleteCustomMarker}
                   mapMode={mapMode}
                   canUseGoogle3D={canUseGoogle3D}
                   isIOSDevice={isIOSDevice}
+                  isStandalonePwa={isIOSStandalonePwa}
                   onToggleMapMode={toggleMapMode}
                   onSetMapMode={setMapMode}
-                hapticsEnabled={hapticsEnabled}
-                allBiens={biens}
-                searchZone={activeZoneRecherche}
-                touchNavTuning={touchNavTuning}
-                mobileQualityProfile={mobileQualityProfile}
-                isMobile
-                syncVersion={syncVersion}
-                focusBienId={focusBienId}
-                focusBienVersion={focusBienVersion}
-                onFocusHandled={handleMapFocusHandled}
-                mobilePanel={mobilePanel}
-                placingBienId={placingBienId}
-                boundaryGeoJson={boundaryGeoJson}
-                placingBienLabel={
-                  biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
-                }
-                onPlaceBien={handlePlaceBienOnMap}
-                isMobileMapExpanded
-                showMobileExpandButton={false}
-                topLeftOverlay={
-                  <AppMenu
-                    onLogout={seDeconnecter}
-                    onExportKml={handleExportKml}
-                    onOpenSettings={() => setSettingsPanelOpen(true)}
-                    showBoundary={showBoundary}
-                    onToggleBoundary={() => setShowBoundary((value) => !value)}
-                    themeMode={themeMode}
-                    onToggleTheme={() =>
-                      setThemeMode((value) => (value === "dark" ? "light" : "dark"))
-                    }
-                    styleMode={styleMode}
-                    onChangeStyle={setStyleMode}
-                    hapticsEnabled={hapticsEnabled}
-                    onToggleHaptics={handleToggleHaptics}
-                    touchNavTuning={touchNavTuning}
-                    onMenuOpenChange={setIsAppMenuOpen}
-                    isMobile
-                  />
-                }
-              />
+                  hapticsEnabled={hapticsEnabled}
+                  allBiens={biens}
+                  searchZone={activeZoneRecherche}
+                  touchNavTuning={touchNavTuning}
+                  mobileQualityProfile={mobileQualityProfile}
+                  isMobile
+                  syncVersion={syncVersion}
+                  focusBienId={focusBienId}
+                  focusBienVersion={focusBienVersion}
+                  onFocusHandled={handleMapFocusHandled}
+                  mobilePanel={mobilePanel}
+                  placingBienId={placingBienId}
+                  boundaryGeoJson={boundaryGeoJson}
+                  placingBienLabel={
+                    biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
+                  }
+                  onPlaceBien={handlePlaceBienOnMap}
+                  isMobileMapExpanded
+                  showMobileExpandButton={false}
+                  topLeftOverlay={
+                    <AppMenu
+                      onLogout={seDeconnecter}
+                      onExportKml={handleExportKml}
+                      onOpenSettings={() => setSettingsPanelOpen(true)}
+                      showBoundary={showBoundary}
+                      onToggleBoundary={() => setShowBoundary((value) => !value)}
+                      themeMode={themeMode}
+                      onToggleTheme={() =>
+                        setThemeMode((value) => (value === "dark" ? "light" : "dark"))
+                      }
+                      styleMode={styleMode}
+                      onChangeStyle={setStyleMode}
+                      hapticsEnabled={hapticsEnabled}
+                      onToggleHaptics={handleToggleHaptics}
+                      touchNavTuning={touchNavTuning}
+                      onMenuOpenChange={setIsAppMenuOpen}
+                      isMobile
+                    />
+                  }
+                />
+              </Suspense>
 
               <MobileMapActionButtons
                 mobilePanel={mobilePanel}
                 disabled={isAppMenuOpen}
+                isStandalonePwa={isIOSStandalonePwa}
                 onOpenSearch={openMobileSearchPanel}
                 onOpenFilters={() => openMobileFiltersPanel("map")}
               />
@@ -1652,6 +1711,65 @@ function App() {
         }
       />
     </div>
+  );
+}
+
+function MapLoadingFallback({ isMobile = false }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        minHeight: isMobile ? "var(--immo3d-mobile-vh, 100svh)" : 0,
+        display: "grid",
+        placeItems: "center",
+        background: "var(--map-shell-bg)",
+      }}
+    >
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "12px 16px",
+          borderRadius: 999,
+          border: "1px solid var(--border-color)",
+          background: "var(--panel-bg)",
+          color: "var(--text-primary)",
+          fontWeight: 700,
+          boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
+        }}
+      >
+        <LoadingSpinner size={16} />
+        <span>Chargement de la carte...</span>
+      </div>
+    </div>
+  );
+}
+
+function LoadingSpinner({ size = 14 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: "block", color: "currentColor" }}
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+        <animateTransform
+          attributeName="transform"
+          attributeType="XML"
+          type="rotate"
+          from="0 12 12"
+          to="360 12 12"
+          dur="0.8s"
+          repeatCount="indefinite"
+        />
+      </path>
+    </svg>
   );
 }
 
@@ -1729,14 +1847,23 @@ function DesktopSidePanel({
   );
 }
 
-function MobileMapActionButtons({ mobilePanel, onOpenSearch, onOpenFilters, disabled = false }) {
+function MobileMapActionButtons({
+  mobilePanel,
+  onOpenSearch,
+  onOpenFilters,
+  disabled = false,
+  isStandalonePwa = false,
+}) {
   if (disabled) return null;
+  const topOffset = isStandalonePwa
+    ? "calc(env(safe-area-inset-top, 0px) + 8px)"
+    : 14;
 
   return (
     <div
       style={{
         position: "absolute",
-        top: 14,
+        top: topOffset,
         right: 14,
         zIndex: 12,
         display: "flex",
@@ -1757,11 +1884,7 @@ function MobileMapActionButtons({ mobilePanel, onOpenSearch, onOpenFilters, disa
         title="Filtres"
         aria-label="Filtres"
       >
-        <img
-          src="https://static.vecteezy.com/ti/vecteur-libre/p1/9008831-vecteur-de-filtre-icone-filtre-logo-isole-sur-fond-blanc-gratuit-vectoriel.jpg"
-          alt=""
-          style={{ width: 20, height: 20, objectFit: "cover", borderRadius: 4 }}
-        />
+        <FilterLinesIcon />
       </button>
     </div>
   );
@@ -1962,7 +2085,7 @@ function MobileFiltersOverlay({ open, counts, filterState, onFilterChange, onClo
           top: 64,
           left: 12,
           right: 12,
-          maxHeight: "calc(100svh - 76px)",
+          maxHeight: "calc(var(--immo3d-mobile-vh, 100svh) - 76px)",
           borderRadius: 22,
           border: "1px solid var(--border-color)",
           background: "var(--panel-bg)",
@@ -2207,12 +2330,14 @@ function SettingsOverlay({
               marginBottom: 10,
             }}
           >
-            Auto recommande. Haute ameliore les details. Perf favorise la fluidite.
+            Auto recommande. Haute ameliore les details. Tres haute maximise le rendu satellite.
+            Perf favorise la fluidite.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
             {[
               { value: "auto", label: "Auto" },
               { value: "high", label: "Haute" },
+              { value: "ultra", label: "Tres haute" },
               { value: "perf", label: "Perf" },
             ].map((option) => {
               const active = normalizedMobileQualityProfile === option.value;
