@@ -9,6 +9,7 @@ const cesiumBaseUrl = "cesium";
 const cesiumSource = normalizePath(
   fileURLToPath(new URL("./node_modules/cesium/Build/Cesium", import.meta.url))
 );
+const cesiumSourceDepth = cesiumSource.split("/").length;
 
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -20,10 +21,26 @@ export default defineConfig(({ mode, command }) => {
       react(),
       viteStaticCopy({
         targets: [
-          { src: `${cesiumSource}/Workers/**/*`, dest: `${cesiumBaseUrl}/Workers` },
-          { src: `${cesiumSource}/ThirdParty/**/*`, dest: `${cesiumBaseUrl}/ThirdParty` },
-          { src: `${cesiumSource}/Assets/**/*`, dest: `${cesiumBaseUrl}/Assets` },
-          { src: `${cesiumSource}/Widgets/**/*`, dest: `${cesiumBaseUrl}/Widgets` },
+          {
+            src: `${cesiumSource}/Workers/**/*`,
+            dest: `${cesiumBaseUrl}/Workers`,
+            rename: { stripBase: cesiumSourceDepth + 1 },
+          },
+          {
+            src: `${cesiumSource}/ThirdParty/**/*`,
+            dest: `${cesiumBaseUrl}/ThirdParty`,
+            rename: { stripBase: cesiumSourceDepth + 1 },
+          },
+          {
+            src: `${cesiumSource}/Assets/**/*`,
+            dest: `${cesiumBaseUrl}/Assets`,
+            rename: { stripBase: cesiumSourceDepth + 1 },
+          },
+          {
+            src: `${cesiumSource}/Widgets/**/*`,
+            dest: `${cesiumBaseUrl}/Widgets`,
+            rename: { stripBase: cesiumSourceDepth + 1 },
+          },
         ],
       }),
     ],
@@ -52,6 +69,32 @@ export default defineConfig(({ mode, command }) => {
       host: env.VITE_PREVIEW_HOST || env.VITE_DEV_HOST || undefined,
       port: parseOptionalPort(env.VITE_PREVIEW_PORT),
       https: httpsConfig,
+    },
+
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (typeof id !== "string") {
+              return undefined;
+            }
+            const normalizedId = normalizePath(id);
+            if (normalizedId.includes("/node_modules/cesium/")) {
+              return "cesium-vendor";
+            }
+            if (
+              normalizedId.includes("/node_modules/react/") ||
+              normalizedId.includes("/node_modules/react-dom/")
+            ) {
+              return "react-vendor";
+            }
+            if (normalizedId.includes("/node_modules/")) {
+              return "vendor";
+            }
+            return undefined;
+          },
+        },
+      },
     },
   };
 });
