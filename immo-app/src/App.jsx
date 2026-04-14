@@ -46,6 +46,12 @@ function isLikelyIOSDevice() {
   return isClassicIOS || isIPadDesktopMode;
 }
 
+const MOBILE_QUALITY_PROFILE_OPTIONS = ["auto", "high", "perf"];
+
+function normalizeMobileQualityProfile(value) {
+  return MOBILE_QUALITY_PROFILE_OPTIONS.includes(value) ? value : "auto";
+}
+
 function App() {
   const noteTimerRef = useRef(null);
   const isBackgroundRefreshingRef = useRef(false);
@@ -58,6 +64,7 @@ function App() {
   const THEME_STORAGE_KEY = "immo3d_theme_mode";
   const STYLE_STORAGE_KEY = "immo3d_style_mode";
   const HAPTICS_STORAGE_KEY = "immo3d_haptics_enabled";
+  const MOBILE_QUALITY_PROFILE_STORAGE_KEY = "immo3d_mobile_quality_profile";
   const FILTERS_BY_ZONE_STORAGE_KEY = "immo3d_filters_by_zone";
   const MAP_MODE_STORAGE_KEY = "immo3d_map_mode";
   const FILTER_STATE_KEYS = [
@@ -125,6 +132,11 @@ function App() {
     if (storedValue === null) return true;
     return storedValue !== "false";
   });
+  const [mobileQualityProfile, setMobileQualityProfile] = useState(() =>
+    normalizeMobileQualityProfile(
+      localStorage.getItem(MOBILE_QUALITY_PROFILE_STORAGE_KEY)
+    )
+  );
   const touchNavTuning = useMemo(
     () => mergeTouchNavTuning(TOUCH_NAV_TUNING),
     []
@@ -275,6 +287,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(HAPTICS_STORAGE_KEY, hapticsEnabled ? "true" : "false");
   }, [hapticsEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem(MOBILE_QUALITY_PROFILE_STORAGE_KEY, mobileQualityProfile);
+  }, [mobileQualityProfile]);
 
   useEffect(() => {
     const safeMode = mapMode === "google3d" && canUseGoogle3D ? "google3d" : "osm";
@@ -1442,6 +1458,7 @@ function App() {
                 allBiens={biens}
                 searchZone={activeZoneRecherche}
                 touchNavTuning={touchNavTuning}
+                mobileQualityProfile={mobileQualityProfile}
                 isMobile={false}
                 syncVersion={syncVersion}
                 focusBienId={focusBienId}
@@ -1522,6 +1539,7 @@ function App() {
                 allBiens={biens}
                 searchZone={activeZoneRecherche}
                 touchNavTuning={touchNavTuning}
+                mobileQualityProfile={mobileQualityProfile}
                 isMobile
                 syncVersion={syncVersion}
                 focusBienId={focusBienId}
@@ -1628,6 +1646,10 @@ function App() {
         open={settingsPanelOpen}
         onClose={() => setSettingsPanelOpen(false)}
         onOpenSubscriptionPortal={ouvrirPortailAbonnement}
+        mobileQualityProfile={mobileQualityProfile}
+        onChangeMobileQualityProfile={(nextProfile) =>
+          setMobileQualityProfile(normalizeMobileQualityProfile(nextProfile))
+        }
       />
     </div>
   );
@@ -2110,7 +2132,14 @@ function MobileDetailOverlay({ open, onClose, children }) {
   );
 }
 
-function SettingsOverlay({ open, onClose, onOpenSubscriptionPortal }) {
+function SettingsOverlay({
+  open,
+  onClose,
+  onOpenSubscriptionPortal,
+  mobileQualityProfile = "auto",
+  onChangeMobileQualityProfile,
+}) {
+  const normalizedMobileQualityProfile = normalizeMobileQualityProfile(mobileQualityProfile);
   return (
     <div
       style={{
@@ -2169,6 +2198,56 @@ function SettingsOverlay({ open, onClose, onOpenSubscriptionPortal }) {
             background: "var(--panel-muted-bg)",
           }}
         >
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Qualite mobile</div>
+          <div
+            style={{
+              color: "var(--text-secondary)",
+              fontSize: 13,
+              lineHeight: 1.45,
+              marginBottom: 10,
+            }}
+          >
+            Auto recommande. Haute ameliore les details. Perf favorise la fluidite.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            {[
+              { value: "auto", label: "Auto" },
+              { value: "high", label: "Haute" },
+              { value: "perf", label: "Perf" },
+            ].map((option) => {
+              const active = normalizedMobileQualityProfile === option.value;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => onChangeMobileQualityProfile?.(option.value)}
+                  style={{
+                    height: 38,
+                    borderRadius: 11,
+                    border: active
+                      ? "1px solid var(--text-primary)"
+                      : "1px solid var(--border-color)",
+                    background: active ? "var(--text-primary)" : "var(--panel-bg)",
+                    color: active ? "var(--panel-bg)" : "var(--text-primary)",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            border: "1px solid var(--border-color)",
+            borderRadius: 16,
+            padding: 12,
+            background: "var(--panel-muted-bg)",
+          }}
+        >
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Abonnement</div>
           <div style={{ color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.45 }}>
             Preparation de l'espace abonnement. Tu peux deja ouvrir Stripe pour gerer ton abonnement.
@@ -2209,9 +2288,17 @@ function SearchIcon() {
 function FilterLinesIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M3 6H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M6 12H18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M10 18H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M3 5H21" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="15.5" cy="5" r="3.3" fill="currentColor" />
+      <circle cx="15.5" cy="5" r="1.25" fill="var(--panel-bg, #ffffff)" />
+
+      <path d="M3 12H21" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="8" cy="12" r="3.3" fill="currentColor" />
+      <circle cx="8" cy="12" r="1.25" fill="var(--panel-bg, #ffffff)" />
+
+      <path d="M3 19H21" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="17" cy="19" r="3.3" fill="currentColor" />
+      <circle cx="17" cy="19" r="1.25" fill="var(--panel-bg, #ffffff)" />
     </svg>
   );
 }
