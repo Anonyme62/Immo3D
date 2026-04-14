@@ -1076,6 +1076,7 @@ export default function CesiumMap({
     target: null,
   });
   const isSatelliteReadyRef = useRef(false);
+  const isTouchNavigationDevice = isMobile && hasTouchInput();
 
   useEffect(() => {
     onSelectBienRef.current = setSelectedBien;
@@ -1883,7 +1884,7 @@ function findPickedInteractiveData(
     viewer.resolutionScale = getPreferredResolutionScale(isMobile, isIOSDevice);
     viewer.scene.msaaSamples =
       isIOSDevice ? IOS_MSAA_SAMPLES : isMobile ? MOBILE_MSAA_SAMPLES : DESKTOP_MSAA_SAMPLES;
-    if (isMobile) {
+    if (isTouchNavigationDevice) {
       optimizeTouchNavigation(
         viewer,
         touchNavTuningRef.current,
@@ -1931,7 +1932,7 @@ function findPickedInteractiveData(
       }
       persistCurrentCameraInZoneCache(viewer);
     };
-    if (isMobile) {
+    if (isTouchNavigationDevice) {
       viewer.scene.postRender.addEventListener(enforceSatelliteZoomFloor);
     }
     viewer.camera.moveEnd.addEventListener(saveCameraStateOnMoveEnd);
@@ -2129,7 +2130,7 @@ function findPickedInteractiveData(
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
     const touchCanvas = viewer.scene.canvas;
-    const enableCustomTouchGestures = isMobile && hasTouchInput();
+    const enableCustomTouchGestures = isTouchNavigationDevice;
     const screenSpaceController = viewer.scene.screenSpaceCameraController;
 
     if (enableCustomTouchGestures) {
@@ -2668,7 +2669,7 @@ function findPickedInteractiveData(
         resetPanInertia();
         clearLongPressTimer();
       }
-      if (isMobile) {
+      if (isTouchNavigationDevice) {
         viewer.scene.postRender.removeEventListener(enforceSatelliteZoomFloor);
       }
       viewer.camera.moveEnd.removeEventListener(saveCameraStateOnMoveEnd);
@@ -2751,6 +2752,7 @@ function findPickedInteractiveData(
     let googleLateReadyTileset = null;
     let googleLateReadyListener = null;
     let googleLateReadyTimeoutId = null;
+    const useTouchNavigation = isMobile && hasTouchInput();
 
     const clearGoogleLateReadyListener = () => {
       if (googleLateReadyTileset && googleLateReadyListener) {
@@ -3469,7 +3471,7 @@ function findPickedInteractiveData(
     }
 
     const handleDesktopMoveStart = () => {
-      if (isMobile) return;
+      if (useTouchNavigation) return;
       adaptiveQualityStateRef.current.isMoving = true;
       clearMobileUltraRestoreTimeout();
       clearDesktopQualityRestoreTimeouts();
@@ -3478,7 +3480,7 @@ function findPickedInteractiveData(
     };
 
     const handleDesktopMoveEnd = () => {
-      if (isMobile) return;
+      if (useTouchNavigation) return;
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       clearDesktopQualityRestoreTimeouts();
@@ -3496,7 +3498,7 @@ function findPickedInteractiveData(
     };
 
     const handleMobileMoveStart = () => {
-      if (!isMobile) return;
+      if (!useTouchNavigation) return;
       adaptiveQualityStateRef.current.isMoving = true;
       clearMobileUltraRestoreTimeout();
       clearMobileQualityRestoreTimeout();
@@ -3505,7 +3507,7 @@ function findPickedInteractiveData(
     };
 
     const handleMobileMoveEnd = () => {
-      if (!isMobile) return;
+      if (!useTouchNavigation) return;
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       clearMobileQualityRestoreTimeout();
@@ -3523,11 +3525,11 @@ function findPickedInteractiveData(
       }, selectedMobileQualityProfile.idleRestoreDelayMs);
     };
 
-    if (isMobile) {
+    if (useTouchNavigation) {
       viewer.camera.moveStart.addEventListener(handleMobileMoveStart);
       viewer.camera.moveEnd.addEventListener(handleMobileMoveEnd);
       applyMobileIdleQuality();
-    } else if (!isMobile) {
+    } else {
       viewer.camera.moveStart.addEventListener(handleDesktopMoveStart);
       viewer.camera.moveEnd.addEventListener(handleDesktopMoveEnd);
       applyDesktopIdleQuality();
@@ -3573,10 +3575,10 @@ function findPickedInteractiveData(
         window.clearTimeout(satelliteWarmupBlockTimeoutRef.current);
         satelliteWarmupBlockTimeoutRef.current = null;
       }
-      if (isMobile && !viewer.isDestroyed()) {
+      if (useTouchNavigation && !viewer.isDestroyed()) {
         viewer.camera.moveStart.removeEventListener(handleMobileMoveStart);
         viewer.camera.moveEnd.removeEventListener(handleMobileMoveEnd);
-      } else if (!isMobile && !viewer.isDestroyed()) {
+      } else if (!viewer.isDestroyed()) {
         viewer.camera.moveStart.removeEventListener(handleDesktopMoveStart);
         viewer.camera.moveEnd.removeEventListener(handleDesktopMoveEnd);
       }
@@ -3692,7 +3694,6 @@ function findPickedInteractiveData(
         tilesetRef.current?.tilesLoaded &&
         (SATELLITE_USE_MESH_CLAMP_FOR_MARKERS ||
           (isMobile && SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE));
-
       const selectClosestPositionIndexes = (positions, limit) => {
         if (!Array.isArray(positions) || positions.length === 0) return [];
         const safeLimit = Math.max(0, Math.min(limit, positions.length));
@@ -3715,96 +3716,50 @@ function findPickedInteractiveData(
           .slice(0, safeLimit)
           .map((entry) => entry.index);
       };
-
-      if (shouldUseMeshClampForMarkers) {
-        try {
-          const maxClampPositions = isMobile
-            ? SATELLITE_CLAMP_MAX_POSITIONS_MOBILE
-            : SATELLITE_CLAMP_MAX_POSITIONS;
-
-          if (rawBienPositions.length > 0) {
-            const bienIndexesToClamp = selectClosestPositionIndexes(
-              rawBienPositions,
-              maxClampPositions
-            );
-            const sampleBienPositions = bienIndexesToClamp.map(
-              (index) => rawBienPositions[index]
-            );
-            const clampedBiens = await withPromiseTimeout(
-              viewer.scene.clampToHeightMostDetailed(sampleBienPositions),
-              SATELLITE_CLAMP_TIMEOUT_MS,
-              "CLAMP_TIMEOUT_BIENS",
-              "CLAMP_TIMEOUT_BIENS"
-            );
-            if (!cancelled && Array.isArray(clampedBiens)) {
-              clampedBiens.forEach((position, sampledIndex) => {
-                const index = bienIndexesToClamp[sampledIndex];
-                const elevated = elevateCartesianPosition(position);
-                if (elevated) {
-                  finalBienPositions[index] = elevated;
-                  return;
-                }
-                const bien = biensAvecCoordonnees[index];
-                finalBienPositions[index] = buildFallbackSatellitePosition(
-                  bien.lon,
-                  bien.lat
-                );
-              });
-            }
-          }
-
-          if (rawCustomPositions.length > 0) {
-            const customIndexesToClamp = selectClosestPositionIndexes(
-              rawCustomPositions,
-              maxClampPositions
-            );
-            const sampleCustomPositions = customIndexesToClamp.map(
-              (index) => rawCustomPositions[index]
-            );
-            const clampedCustomMarkers = await withPromiseTimeout(
-              viewer.scene.clampToHeightMostDetailed(sampleCustomPositions),
-              SATELLITE_CLAMP_TIMEOUT_MS,
-              "CLAMP_TIMEOUT_CUSTOM",
-              "CLAMP_TIMEOUT_CUSTOM"
-            );
-            if (!cancelled && Array.isArray(clampedCustomMarkers)) {
-              clampedCustomMarkers.forEach((position, sampledIndex) => {
-                const index = customIndexesToClamp[sampledIndex];
-                const elevated = elevateCartesianPosition(position);
-                if (elevated) {
-                  finalCustomPositions[index] = elevated;
-                  return;
-                }
-                const marker = customMarkers[index];
-                finalCustomPositions[index] = buildFallbackSatellitePosition(
-                  marker.lon,
-                  marker.lat
-                );
-              });
-            }
-          }
-        } catch (error) {
-          if (
-            error?.code !== "CLAMP_TIMEOUT_BIENS" &&
-            error?.code !== "CLAMP_TIMEOUT_CUSTOM"
-          ) {
-            console.error("Erreur clamp reperes satellite :", error);
-          }
-          finalBienPositions = biensAvecCoordonnees.map((bien) =>
-            buildFallbackSatellitePosition(bien.lon, bien.lat)
+      const buildBienPositionById = (positions) => {
+        const bienPositionById = new Map();
+        biensAvecCoordonnees.forEach((bien, index) => {
+          bienPositionById.set(bien.id, positions[index] || rawBienPositions[index]);
+        });
+        return bienPositionById;
+      };
+      const resolveBienPointPosition = (
+        bien,
+        index,
+        positions,
+        bienPositionById = buildBienPositionById(positions)
+      ) => {
+        const basePosition =
+          bienPositionById.get(bien.id) || positions[index] || rawBienPositions[index];
+        const anchorBienId = addressAnchorAssignments.get(bien.id);
+        return anchorBienId
+          ? bienPositionById.get(anchorBienId) || basePosition
+          : basePosition;
+      };
+      const bienEntitiesByIndex = new Array(biensAvecCoordonnees.length);
+      const customEntitiesByIndex = new Array(customMarkers.length);
+      const applyBienEntityPositions = (positions) => {
+        const bienPositionById = buildBienPositionById(positions);
+        biensAvecCoordonnees.forEach((bien, index) => {
+          const entity = bienEntitiesByIndex[index];
+          if (!entity) return;
+          entity.position = resolveBienPointPosition(
+            bien,
+            index,
+            positions,
+            bienPositionById
           );
-          finalCustomPositions = customMarkers.map((marker) =>
-            buildFallbackSatellitePosition(marker.lon, marker.lat)
-          );
-        }
-      }
-
+        });
+      };
+      const applyCustomEntityPositions = (positions) => {
+        customMarkers.forEach((marker, markerIndex) => {
+          const entity = customEntitiesByIndex[markerIndex];
+          if (!entity) return;
+          entity.position = positions[markerIndex] || rawCustomPositions[markerIndex];
+        });
+      };
+      const initialBienPositionById = buildBienPositionById(finalBienPositions);
       if (cancelled) return;
-
-      const bienPositionById = new Map();
-      biensAvecCoordonnees.forEach((bien, index) => {
-        bienPositionById.set(bien.id, finalBienPositions[index] || rawBienPositions[index]);
-      });
 
       biensAvecCoordonnees.forEach((bien, index) => {
         const labelGroup = labelGroupAssignments.get(bien.id) ?? {
@@ -3820,11 +3775,12 @@ function findPickedInteractiveData(
           index: 0,
           total: 1,
         };
-        const basePosition = bienPositionById.get(bien.id) || finalBienPositions[index] || rawBienPositions[index];
-        const anchorBienId = addressAnchorAssignments.get(bien.id);
-        const pointPosition = anchorBienId
-          ? bienPositionById.get(anchorBienId) || basePosition
-          : basePosition;
+        const pointPosition = resolveBienPointPosition(
+          bien,
+          index,
+          finalBienPositions,
+          initialBienPositionById
+        );
         const shouldShowPoint = stackAssignment.index === 0;
         const isSelected = currentSelectedBienId === bien.id;
 
@@ -3871,6 +3827,7 @@ function findPickedInteractiveData(
         entity.showPointByPriority = shouldShowPoint;
         entity.stackBienIds = (stackByBienId.get(bien.id) || [bien]).map((item) => item.id);
         entitiesRef.current.push(entity);
+        bienEntitiesByIndex[index] = entity;
         markerDataByIdRef.current.set(bien.id, bien);
       });
 
@@ -3911,7 +3868,96 @@ function findPickedInteractiveData(
         });
 
         entity.customMarkerData = marker;
+        customEntitiesByIndex[markerIndex] = entity;
       });
+
+      const refineMarkerHeightsWithClamp = async () => {
+        const clampedBienPositions = [...finalBienPositions];
+        const clampedCustomPositions = [...finalCustomPositions];
+        try {
+          const maxClampPositions = isMobile
+            ? SATELLITE_CLAMP_MAX_POSITIONS_MOBILE
+            : SATELLITE_CLAMP_MAX_POSITIONS;
+
+          if (rawBienPositions.length > 0) {
+            const bienIndexesToClamp = selectClosestPositionIndexes(
+              rawBienPositions,
+              maxClampPositions
+            );
+            const sampleBienPositions = bienIndexesToClamp.map(
+              (index) => rawBienPositions[index]
+            );
+            const clampedBiens = await withPromiseTimeout(
+              viewer.scene.clampToHeightMostDetailed(sampleBienPositions),
+              SATELLITE_CLAMP_TIMEOUT_MS,
+              "CLAMP_TIMEOUT_BIENS",
+              "CLAMP_TIMEOUT_BIENS"
+            );
+            if (!cancelled && Array.isArray(clampedBiens)) {
+              clampedBiens.forEach((position, sampledIndex) => {
+                const index = bienIndexesToClamp[sampledIndex];
+                const elevated = elevateCartesianPosition(position);
+                if (elevated) {
+                  clampedBienPositions[index] = elevated;
+                  return;
+                }
+                const bien = biensAvecCoordonnees[index];
+                clampedBienPositions[index] = buildFallbackSatellitePosition(
+                  bien.lon,
+                  bien.lat
+                );
+              });
+            }
+          }
+
+          if (rawCustomPositions.length > 0) {
+            const customIndexesToClamp = selectClosestPositionIndexes(
+              rawCustomPositions,
+              maxClampPositions
+            );
+            const sampleCustomPositions = customIndexesToClamp.map(
+              (index) => rawCustomPositions[index]
+            );
+            const clampedCustomMarkers = await withPromiseTimeout(
+              viewer.scene.clampToHeightMostDetailed(sampleCustomPositions),
+              SATELLITE_CLAMP_TIMEOUT_MS,
+              "CLAMP_TIMEOUT_CUSTOM",
+              "CLAMP_TIMEOUT_CUSTOM"
+            );
+            if (!cancelled && Array.isArray(clampedCustomMarkers)) {
+              clampedCustomMarkers.forEach((position, sampledIndex) => {
+                const index = customIndexesToClamp[sampledIndex];
+                const elevated = elevateCartesianPosition(position);
+                if (elevated) {
+                  clampedCustomPositions[index] = elevated;
+                  return;
+                }
+                const marker = customMarkers[index];
+                clampedCustomPositions[index] = buildFallbackSatellitePosition(
+                  marker.lon,
+                  marker.lat
+                );
+              });
+            }
+          }
+        } catch (error) {
+          if (
+            error?.code !== "CLAMP_TIMEOUT_BIENS" &&
+            error?.code !== "CLAMP_TIMEOUT_CUSTOM"
+          ) {
+            console.error("Erreur clamp reperes satellite :", error);
+          }
+        }
+
+        if (cancelled) return;
+        applyBienEntityPositions(clampedBienPositions);
+        applyCustomEntityPositions(clampedCustomPositions);
+        viewer.scene.requestRender();
+      };
+
+      if (shouldUseMeshClampForMarkers) {
+        void refineMarkerHeightsWithClamp();
+      }
 
       if (!hasInitialFlyRef.current) {
         const initialBien = getReferenceBien();
@@ -4023,6 +4069,7 @@ function findPickedInteractiveData(
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
+    const useTouchNavigation = isMobile && hasTouchInput();
     const liveMode =
       modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
         ? "google3d"
@@ -4030,7 +4077,7 @@ function findPickedInteractiveData(
           ? resolveMode(mapModeRef.current)
           : "osm";
 
-    if (isMobile) {
+    if (useTouchNavigation) {
       optimizeTouchNavigation(viewer, touchNavTuningRef.current, liveMode);
       const modeKey = getModeKey(liveMode);
       if (!Number.isFinite(syncPanHeightRef.current[modeKey])) {
@@ -4352,28 +4399,43 @@ function findPickedInteractiveData(
     const currentMode = liveMode;
     const cameraHeight =
       Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)?.height || 0;
-    const minimumTopDownRange = currentMode === "google3d" ? 160 : 850;
+    const currentRangeToFocus = Cesium.Cartesian3.distance(
+      viewer.camera.positionWC,
+      focusPosition
+    );
+    const minimumTopDownRange = currentMode === "google3d" ? 120 : 850;
+    const maximumTopDownRange = currentMode === "google3d" ? 18000 : 120000;
+    const normalizedCurrentRange = Math.max(
+      minimumTopDownRange,
+      Math.min(
+        maximumTopDownRange,
+        Number.isFinite(currentRangeToFocus) && currentRangeToFocus > 0
+          ? currentRangeToFocus
+          : cameraHeight
+      )
+    );
     let topDownRange;
 
     if (!isTilted) {
-      // Entering 3D: prefer the last known top-down range to avoid cumulative drift.
-      const stableRange = Number(tiltToggleBaseRangeRef.current);
-      topDownRange = Math.max(
-        Number.isFinite(stableRange) ? stableRange : cameraHeight,
-        minimumTopDownRange
-      );
+      // Entering 3D: lock range from current camera distance so the toggle
+      // preserves zoom instead of jumping far away.
+      topDownRange = normalizedCurrentRange;
       tiltToggleBaseRangeRef.current = topDownRange;
     } else {
-      // Returning to 2D: reuse the same base range captured when we entered 3D.
+      // Returning to 2D: restore the locked top-down range, clamped to sane bounds.
       const stableRange = Number(tiltToggleBaseRangeRef.current);
+      const fallbackRange =
+        Number.isFinite(stableRange) && stableRange > 0
+          ? stableRange
+          : normalizedCurrentRange;
       topDownRange = Math.max(
-        Number.isFinite(stableRange) ? stableRange : cameraHeight,
-        minimumTopDownRange
+        minimumTopDownRange,
+        Math.min(maximumTopDownRange, fallbackRange)
       );
     }
 
     const obliqueRange = Math.max(
-      topDownRange * (currentMode === "google3d" ? 1.18 : 1.12),
+      topDownRange * (currentMode === "google3d" ? 1.06 : 1.1),
       currentMode === "google3d" ? 220 : 980
     );
     const boundingSphere = new Cesium.BoundingSphere(

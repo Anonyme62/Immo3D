@@ -997,6 +997,13 @@ function App() {
       setSelectedBien((prev) =>
         prev ? { ...prev, blackliste: true, statut: "blackliste" } : prev
       );
+
+      if (isMobile) {
+        // On mobile, return straight to map after blacklisting instead of
+        // auto-showing another listing in the detail flow.
+        setMobileDetailOrigin("map");
+        setMobilePanel("none");
+      }
     } catch (error) {
       console.error("Erreur blacklist :", error);
       alert(error.message || "Erreur lors de l'ajout a la blacklist");
