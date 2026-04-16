@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   formatPrix,
   formatSurface,
@@ -5,12 +6,20 @@ import {
   getBienBadge,
   getSelectedBienPhotos,
 } from "../utils/bienFormat";
+import { uploadPhotoAsset } from "../api";
+
+const MAX_NOTE_PHOTOS = 8;
+const MAX_NOTE_PHOTO_DATA_URL_LENGTH = 1_200_000;
+const NOTE_PHOTO_MAX_DIMENSION_STEPS = [1920, 1600, 1280, 1024, 800, 640];
+const NOTE_PHOTO_QUALITY_STEPS = [0.86, 0.78, 0.7, 0.62, 0.54, 0.46];
 
 export default function SelectedBienPanel({
   selectedBien,
   noteDraft,
+  notePhotos = [],
   noteStatus,
   onNoteChange,
+  onNotePhotosChange,
   onAddFavorite,
   onRemoveFavorite,
   onAddSetAside,
@@ -22,8 +31,11 @@ export default function SelectedBienPanel({
   isPlacingBien = false,
   isMobile = false,
 }) {
+  const [notePhotoError, setNotePhotoError] = useState("");
+  const [pendingNotePhotoPreviews, setPendingNotePhotoPreviews] = useState([]);
   const photos = getSelectedBienPhotos(selectedBien);
   const annonceLinks = getAnnonceLinks(selectedBien);
+  const safeNotePhotos = Array.isArray(notePhotos) ? notePhotos : [];
   const selectedBienKey =
     selectedBien?.id ||
     selectedBien?.bien_id ||
@@ -69,6 +81,7 @@ export default function SelectedBienPanel({
     Boolean(selectedBien?.placed_manually) ||
     isPlacingBien;
   const canOpenDirections = Boolean(buildDirectionsUrl(selectedBien));
+  const directionsTarget = isMobile ? "_self" : "_blank";
   const displayAddress = formatDisplayAddress(selectedBien?.adresse);
 
   const placementButtonLabel = isPlacingBien
@@ -76,6 +89,58 @@ export default function SelectedBienPanel({
     : selectedBien?.placed_manually
       ? "Replacer le repere"
       : "Placer un repere";
+
+  const handleNotePhotoInputChange = async (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = "";
+    setNotePhotoError("");
+
+    if (!selectedFiles.length) return;
+
+    const availableSlots = Math.max(
+      0,
+      MAX_NOTE_PHOTOS - safeNotePhotos.length - pendingNotePhotoPreviews.length
+    );
+    if (availableSlots <= 0) {
+      setNotePhotoError("Maximum 8 photos atteint pour cette note.");
+      return;
+    }
+
+    const filesToEncode = selectedFiles.slice(0, availableSlots);
+    const stagedPreviews = filesToEncode.map((file, index) => ({
+      id: `${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`,
+      file,
+      url: URL.createObjectURL(file),
+    }));
+    setPendingNotePhotoPreviews((prev) => [...prev, ...stagedPreviews]);
+
+    let nextPersistedPhotos = [...safeNotePhotos];
+    let hasFailure = false;
+
+    for (const preview of stagedPreviews) {
+      try {
+        const storedPhotoReference = await convertFileToStoredReference(preview.file);
+        nextPersistedPhotos = [...nextPersistedPhotos, storedPhotoReference].slice(0, MAX_NOTE_PHOTOS);
+        onNotePhotosChange?.(nextPersistedPhotos);
+      } catch (error) {
+        hasFailure = true;
+        console.error("Erreur ajout photo note bien :", error);
+      } finally {
+        setPendingNotePhotoPreviews((prev) => prev.filter((item) => item.id !== preview.id));
+        URL.revokeObjectURL(preview.url);
+      }
+    }
+
+    if (hasFailure) {
+      setNotePhotoError("Une ou plusieurs photos n'ont pas pu etre chargees.");
+    }
+  };
+
+  const removeNotePhoto = (photoIndex) => {
+    const nextPhotos = safeNotePhotos.filter((_, index) => index !== photoIndex);
+    setNotePhotoError("");
+    onNotePhotosChange?.(nextPhotos);
+  };
 
   return (
     <div
@@ -201,29 +266,33 @@ export default function SelectedBienPanel({
               lineHeight: 1.8,
             }}
           >
-            <div>
-              <strong>Agence :</strong> {selectedBien.agence || "Non renseignee"}
+            <div style={bienInfoRowStyle()}>
+              <strong style={bienInfoLabelStyle()}>Agence :</strong>
+              <span
+                title={selectedBien.agence || "Non renseignee"}
+                style={bienInfoValueStyle()}
+              >
+                {selectedBien.agence || "Non renseignee"}
+              </span>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <strong>Adresse :</strong>
-              <span>{displayAddress}</span>
-              {canPlaceBienMarker ? (
+            <div style={bienInfoRowStyle()}>
+              <strong style={bienInfoLabelStyle()}>Adresse :</strong>
+              <span title={displayAddress} style={bienInfoValueStyle()}>
+                {displayAddress || "Non renseignee"}
+              </span>
+            </div>
+
+            {canPlaceBienMarker ? (
+              <div style={{ marginTop: 8 }}>
                 <button
                   onClick={onStartPlacingBien}
-                  style={panelActionButtonStyle("neutral", false, true)}
+                  style={panelActionButtonStyle("neutral", isMobile, true)}
                 >
                   {placementButtonLabel}
                 </button>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
 
             {canOpenDirections || selectedBien.placed_manually ? (
               <div
@@ -237,9 +306,9 @@ export default function SelectedBienPanel({
                 {canOpenDirections ? (
                   <a
                     href={buildDirectionsUrl(selectedBien)}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={panelActionLinkStyle("neutral", isMobile)}
+                    target={directionsTarget}
+                    rel={isMobile ? undefined : "noreferrer"}
+                    style={directionsButtonStyle(isMobile)}
                   >
                     S'y rendre
                   </a>
@@ -256,53 +325,24 @@ export default function SelectedBienPanel({
               </div>
             ) : null}
 
-            <div>
-              <strong>Prix :</strong> {formatPrix(selectedBien.prix)}
+            <div style={bienInfoRowStyle()}>
+              <strong style={bienInfoLabelStyle()}>Prix :</strong>
+              <span style={bienInfoValueStyle()}>{formatPrix(selectedBien.prix)}</span>
             </div>
 
-            <div>
-              <strong>Surface :</strong> {formatSurface(selectedBien.surface)}
+            <div style={bienInfoRowStyle()}>
+              <strong style={bienInfoLabelStyle()}>Surface :</strong>
+              <span style={bienInfoValueStyle()}>{formatSurface(selectedBien.surface)}</span>
             </div>
 
-            <div>
-              <strong>Anciennete :</strong>{" "}
-              {selectedBien.anciennete !== null && selectedBien.anciennete !== undefined
-                ? `${selectedBien.anciennete} jours`
-                : "? jours"}
+            <div style={bienInfoRowStyle()}>
+              <strong style={bienInfoLabelStyle()}>Anciennete :</strong>
+              <span style={bienInfoValueStyle()}>
+                {selectedBien.anciennete !== null && selectedBien.anciennete !== undefined
+                  ? `${selectedBien.anciennete} jours`
+                  : "? jours"}
+              </span>
             </div>
-          </div>
-
-          <div style={{ marginTop: 18 }}>
-            <textarea
-              value={noteDraft}
-              onChange={(event) => onNoteChange(event.target.value)}
-              placeholder="Ajoute une note sur ce bien..."
-              style={{
-                width: "100%",
-                minHeight: 110,
-                borderRadius: 14,
-                border: "1px solid var(--border-color)",
-                background: "var(--input-bg)",
-                color: "var(--text-primary)",
-                padding: 12,
-                fontFamily: "Arial, sans-serif",
-                fontSize: 14,
-                resize: "vertical",
-                boxSizing: "border-box",
-              }}
-            />
-
-            {noteStatus ? (
-              <div
-                style={{
-                  marginTop: 8,
-                  color: noteStatus.includes("Erreur") ? "#991b1b" : "var(--text-muted)",
-                  fontSize: 13,
-                }}
-              >
-                {noteStatus}
-              </div>
-            ) : null}
           </div>
 
           <div style={{ marginTop: 18 }}>
@@ -340,12 +380,258 @@ export default function SelectedBienPanel({
             )}
           </div>
 
+          <div style={{ marginTop: 18 }}>
+            <textarea
+              value={noteDraft}
+              onChange={(event) => onNoteChange(event.target.value)}
+              placeholder="Ajoute une note sur ce bien..."
+              style={{
+                width: "100%",
+                minHeight: 110,
+                borderRadius: 14,
+                border: "1px solid var(--border-color)",
+                background: "var(--input-bg)",
+                color: "var(--text-primary)",
+                padding: 12,
+                fontFamily: "Arial, sans-serif",
+                fontSize: 14,
+                resize: "vertical",
+                boxSizing: "border-box",
+              }}
+            />
+
+            {noteStatus ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  color: noteStatus.includes("Erreur") ? "#991b1b" : "var(--text-muted)",
+                  fontSize: 13,
+                }}
+              >
+                {noteStatus}
+              </div>
+            ) : null}
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            {isMobile ? (
+              <div style={mobilePhotoButtonsRowStyle()}>
+                <label style={notePhotoUploadButtonStyle()}>
+                  Prendre photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    multiple
+                    onChange={handleNotePhotoInputChange}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                <label style={notePhotoUploadButtonStyle()}>
+                  Ajouter photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleNotePhotoInputChange}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              </div>
+            ) : (
+              <label style={notePhotoUploadButtonStyle()}>
+                Ajouter photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleNotePhotoInputChange}
+                  style={{ display: "none" }}
+                />
+              </label>
+            )}
+            {safeNotePhotos.length > 0 || pendingNotePhotoPreviews.length > 0 ? (
+              <div style={notePhotoGridStyle(isMobile)}>
+                {safeNotePhotos.map((photo, index) => (
+                  <div key={`note-photo-${index}`} style={{ position: "relative" }}>
+                    <img
+                      src={photo}
+                      alt={`Photo note ${index + 1}`}
+                      style={notePhotoPreviewStyle()}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeNotePhoto(index)}
+                      style={notePhotoRemoveButtonStyle()}
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+                {pendingNotePhotoPreviews.map((preview) => (
+                  <div
+                    key={preview.id}
+                    style={{
+                      position: "relative",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    <img
+                      src={preview.url}
+                      alt="Photo en cours de traitement"
+                      style={{
+                        ...notePhotoPreviewStyle(),
+                        opacity: 0.6,
+                        filter: "blur(0.4px)",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: "auto 6px 6px 6px",
+                        background: "rgba(17, 24, 39, 0.74)",
+                        color: "#f9fafb",
+                        borderRadius: 8,
+                        padding: "3px 6px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textAlign: "center",
+                      }}
+                    >
+                      Traitement...
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {notePhotoError ? (
+              <div style={{ marginTop: 8, color: "#991b1b", fontSize: 13 }}>
+                {notePhotoError}
+              </div>
+            ) : null}
+          </div>
+
           {!isMobile ? photosBlock : null}
 
         </div>
       )}
     </div>
   );
+}
+
+function loadImageElement(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Impossible de charger cette photo."));
+    image.src = dataUrl;
+  });
+}
+
+function tryCompressNotePhoto(imageElement) {
+  const sourceWidth = Math.max(1, imageElement.naturalWidth || imageElement.width || 1);
+  const sourceHeight = Math.max(1, imageElement.naturalHeight || imageElement.height || 1);
+  const preferredMimeTypes = ["image/webp", "image/jpeg"];
+
+  for (const maxDimension of NOTE_PHOTO_MAX_DIMENSION_STEPS) {
+    const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) break;
+    context.drawImage(imageElement, 0, 0, width, height);
+
+    for (const mimeType of preferredMimeTypes) {
+      for (const quality of NOTE_PHOTO_QUALITY_STEPS) {
+        const compressedDataUrl = canvas.toDataURL(mimeType, quality);
+        if (compressedDataUrl.length <= MAX_NOTE_PHOTO_DATA_URL_LENGTH) {
+          return compressedDataUrl;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+async function convertFileToDataUrl(file) {
+  const originalDataUrl = await readFileAsDataUrl(file);
+  if (originalDataUrl.length <= MAX_NOTE_PHOTO_DATA_URL_LENGTH) {
+    return originalDataUrl;
+  }
+
+  const imageElement = await loadImageElement(originalDataUrl);
+  const compressedDataUrl = tryCompressNotePhoto(imageElement);
+  if (compressedDataUrl) {
+    return compressedDataUrl;
+  }
+
+  throw new Error(
+    "Photo trop volumineuse. Essaie une photo plus legere ou recadree."
+  );
+}
+
+async function convertFileToStoredReference(file) {
+  const dataUrl = await convertFileToDataUrl(file);
+  const uploadFile = dataUrlToUploadFile(dataUrl, file?.name || "note-photo");
+  try {
+    return await uploadPhotoAsset(uploadFile, "note");
+  } catch (error) {
+    console.warn("Upload objet indisponible (note), fallback data URL.", error);
+    return dataUrl;
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Impossible de lire cette photo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToUploadFile(dataUrl, originalFileName = "photo") {
+  const match = String(dataUrl || "").match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Format de photo encodee invalide.");
+  }
+
+  const mimeType = match[1] || "image/jpeg";
+  const base64Body = match[2] || "";
+  const binary = window.atob(base64Body);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  const safeName = buildUploadFileName(originalFileName, mimeType);
+  return new File([bytes], safeName, { type: mimeType });
+}
+
+function buildUploadFileName(originalFileName, mimeType) {
+  const baseName = String(originalFileName || "photo").trim() || "photo";
+  const safeBaseName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  const extensionByMime = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "image/gif": ".gif",
+  };
+  const normalizedMimeType = String(mimeType || "").toLowerCase();
+  const wantedExtension = extensionByMime[normalizedMimeType] || ".jpg";
+
+  if (safeBaseName.toLowerCase().endsWith(wantedExtension)) {
+    return safeBaseName;
+  }
+  return `${safeBaseName}${wantedExtension}`;
 }
 
 function panelActionButtonStyle(tone = "neutral", isMobile = false, compact = false) {
@@ -408,6 +694,113 @@ function panelActionLinkStyle(tone = "neutral", isMobile = false, compact = fals
   };
 }
 
+function notePhotoUploadButtonStyle() {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    width: "100%",
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid var(--border-color)",
+    background: "var(--panel-subtle)",
+    color: "var(--text-primary)",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+    boxSizing: "border-box",
+    minWidth: 0,
+  };
+}
+
+function mobilePhotoButtonsRowStyle() {
+  return {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 8,
+  };
+}
+
+function notePhotoGridStyle(isMobile) {
+  return {
+    marginTop: 10,
+    display: "grid",
+    gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))",
+    gap: 8,
+  };
+}
+
+function notePhotoPreviewStyle() {
+  return {
+    width: "100%",
+    height: 90,
+    borderRadius: 10,
+    objectFit: "cover",
+    display: "block",
+    border: "1px solid var(--border-color)",
+  };
+}
+
+function notePhotoRemoveButtonStyle() {
+  return {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    border: "none",
+    borderRadius: "50%",
+    background: "rgba(127, 29, 29, 0.92)",
+    color: "#fee2e2",
+    fontWeight: 800,
+    cursor: "pointer",
+    lineHeight: 1,
+  };
+}
+
+function bienInfoRowStyle() {
+  return {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+    flexWrap: "nowrap",
+  };
+}
+
+function bienInfoLabelStyle() {
+  return {
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  };
+}
+
+function bienInfoValueStyle() {
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+}
+
+function directionsButtonStyle(isMobile = false) {
+  return {
+    ...panelActionLinkStyle("neutral", isMobile),
+    borderRadius: 999,
+    padding: isMobile ? "10px 14px" : "9px 14px",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(245,247,250,0.9) 100%)",
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    boxShadow:
+      "0 8px 20px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72)",
+    color: "#1f2937",
+    letterSpacing: 0.2,
+    backdropFilter: "blur(6px)",
+  };
+}
+
 function buildDirectionsUrl(selectedBien) {
   if (!selectedBien) return "";
 
@@ -421,8 +814,12 @@ function buildDirectionsUrl(selectedBien) {
 
   if (!destination) return "";
 
-  if (isAppleMobileDevice()) {
-    return `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=d`;
+  if (isMobileDevice()) {
+    if (isAppleMobileDevice()) {
+      return `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=d`;
+    }
+
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
   }
 
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
@@ -433,9 +830,24 @@ function formatDisplayAddress(address) {
   if (!trimmedAddress) return "";
 
   return trimmedAddress
-    .replace(/,\s*(\d{5})\s+([A-Za-zÀ-ÿ' -]+)$/u, ", $2")
-    .replace(/\s+(\d{5})\s+([A-Za-zÀ-ÿ' -]+)$/u, " $2")
+    .replace(/\b\d{5}\b/g, "")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*,/g, ", ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/,\s*$/g, "")
     .trim();
+}
+function isMobileDevice() {
+  if (typeof navigator === "undefined") return false;
+
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+  return (
+    /iPhone|iPad|iPod|Android/i.test(userAgent) ||
+    (platform === "MacIntel" && maxTouchPoints > 1)
+  );
 }
 
 function isAppleMobileDevice() {
@@ -450,3 +862,6 @@ function isAppleMobileDevice() {
     (platform === "MacIntel" && maxTouchPoints > 1)
   );
 }
+
+
+
