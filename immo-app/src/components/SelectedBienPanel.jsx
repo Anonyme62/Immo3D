@@ -578,12 +578,7 @@ async function convertFileToDataUrl(file) {
 async function convertFileToStoredReference(file) {
   const dataUrl = await convertFileToDataUrl(file);
   const uploadFile = dataUrlToUploadFile(dataUrl, file?.name || "note-photo");
-  try {
-    return await uploadPhotoAsset(uploadFile, "note");
-  } catch (error) {
-    console.warn("Upload objet indisponible (note), fallback data URL.", error);
-    return dataUrl;
-  }
+  return await uploadPhotoAsset(uploadFile, "note");
 }
 
 function readFileAsDataUrl(file) {

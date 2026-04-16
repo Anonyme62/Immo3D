@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_subscribed_user, require_valid_csrf
 from app.models import CustomMarker, User
+from app.photo_refs import sanitize_photo_references
 from app.schemas import (
     CustomMarkerCreateRequest,
     CustomMarkerResponse,
@@ -31,24 +32,11 @@ def extract_postcode(value: str | None) -> str:
 
 
 def sanitize_marker_photos(photos: list[str] | None) -> list[str]:
-    sanitized: list[str] = []
-    for photo in photos or []:
-        if not isinstance(photo, str):
-            continue
-        normalized_photo = photo.strip()
-        if not normalized_photo:
-            continue
-        if len(normalized_photo) > MAX_MARKER_PHOTO_LENGTH:
-            raise HTTPException(
-                status_code=400,
-                detail="Une photo est trop volumineuse pour etre enregistree.",
-            )
-        sanitized.append(normalized_photo)
-
-        if len(sanitized) >= MAX_MARKER_PHOTOS:
-            break
-
-    return sanitized
+    return sanitize_photo_references(
+        photos,
+        max_photos=MAX_MARKER_PHOTOS,
+        max_data_url_length=MAX_MARKER_PHOTO_LENGTH,
+    )
 
 
 @router.get("", response_model=list[CustomMarkerResponse])

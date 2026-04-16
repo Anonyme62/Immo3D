@@ -1885,12 +1885,7 @@ function openMarkerEditorAtPosition(position) {
   async function convertFileToStoredMarkerPhoto(file) {
     const dataUrl = await convertFileToDataUrl(file);
     const uploadFile = dataUrlToUploadFile(dataUrl, file?.name || "marker-photo");
-    try {
-      return await uploadPhotoAsset(uploadFile, "marker");
-    } catch (error) {
-      console.warn("Upload objet indisponible (repere), fallback data URL.", error);
-      return dataUrl;
-    }
+    return await uploadPhotoAsset(uploadFile, "marker");
   }
 
   function dataUrlToUploadFile(dataUrl, originalFileName = "photo") {

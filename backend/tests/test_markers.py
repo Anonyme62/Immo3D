@@ -71,3 +71,39 @@ class CustomMarkersApiTests(BackendApiTestCase):
         list_response = self.client.get("/markers")
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.json(), [])
+
+    def test_marker_accepts_remote_photo_urls(self):
+        self.login("charlie")
+        create_response = self.client.post(
+            "/markers",
+            json={
+                "lat": 50.45,
+                "lon": 2.79,
+                "note": "Repere URL",
+                "photos": ["https://cdn.example.com/photos/marker-1.jpg"],
+            },
+            headers=self.auth_headers(),
+        )
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(
+            create_response.json()["photos"],
+            ["https://cdn.example.com/photos/marker-1.jpg"],
+        )
+
+    def test_marker_rejects_data_url_photos(self):
+        self.login("charlie")
+        create_response = self.client.post(
+            "/markers",
+            json={
+                "lat": 50.45,
+                "lon": 2.79,
+                "note": "Repere data url",
+                "photos": ["data:image/webp;base64,AAAA"],
+            },
+            headers=self.auth_headers(),
+        )
+        self.assertEqual(create_response.status_code, 400)
+        self.assertEqual(
+            create_response.json()["detail"],
+            "Format photo non supporte. Utilise une URL distante.",
+        )
