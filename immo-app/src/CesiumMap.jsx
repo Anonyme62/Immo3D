@@ -4,6 +4,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import {
   getPostcodeFromCoordinates,
   getStreetSuggestions,
+  uploadPhotoAsset,
 } from "./api";
 import { CESIUM_ION_TOKEN } from "./config";
 import { TOUCH_NAV_TUNING } from "./config/touchNavigationTuning";
@@ -1142,6 +1143,55 @@ function getBienPreviewPhoto(bien) {
   return Array.isArray(photos) && photos.length > 0 ? photos[0] : "";
 }
 
+function getBienStableId(bien) {
+  if (!bien || typeof bien !== "object") return "";
+  return String(
+    bien.id ??
+      bien.bien_id ??
+      bien.id_bien ??
+      bien.lien_yanport ??
+      bien.lien_annonce ??
+      ""
+  );
+}
+
+function getStackedOptionBadge(bien) {
+  if (bien?.blackliste) {
+    return {
+      label: "blackliste",
+      style: {
+        background: "#fee2e2",
+        color: "#991b1b",
+        border: "1px solid #fecaca",
+      },
+    };
+  }
+
+  if (bien?.de_cote) {
+    return {
+      label: "de cote",
+      style: {
+        background: "#fef3c7",
+        color: "#92400e",
+        border: "1px solid #fde68a",
+      },
+    };
+  }
+
+  if (bien?.favorite) {
+    return {
+      label: "favori",
+      style: {
+        background: "#dcfce7",
+        color: "#166534",
+        border: "1px solid #bbf7d0",
+      },
+    };
+  }
+
+  return getBienBadge(bien);
+}
+
 export default function CesiumMap({
   biens,
   allBiens = [],
@@ -1444,6 +1494,37 @@ export default function CesiumMap({
   useEffect(() => {
     selectedCustomMarkerIdRef.current = selectedCustomMarkerId;
   }, [selectedCustomMarkerId]);
+
+  useEffect(() => {
+    if (!stackedMarkerOptions.length) return;
+
+    const latestBiensById = new Map();
+    [...(Array.isArray(allBiens) ? allBiens : []), ...(Array.isArray(biens) ? biens : [])].forEach(
+      (bien) => {
+        const bienId = getBienStableId(bien);
+        if (!bienId) return;
+        latestBiensById.set(bienId, bien);
+      }
+    );
+
+    let hasChanged = false;
+    const nextOptions = stackedMarkerOptions
+      .map((option) => {
+        const optionId = getBienStableId(option);
+        if (!optionId) return option;
+        const latestOption = latestBiensById.get(optionId);
+        if (!latestOption) return option;
+        if (latestOption !== option) {
+          hasChanged = true;
+        }
+        return latestOption;
+      })
+      .filter(Boolean);
+
+    if (hasChanged) {
+      setStackedMarkerOptions(nextOptions);
+    }
+  }, [allBiens, biens, stackedMarkerOptions]);
 
   useEffect(() => {
     markerEditorOpenRef.current = markerEditorOpen;
@@ -1799,6 +1880,56 @@ function openMarkerEditorAtPosition(position) {
       reader.onerror = () => reject(new Error("Impossible de lire cette photo."));
       reader.readAsDataURL(file);
     });
+  }
+
+  async function convertFileToStoredMarkerPhoto(file) {
+    const dataUrl = await convertFileToDataUrl(file);
+    const uploadFile = dataUrlToUploadFile(dataUrl, file?.name || "marker-photo");
+    try {
+      return await uploadPhotoAsset(uploadFile, "marker");
+    } catch (error) {
+      console.warn("Upload objet indisponible (repere), fallback data URL.", error);
+      return dataUrl;
+    }
+  }
+
+  function dataUrlToUploadFile(dataUrl, originalFileName = "photo") {
+    const match = String(dataUrl || "").match(/^data:([^;,]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error("Format de photo encodee invalide.");
+    }
+
+    const mimeType = match[1] || "image/jpeg";
+    const base64Body = match[2] || "";
+    const binary = window.atob(base64Body);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    const safeName = buildUploadFileName(originalFileName, mimeType);
+    return new File([bytes], safeName, { type: mimeType });
+  }
+
+  function buildUploadFileName(originalFileName, mimeType) {
+    const baseName = String(originalFileName || "photo").trim() || "photo";
+    const safeBaseName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+    const extensionByMime = {
+      "image/jpeg": ".jpg",
+      "image/jpg": ".jpg",
+      "image/png": ".png",
+      "image/webp": ".webp",
+      "image/heic": ".heic",
+      "image/heif": ".heif",
+      "image/gif": ".gif",
+    };
+    const normalizedMimeType = String(mimeType || "").toLowerCase();
+    const wantedExtension = extensionByMime[normalizedMimeType] || ".jpg";
+
+    if (safeBaseName.toLowerCase().endsWith(wantedExtension)) {
+      return safeBaseName;
+    }
+    return `${safeBaseName}${wantedExtension}`;
   }
 
   function getReferenceBien() {
@@ -4910,7 +5041,7 @@ function findPickedInteractiveData(
     try {
       for (const file of filesToProcess) {
         try {
-          const encodedPhoto = await convertFileToDataUrl(file);
+          const encodedPhoto = await convertFileToStoredMarkerPhoto(file);
           encodedPhotos.push(encodedPhoto);
         } catch (error) {
           photoEncodingError = error;
@@ -5481,7 +5612,7 @@ function findPickedInteractiveData(
             <div style={{ display: "grid", gap: 8, maxHeight: 320, overflowY: "auto" }}>
               {stackedMarkerOptions.map((bien) => {
                 const previewPhoto = getBienPreviewPhoto(bien);
-                const badge = getBienBadge(bien);
+                const badge = getStackedOptionBadge(bien);
                 const publicationText =
                   bien.anciennete !== null && bien.anciennete !== undefined
                     ? `Publie il y a ${bien.anciennete} jours`
