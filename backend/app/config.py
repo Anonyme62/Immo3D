@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     backup_interval_minutes: int = 0
     backup_verify_after_create: bool = True
     backup_encryption_key: str | None = None
+    photo_upload_max_bytes: int = 8 * 1024 * 1024
+    r2_bucket: str | None = None
+    r2_region: str = "auto"
+    r2_endpoint_url: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    r2_public_base_url: str | None = None
+    r2_upload_url_ttl_seconds: int = 300
+    r2_object_key_prefix: str = "uploads"
 
     @field_validator("app_secret_key")
     @classmethod
@@ -77,6 +86,24 @@ class Settings(BaseSettings):
     def validate_backup_interval_minutes(cls, value: int) -> int:
         if value < 0:
             raise ValueError("BACKUP_INTERVAL_MINUTES doit etre superieur ou egal a 0.")
+        return value
+
+    @field_validator("photo_upload_max_bytes")
+    @classmethod
+    def validate_photo_upload_max_bytes(cls, value: int) -> int:
+        if value < 100_000:
+            raise ValueError("PHOTO_UPLOAD_MAX_BYTES doit etre superieur ou egal a 100000.")
+        if value > 20_000_000:
+            raise ValueError("PHOTO_UPLOAD_MAX_BYTES doit etre inferieur ou egal a 20000000.")
+        return value
+
+    @field_validator("r2_upload_url_ttl_seconds")
+    @classmethod
+    def validate_r2_upload_url_ttl_seconds(cls, value: int) -> int:
+        if value < 60:
+            raise ValueError("R2_UPLOAD_URL_TTL_SECONDS doit etre superieur ou egal a 60.")
+        if value > 3600:
+            raise ValueError("R2_UPLOAD_URL_TTL_SECONDS doit etre inferieur ou egal a 3600.")
         return value
 
     @field_validator("frontend_origin")
@@ -123,6 +150,30 @@ class Settings(BaseSettings):
         hosts = [host.strip().lower() for host in value.split(",") if host.strip()]
         return ",".join(hosts) if hosts else None
 
+    @field_validator("r2_endpoint_url")
+    @classmethod
+    def normalize_r2_endpoint_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        endpoint_url = value.strip().rstrip("/")
+        return endpoint_url or None
+
+    @field_validator("r2_public_base_url")
+    @classmethod
+    def normalize_r2_public_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        public_base_url = value.strip().rstrip("/")
+        return public_base_url or None
+
+    @field_validator("r2_bucket", "r2_access_key_id", "r2_secret_access_key", "r2_object_key_prefix")
+    @classmethod
+    def normalize_r2_text_values(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
     @property
     def allowed_hosts_list(self) -> list[str]:
         if self.allowed_hosts:
@@ -162,6 +213,18 @@ class Settings(BaseSettings):
     @property
     def backup_encryption_configured(self) -> bool:
         return bool(self.backup_encryption_key)
+
+    @property
+    def r2_configured(self) -> bool:
+        return all(
+            [
+                self.r2_bucket,
+                self.r2_endpoint_url,
+                self.r2_access_key_id,
+                self.r2_secret_access_key,
+                self.r2_public_base_url,
+            ]
+        )
 
     @model_validator(mode="after")
     def validate_production_security(self):

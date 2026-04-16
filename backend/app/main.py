@@ -1,7 +1,10 @@
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +19,7 @@ from app.routers.blacklist import router as blacklist_router
 from app.routers.geocoding import router as geocoding_router
 from app.routers.markers import router as markers_router
 from app.routers.notes import router as notes_router
+from app.routers.uploads import router as uploads_router
 
 
 Base.metadata.create_all(bind=engine)
@@ -25,6 +29,15 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = BACKEND_ROOT / "frontend_dist"
 
 app = FastAPI(title="Immo 3D API", version="1.0.0")
+
+APP_BUILD_VERSION = os.environ.get("APP_BUILD_VERSION", "dev").strip() or "dev"
+APP_BUILD_REF = (
+    os.environ.get("APP_BUILD_REF")
+    or os.environ.get("GIT_COMMIT")
+    or "local"
+).strip()
+APP_BUILD_TIME = os.environ.get("APP_BUILD_TIME", "").strip()
+APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,6 +53,42 @@ app.add_middleware(
     allowed_hosts=settings.allowed_hosts_list,
 )
 
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1024,
+    compresslevel=6,
+)
+
+
+def is_spa_navigation_request(path: str) -> bool:
+    if not FRONTEND_DIST.exists():
+        return False
+
+    reserved_prefixes = (
+        "/auth",
+        "/biens",
+        "/blacklist",
+        "/notes",
+        "/markers",
+        "/billing",
+        "/uploads",
+        "/health",
+        "/geocoding",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/assets",
+        "/cesium",
+        "/favicon.svg",
+        "/icons.svg",
+        "/test-bien.kml",
+    )
+
+    if path.startswith(reserved_prefixes):
+        return False
+
+    return "." not in Path(path).name
+
 
 @app.middleware("http")
 async def add_security_headers(request, call_next):
@@ -51,16 +100,45 @@ async def add_security_headers(request, call_next):
     if settings.app_env.lower() == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
-    protected_prefixes = ("/auth", "/biens", "/notes", "/markers", "/blacklist", "/billing")
+    protected_prefixes = (
+        "/auth",
+        "/biens",
+        "/notes",
+        "/markers",
+        "/blacklist",
+        "/billing",
+        "/uploads",
+    )
     if request.url.path.startswith(protected_prefixes):
         response.headers.setdefault("Cache-Control", "no-store")
+        return response
+
+    if request.method == "GET":
+        path = request.url.path
+        if path.startswith("/assets/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        elif path.startswith("/cesium/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=604800")
+        elif path in {"/", "/index.html", "/runtime-config.js", "/sw.js"}:
+            response.headers.setdefault("Cache-Control", "no-store")
+        elif is_spa_navigation_request(path):
+            response.headers.setdefault("Cache-Control", "no-store")
 
     return response
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "api_version": app.version,
+        "app_env": settings.app_env,
+        "build_version": APP_BUILD_VERSION,
+        "build_ref": APP_BUILD_REF,
+        "build_time": APP_BUILD_TIME,
+        "started_at": APP_STARTED_AT,
+        "frontend_dist_present": FRONTEND_DIST.exists(),
+    }
 
 
 app.include_router(auth_router)
@@ -70,6 +148,7 @@ app.include_router(blacklist_router)
 app.include_router(markers_router)
 app.include_router(biens_router)
 app.include_router(geocoding_router)
+app.include_router(uploads_router)
 
 
 if FRONTEND_DIST.exists():
@@ -111,6 +190,7 @@ if FRONTEND_DIST.exists():
             "notes",
             "markers",
             "billing",
+            "uploads",
             "health",
             "geocoding",
             "docs",

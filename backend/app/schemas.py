@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -38,9 +39,26 @@ class CheckoutSessionSyncRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=255)
 
 
+class PhotoUploadInitRequest(BaseModel):
+    purpose: Literal["note", "marker"] = "note"
+    file_name: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=3, max_length=127)
+    content_length: int = Field(ge=1, le=20_000_000)
+
+
+class PhotoUploadInitResponse(BaseModel):
+    upload_url: str
+    file_url: str
+    object_key: str
+    method: Literal["PUT"] = "PUT"
+    headers: dict[str, str] = Field(default_factory=dict)
+    expires_in_seconds: int = Field(ge=1)
+
+
 class NoteUpsertRequest(BaseModel):
     bien_id: str = Field(min_length=1, max_length=255)
     note: str = Field(default="", max_length=5000)
+    photos: list[str] = Field(default_factory=list, max_length=8)
 
 
 class NoteResponse(BaseModel):
@@ -48,6 +66,7 @@ class NoteResponse(BaseModel):
     user_id: str
     bien_id: str
     note: str
+    photos: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -92,6 +111,7 @@ class BienResponse(BaseModel):
     lien_logicimmo: str = ""
     lien_figaro: str = ""
     note: str = ""
+    note_photos: list[str] = Field(default_factory=list)
     favorite: bool = False
     de_cote: bool = False
     placed_manually: bool = False
