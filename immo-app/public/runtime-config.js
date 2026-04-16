@@ -14,8 +14,14 @@ const isLocalHost =
 
 window.__IMMO3D_RUNTIME_CONFIG__.apiBaseUrl =
   window.__IMMO3D_RUNTIME_CONFIG__.apiBaseUrl ||
-  (isLocalHost ? "" : "https://app.pigepro.fr");
+  (isLocalHost ? "" : "https://api.pigepro.fr");
 
 // Optionnel: surcharge du token Cesium sans rebuild.
 window.__IMMO3D_RUNTIME_CONFIG__.cesiumIonToken =
   window.__IMMO3D_RUNTIME_CONFIG__.cesiumIonToken || "";
+
+window.__IMMO3D_RUNTIME_CONFIG__.buildVersion =
+  window.__IMMO3D_RUNTIME_CONFIG__.buildVersion || "";
+
+window.__IMMO3D_RUNTIME_CONFIG__.buildRef =
+  window.__IMMO3D_RUNTIME_CONFIG__.buildRef || "";
