@@ -11,6 +11,9 @@ const bundledCesiumIonToken = Object.values(bundledTokenModules).find(
 const runtimeApiBaseUrl = window.__IMMO3D_RUNTIME_CONFIG__?.apiBaseUrl || "";
 const runtimeCesiumIonToken =
   window.__IMMO3D_RUNTIME_CONFIG__?.cesiumIonToken || "";
+const runtimeBuildVersion =
+  window.__IMMO3D_RUNTIME_CONFIG__?.buildVersion || "";
+const runtimeBuildRef = window.__IMMO3D_RUNTIME_CONFIG__?.buildRef || "";
 
 function normalizeBaseUrl(value) {
   return (value || "").replace(/\/+$/, "");
@@ -39,4 +42,16 @@ export const CESIUM_ION_TOKEN = (
   import.meta.env.VITE_CESIUM_ION_TOKEN ||
   bundledCesiumIonToken ||
   ""
+).trim();
+
+export const APP_BUILD_VERSION = (
+  runtimeBuildVersion ||
+  import.meta.env.VITE_APP_BUILD_VERSION ||
+  "dev"
+).trim();
+
+export const APP_BUILD_REF = (
+  runtimeBuildRef ||
+  import.meta.env.VITE_APP_BUILD_REF ||
+  "local"
 ).trim();

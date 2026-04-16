@@ -115,6 +115,10 @@ export function getAuthStatus() {
   return apiFetch("/auth/me", { method: "GET" });
 }
 
+export function getHealth() {
+  return apiFetch("/health", { method: "GET" });
+}
+
 export function loginYanport(username, password) {
   return apiFetch("/auth/login", {
     method: "POST",
@@ -133,10 +137,10 @@ export function getBiens(zoneRecherche) {
   return apiFetch(`/biens${query ? `?${query}` : ""}`, { method: "GET" });
 }
 
-export function saveNote(bienId, note) {
+export function saveNote(bienId, note, photos = []) {
   return apiFetch("/notes", {
     method: "POST",
-    body: JSON.stringify({ bien_id: bienId, note }),
+    body: JSON.stringify({ bien_id: bienId, note, photos }),
   });
 }
 
@@ -271,4 +275,56 @@ export function syncBillingCheckoutSession(sessionId) {
 
 export function createBillingPortalSession() {
   return apiFetch("/billing/portal-session", { method: "POST" });
+}
+
+export async function uploadPhotoAsset(file, purpose = "note") {
+  if (!(file instanceof Blob)) {
+    throw new Error("Le fichier photo est invalide.");
+  }
+
+  const normalizedPurpose = purpose === "marker" ? "marker" : "note";
+  const safeFileName =
+    typeof file.name === "string" && file.name.trim()
+      ? file.name.trim().slice(0, 255)
+      : `photo-${Date.now()}.jpg`;
+  const contentType = String(file.type || "image/jpeg")
+    .trim()
+    .toLowerCase();
+
+  if (!contentType.startsWith("image/")) {
+    throw new Error("Type de fichier non supporte pour une photo.");
+  }
+
+  const initPayload = await apiFetch("/uploads/photo/init", {
+    method: "POST",
+    body: JSON.stringify({
+      purpose: normalizedPurpose,
+      file_name: safeFileName,
+      content_type: contentType,
+      content_length: Number(file.size || 0),
+    }),
+  });
+
+  const uploadHeaders = {
+    ...(initPayload?.headers || {}),
+    "Content-Type": contentType,
+  };
+
+  const uploadResponse = await fetch(initPayload.upload_url, {
+    method: initPayload.method || "PUT",
+    headers: uploadHeaders,
+    body: file,
+    mode: "cors",
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error("Upload photo objet impossible.");
+  }
+
+  const finalUrl = String(initPayload.file_url || "").trim();
+  if (!finalUrl) {
+    throw new Error("URL photo distante manquante apres upload.");
+  }
+
+  return finalUrl;
 }

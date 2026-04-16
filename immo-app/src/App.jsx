@@ -88,15 +88,6 @@ function normalizeDesktopQualityProfile(value) {
   return DESKTOP_QUALITY_PROFILE_OPTIONS.includes(value) ? value : "auto";
 }
 
-function areStringArraysEqual(left, right) {
-  if (!Array.isArray(left) || !Array.isArray(right)) return false;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
 function getBienPreviewPhoto(bien) {
   const photos = getSelectedBienPhotos(bien);
   return Array.isArray(photos) && photos.length > 0 ? photos[0] : "";
@@ -106,6 +97,7 @@ const MOBILE_BIEN_CARD_HEIGHT = 134;
 
 function App() {
   const noteTimerRef = useRef(null);
+  const noteDraftBienIdRef = useRef(null);
   const isBackgroundRefreshingRef = useRef(false);
   const previousVisibleViewRef = useRef(null);
   const DESKTOP_LEFT_WIDTH = 340;
@@ -672,13 +664,6 @@ function App() {
       const data = await getBiens(nextZoneRecherche);
       const nextBiens = Array.isArray(data) ? data : [];
       const currentSelectedBienId = selectedBien?.id ?? null;
-      const selectedNotePhotos = Array.isArray(selectedBien?.note_photos)
-        ? selectedBien.note_photos
-        : [];
-      const isEditingCurrentNote =
-        currentSelectedBienId !== null &&
-        (noteDraft !== (selectedBien?.note || "") ||
-          !areStringArraysEqual(notePhotosDraft, selectedNotePhotos));
 
       setBiens(nextBiens);
 
@@ -691,14 +676,6 @@ function App() {
 
       if (refreshedSelectedBien) {
         setSelectedBien(refreshedSelectedBien);
-        if (!isEditingCurrentNote) {
-          setNoteDraft(refreshedSelectedBien.note || "");
-          setNotePhotosDraft(
-            Array.isArray(refreshedSelectedBien.note_photos)
-              ? refreshedSelectedBien.note_photos
-              : []
-          );
-        }
       }
     } catch (error) {
       console.error("Erreur rafraichissement arriere-plan :", error);
@@ -867,6 +844,13 @@ function App() {
   }, [biensFiltres, selectedBien]);
 
   useEffect(() => {
+    const selectedBienId = selectedBien?.id ?? null;
+    const previousBienId = noteDraftBienIdRef.current;
+    const hasChangedBien = selectedBienId !== previousBienId;
+
+    if (!hasChangedBien) return;
+
+    noteDraftBienIdRef.current = selectedBienId;
     setNoteDraft(selectedBien?.note || "");
     setNotePhotosDraft(Array.isArray(selectedBien?.note_photos) ? selectedBien.note_photos : []);
     setNoteStatus("");
