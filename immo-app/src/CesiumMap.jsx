@@ -317,7 +317,7 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
 const FPS_BENCHMARK_VERSION = 6;
-const FPS_BENCHMARK_ROUTE_VERSION = 6;
+const FPS_BENCHMARK_ROUTE_VERSION = 7;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
 const FPS_BENCHMARK_COLD_START_QUALITY_LOCK_MS = 420;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
@@ -334,6 +334,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     label: "pan debut",
     phaseKey: "pan_start",
     phaseLabel: "pan debut",
+    benchmarkMoving: true,
     durationMs: 4800,
     fromX: 0,
     fromY: 0,
@@ -347,6 +348,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     label: "pan suite",
     phaseKey: "pan_mid",
     phaseLabel: "pan suite",
+    benchmarkMoving: true,
     durationMs: 4400,
     fromX: 1.9,
     fromY: 0.12,
@@ -360,6 +362,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     label: "dezoom",
     phaseKey: "zoom_out",
     phaseLabel: "dezoom",
+    benchmarkMoving: true,
     durationMs: 2500,
     fromX: 3.64,
     fromY: -0.16,
@@ -373,6 +376,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     label: "rezoom",
     phaseKey: "zoom_in",
     phaseLabel: "rezoom",
+    benchmarkMoving: true,
     durationMs: 2500,
     fromX: 3.64,
     fromY: -0.16,
@@ -386,6 +390,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     label: "fin trajet 1",
     phaseKey: "finish",
     phaseLabel: "fin trajet",
+    benchmarkMoving: true,
     durationMs: 4600,
     fromX: 3.64,
     fromY: -0.16,
@@ -399,9 +404,24 @@ const FPS_BENCHMARK_SEGMENTS = [
     label: "fin trajet 2",
     phaseKey: "finish",
     phaseLabel: "fin trajet",
+    benchmarkMoving: true,
     durationMs: 4400,
     fromX: 5.48,
     fromY: -0.48,
+    toX: 7.1,
+    toY: -0.76,
+    fromHeightScale: 0.50,
+    toHeightScale: 0.50,
+  },
+  {
+    key: "settle_final",
+    label: "settle final",
+    phaseKey: "settle",
+    phaseLabel: "settle",
+    benchmarkMoving: false,
+    durationMs: 1800,
+    fromX: 7.1,
+    fromY: -0.76,
     toX: 7.1,
     toY: -0.76,
     fromHeightScale: 0.50,
@@ -775,6 +795,10 @@ function getFpsBenchmarkSegmentMetaAt(elapsedMs) {
     label: String(matchingSegment?.label || ""),
     phaseKey: String(matchingSegment?.phaseKey || ""),
     phaseLabel: String(matchingSegment?.phaseLabel || ""),
+    benchmarkMoving:
+      typeof matchingSegment?.benchmarkMoving === "boolean"
+        ? Boolean(matchingSegment.benchmarkMoving)
+        : true,
     startMs: Math.max(0, Number(matchingSegment?.startMs || 0)),
     endMs: Math.max(0, Number(matchingSegment?.endMs || 0)),
     durationMs: segmentDurationMs,
@@ -1026,6 +1050,17 @@ function buildBenchmarkPerfEventSamples(events = [], benchmarkStartedAtMs) {
         phaseLabel: segmentMeta?.phaseLabel || null,
         moving:
           typeof event?.moving === "boolean" ? Boolean(event.moving) : null,
+        qualityPreset: String(event?.qualityPreset || ""),
+        qualityMoving:
+          typeof event?.qualityMoving === "boolean"
+            ? Boolean(event.qualityMoving)
+            : null,
+        resolutionScale: roundBenchmarkValue(Number(event?.resolutionScale), 2),
+        msaaSamples: Number.isFinite(Number(event?.msaaSamples))
+          ? Math.max(0, Number(event.msaaSamples))
+          : null,
+        globeSse: roundBenchmarkValue(Number(event?.globeSse), 2),
+        tilesetSse: roundBenchmarkValue(Number(event?.tilesetSse), 2),
         remainingTiles: Number.isFinite(Number(event?.remainingTiles))
           ? Math.max(0, Math.round(Number(event.remainingTiles)))
           : null,
@@ -1061,6 +1096,21 @@ function buildFpsBenchmarkResult(frameSamples, extra = {}) {
       segmentLabel: String(sample.segmentLabel || ""),
       phaseKey: String(sample.phaseKey || ""),
       phaseLabel: String(sample.phaseLabel || ""),
+      benchmarkMoving:
+        typeof sample.benchmarkMoving === "boolean"
+          ? Boolean(sample.benchmarkMoving)
+          : null,
+      qualityPreset: String(sample.qualityPreset || ""),
+      qualityMoving:
+        typeof sample.qualityMoving === "boolean"
+          ? Boolean(sample.qualityMoving)
+          : null,
+      resolutionScale: roundBenchmarkValue(Number(sample.resolutionScale), 2),
+      msaaSamples: Number.isFinite(Number(sample.msaaSamples))
+        ? Math.max(0, Number(sample.msaaSamples))
+        : null,
+      globeSse: roundBenchmarkValue(Number(sample.globeSse), 2),
+      tilesetSse: roundBenchmarkValue(Number(sample.tilesetSse), 2),
     }));
 
   return {
@@ -1903,8 +1953,18 @@ export default function CesiumMap({
   const fpsBenchmarkRunCountRef = useRef(0);
   const fpsBenchmarkQualityLockTimeoutRef = useRef(null);
   const fpsBenchmarkQualityLockRef = useRef(false);
+  const fpsBenchmarkLastSegmentKeyRef = useRef("");
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
   const releaseFpsBenchmarkMovingQualityRef = useRef(() => {});
+  const applyFpsBenchmarkSegmentQualityRef = useRef(() => {});
+  const currentQualityTelemetryRef = useRef({
+    preset: "",
+    moving: null,
+    resolutionScale: null,
+    msaaSamples: null,
+    globeSse: null,
+    tilesetSse: null,
+  });
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -3932,9 +3992,16 @@ function findPickedInteractiveData(
         longTaskObserver = new PerformanceObserver((entryList) => {
           if (cancelled || modeRef.current !== "google3d") return;
           entryList.getEntries().forEach((entry) => {
+            const qualitySnapshot = currentQualityTelemetryRef.current || {};
             recordMapPerfEvent("long_task", {
               durationMs: entry.duration,
               moving: adaptiveQualityStateRef.current.isMoving,
+              qualityPreset: qualitySnapshot.preset,
+              qualityMoving: qualitySnapshot.moving,
+              resolutionScale: qualitySnapshot.resolutionScale,
+              msaaSamples: qualitySnapshot.msaaSamples,
+              globeSse: qualitySnapshot.globeSse,
+              tilesetSse: qualitySnapshot.tilesetSse,
               remainingTiles: tileLoadBurstStateRef.current.lastRemainingTiles,
               mode: modeRef.current,
             });
@@ -4065,6 +4132,30 @@ function findPickedInteractiveData(
       desktopQualityProfileRef.current
     );
 
+    const setCurrentQualityTelemetry = ({
+      preset,
+      moving,
+      resolutionScale,
+      msaaSamples,
+      globeSse,
+      tilesetSse,
+    }) => {
+      currentQualityTelemetryRef.current = {
+        preset: String(preset || ""),
+        moving: typeof moving === "boolean" ? moving : null,
+        resolutionScale: Number.isFinite(Number(resolutionScale))
+          ? Number(resolutionScale)
+          : null,
+        msaaSamples: Number.isFinite(Number(msaaSamples))
+          ? Number(msaaSamples)
+          : null,
+        globeSse: Number.isFinite(Number(globeSse)) ? Number(globeSse) : null,
+        tilesetSse: Number.isFinite(Number(tilesetSse))
+          ? Number(tilesetSse)
+          : null,
+      };
+    };
+
     const applyDesktopMovingQuality = (tileset = tilesetRef.current) => {
       if (isMobile) return;
 
@@ -4102,6 +4193,18 @@ function findPickedInteractiveData(
         osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
       }
 
+      setCurrentQualityTelemetry({
+        preset: "desktop_moving",
+        moving: true,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedDesktopQualityProfile.movingGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedDesktopQualityProfile.movingTilesetSse
+            : null,
+      });
+
       viewer.scene.requestRender();
     };
 
@@ -4132,6 +4235,18 @@ function findPickedInteractiveData(
         osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
       }
 
+      setCurrentQualityTelemetry({
+        preset: "desktop_idle",
+        moving: false,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedDesktopQualityProfile.idleGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedDesktopQualityProfile.idleTilesetSse
+            : null,
+      });
+
       viewer.scene.requestRender();
     };
 
@@ -4153,6 +4268,17 @@ function findPickedInteractiveData(
       }
 
       applyUltraViewerQuality();
+      setCurrentQualityTelemetry({
+        preset: "desktop_ultra",
+        moving: false,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedDesktopQualityProfile.ultraGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedDesktopQualityProfile.ultraTilesetSse
+            : null,
+      });
     };
 
     const applyMobileMovingQuality = (tileset = tilesetRef.current) => {
@@ -4173,6 +4299,18 @@ function findPickedInteractiveData(
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
         osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
       }
+
+      setCurrentQualityTelemetry({
+        preset: "mobile_moving",
+        moving: true,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedMobileQualityProfile.movingGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedMobileQualityProfile.movingTilesetSse
+            : null,
+      });
 
       viewer.scene.requestRender();
     };
@@ -4195,6 +4333,18 @@ function findPickedInteractiveData(
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
         osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
       }
+
+      setCurrentQualityTelemetry({
+        preset: "mobile_idle",
+        moving: false,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedMobileQualityProfile.idleGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedMobileQualityProfile.idleTilesetSse
+            : null,
+      });
 
       viewer.scene.requestRender();
     };
@@ -4229,6 +4379,18 @@ function findPickedInteractiveData(
         osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
       }
 
+      setCurrentQualityTelemetry({
+        preset: "mobile_ultra",
+        moving: false,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedMobileQualityProfile.ultraGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedMobileQualityProfile.ultraTilesetSse
+            : null,
+      });
+
       viewer.scene.requestRender();
     };
 
@@ -4248,6 +4410,56 @@ function findPickedInteractiveData(
         getUltraResolutionScale(isIOSDevice)
       );
       viewer.scene.requestRender();
+    };
+
+    const applyBenchmarkSegmentQuality = (segmentMeta) => {
+      if (!segmentMeta) return;
+      if (fpsBenchmarkQualityLockRef.current) return;
+
+      const shouldMove =
+        typeof segmentMeta.benchmarkMoving === "boolean"
+          ? Boolean(segmentMeta.benchmarkMoving)
+          : true;
+
+      adaptiveQualityStateRef.current.isMoving = shouldMove;
+      clearQualityRecoverySafetyTimeout();
+      resetAdaptiveQualityStats();
+
+      if (shouldMove) {
+        clearDesktopQualityRestoreTimeouts();
+        clearMobileQualityRestoreTimeout();
+        clearMobileUltraRestoreTimeout();
+        if (isMobile) {
+          applyMobileMovingQuality();
+          return;
+        }
+        applyDesktopMovingQuality();
+        return;
+      }
+
+      if (isMobile) {
+        clearMobileQualityRestoreTimeout();
+        clearMobileUltraRestoreTimeout();
+        applyMobileIdleQuality();
+        if (!selectedMobileQualityProfile.enableUltra) return;
+        mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled) return;
+          if (adaptiveQualityStateRef.current.isMoving) return;
+          if (modeRef.current !== "google3d") return;
+          applyMobileUltraQuality();
+        }, selectedMobileQualityProfile.ultraRestoreDelayMs);
+        return;
+      }
+
+      clearDesktopQualityRestoreTimeouts();
+      applyDesktopIdleQuality();
+      if (!selectedDesktopQualityProfile.enableUltra) return;
+      desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        if (adaptiveQualityStateRef.current.isMoving) return;
+        if (modeRef.current !== "google3d") return;
+        applyDesktopUltraQuality();
+      }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
     };
 
     const applyBenchmarkMovingQualityLock = (durationMs = null) => {
@@ -4316,6 +4528,7 @@ function findPickedInteractiveData(
 
     applyFpsBenchmarkMovingQualityRef.current = applyBenchmarkMovingQualityLock;
     releaseFpsBenchmarkMovingQualityRef.current = releaseBenchmarkMovingQualityLock;
+    applyFpsBenchmarkSegmentQualityRef.current = applyBenchmarkSegmentQuality;
 
     const applyFastThenPremiumGoogleQuality = (tileset) => {
       if (!tileset) return;
@@ -4964,8 +5177,10 @@ function findPickedInteractiveData(
       adaptiveQualityStateRef.current.isMoving = false;
       adaptiveQualityStateRef.current.isUltraActive = false;
       fpsBenchmarkQualityLockRef.current = false;
+      fpsBenchmarkLastSegmentKeyRef.current = "";
       applyFpsBenchmarkMovingQualityRef.current = () => {};
       releaseFpsBenchmarkMovingQualityRef.current = () => {};
+      applyFpsBenchmarkSegmentQualityRef.current = () => {};
       resetAdaptiveQualityStats();
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(handleAdaptiveFrameQuality);
@@ -6259,6 +6474,7 @@ function findPickedInteractiveData(
         fpsBenchmarkCameraInputsRef.current;
     }
     fpsBenchmarkCameraInputsRef.current = null;
+    fpsBenchmarkLastSegmentKeyRef.current = "";
     releaseFpsBenchmarkMovingQualityRef.current?.();
   }
 
@@ -6403,6 +6619,13 @@ function findPickedInteractiveData(
           FPS_BENCHMARK_TOTAL_DURATION_MS
         );
         const segmentMeta = getFpsBenchmarkSegmentMetaAt(elapsedMs);
+        if (
+          segmentMeta?.key &&
+          fpsBenchmarkLastSegmentKeyRef.current !== segmentMeta.key
+        ) {
+          fpsBenchmarkLastSegmentKeyRef.current = segmentMeta.key;
+          applyFpsBenchmarkSegmentQualityRef.current?.(segmentMeta);
+        }
         const offset = getFpsBenchmarkOffsetAt(
           elapsedMs,
           benchmarkDistanceMeters
@@ -6437,6 +6660,7 @@ function findPickedInteractiveData(
         viewer.scene.requestRender();
 
         if (lastFrameAt !== null && timestamp > lastFrameAt) {
+          const qualitySnapshot = currentQualityTelemetryRef.current || {};
           frameSamples.push({
             frameMs: timestamp - lastFrameAt,
             elapsedMs,
@@ -6445,9 +6669,24 @@ function findPickedInteractiveData(
             segmentLabel: String(segmentMeta?.label || ""),
             phaseKey: String(segmentMeta?.phaseKey || ""),
             phaseLabel: String(segmentMeta?.phaseLabel || ""),
+            benchmarkMoving:
+              typeof segmentMeta?.benchmarkMoving === "boolean"
+                ? Boolean(segmentMeta.benchmarkMoving)
+                : null,
+            qualityPreset: String(qualitySnapshot.preset || ""),
+            qualityMoving:
+              typeof qualitySnapshot.moving === "boolean"
+                ? Boolean(qualitySnapshot.moving)
+                : null,
+            resolutionScale: qualitySnapshot.resolutionScale,
+            msaaSamples: qualitySnapshot.msaaSamples,
+            globeSse: qualitySnapshot.globeSse,
+            tilesetSse: qualitySnapshot.tilesetSse,
             phaseOrder:
               String(segmentMeta?.phaseKey || "") === "finish"
-                ? 4
+                ? 5
+                : String(segmentMeta?.phaseKey || "") === "settle"
+                  ? 6
                 : Number(segmentMeta?.index || 0),
           });
         }
