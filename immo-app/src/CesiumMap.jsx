@@ -48,9 +48,9 @@ const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
 const SATELLITE_LOAD_WATCHDOG_MS = 15000;
 const DESKTOP_RESOLUTION_SCALE = 1.22;
 const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
-const DESKTOP_MOVING_RESOLUTION_SCALE = 0.78;
+const DESKTOP_MOVING_RESOLUTION_SCALE = 0.9;
 const MOBILE_RESOLUTION_SCALE = 1;
-const MOBILE_MOVING_RESOLUTION_SCALE = 0.66;
+const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
 const IOS_RESOLUTION_SCALE = 0.82;
 const DESKTOP_MSAA_SAMPLES = 4;
 const DESKTOP_ULTRA_MSAA_SAMPLES = 8;
@@ -60,14 +60,14 @@ const MOBILE_MOVING_MSAA_SAMPLES = 1;
 const IOS_MSAA_SAMPLES = 1;
 const MOBILE_GOOGLE_TILESET_FAST_SSE = 16;
 const MOBILE_GOOGLE_TILESET_PREMIUM_SSE = 9.5;
-const MOBILE_GOOGLE_TILESET_MOVING_SSE = 28;
+const MOBILE_GOOGLE_TILESET_MOVING_SSE = 20;
 const MOBILE_GOOGLE_TILESET_IDLE_SSE = 8.5;
-const DESKTOP_GOOGLE_TILESET_MOVING_SSE = 22;
+const DESKTOP_GOOGLE_TILESET_MOVING_SSE = 17;
 const DESKTOP_GOOGLE_TILESET_IDLE_SSE = 6;
 const DESKTOP_GOOGLE_TILESET_ULTRA_SSE = 3.4;
-const MOBILE_GLOBE_SSE_MOVING = 3.1;
+const MOBILE_GLOBE_SSE_MOVING = 2.2;
 const MOBILE_GLOBE_SSE_IDLE = 1.55;
-const DESKTOP_GLOBE_SSE_MOVING = 2.25;
+const DESKTOP_GLOBE_SSE_MOVING = 1.75;
 const DESKTOP_GLOBE_SSE_IDLE = 1.05;
 const DESKTOP_GLOBE_SSE_ULTRA = 0.9;
 const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
@@ -252,9 +252,9 @@ const GLOBE_TILE_CACHE_SIZE_IOS = 650;
 const GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP = 1200;
 const GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE = 600;
 const GLOBE_LOADING_DESCENDANT_LIMIT_IOS = 220;
-const SATELLITE_CLAMP_TIMEOUT_MS = 900;
-const SATELLITE_CLAMP_MAX_POSITIONS = 140;
-const SATELLITE_CLAMP_MAX_POSITIONS_MOBILE = 180;
+const SATELLITE_CLAMP_TIMEOUT_MS = 1400;
+const SATELLITE_CLAMP_MAX_POSITIONS = 260;
+const SATELLITE_CLAMP_MAX_POSITIONS_MOBILE = 420;
 const PLAN_PAN_SPEED_MULTIPLIER = 0.605; // additional -20% from 0.756
 const MOBILE_TOUCH_PAN_SENSITIVITY_MULTIPLIER = 3; // +200% on mobile touch pan
 const MOBILE_SATELLITE_PAN_COMPENSATION = 0.38; // match satellite feel to plan
@@ -273,9 +273,6 @@ const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = true;
 const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE = true;
 const SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE = Number.POSITIVE_INFINITY;
 const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS = 140;
-const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MOVING_MS = 300;
-const DESKTOP_TARGET_FRAME_RATE = 120;
-const MOBILE_TARGET_FRAME_RATE = 60;
 const GOOGLE_EARTH_TOUCH_PROFILE = {
   google3dOrbitGainMultiplier: 1.28,
 };
@@ -2338,11 +2335,7 @@ function findPickedInteractiveData(
       viewer.scene.postProcessStages.fxaa.enabled = false;
     }
     viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
-    viewer.targetFrameRate = isIOSDevice
-      ? 30
-      : isMobile
-        ? MOBILE_TARGET_FRAME_RATE
-        : DESKTOP_TARGET_FRAME_RATE;
+    viewer.targetFrameRate = isIOSDevice ? 30 : 60;
     viewer.useBrowserRecommendedResolution = isIOSDevice;
     viewer.resolutionScale = getPreferredResolutionScale(isMobile, isIOSDevice);
     viewer.scene.msaaSamples =
@@ -4573,11 +4566,8 @@ function findPickedInteractiveData(
 
       const now = performance.now();
       if (now < markerLodRuntimeRef.current.nextUpdateAt) return;
-      const lodUpdateIntervalMs = adaptiveQualityStateRef.current.isMoving
-        ? SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MOVING_MS
-        : SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
       markerLodRuntimeRef.current.nextUpdateAt =
-        now + lodUpdateIntervalMs;
+        now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
 
       const isSatelliteMode =
         modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
@@ -4658,18 +4648,10 @@ function findPickedInteractiveData(
       markerLodRuntimeRef.current.lastSignature = signature;
 
       if (isMoving) {
-        let remainingBienPointBudget = isMobile ? 10 : 16;
-        let remainingCustomPointBudget = isMobile ? 3 : 6;
         bienEntities.forEach((entity) => {
           const bienId = entity.bienData?.id;
           const isSelected = bienId != null && bienId === selectedId;
-          let shouldShowPoint = false;
-          if (isSelected) {
-            shouldShowPoint = true;
-          } else if (entity.showPointByPriority !== false && remainingBienPointBudget > 0) {
-            shouldShowPoint = true;
-            remainingBienPointBudget -= 1;
-          }
+          const shouldShowPoint = isSelected || entity.showPointByPriority !== false;
           const shouldShowLabel = isSelected;
           if (entity.point?.show !== shouldShowPoint) {
             entity.point.show = shouldShowPoint;
@@ -4682,16 +4664,8 @@ function findPickedInteractiveData(
         });
 
         customEntities.forEach((entity) => {
-          const markerId = entity.customMarkerData?.id;
-          const isSelected = markerId != null && markerId === selectedCustomMarkerIdRef.current;
-          let shouldShowPoint = false;
-          if (isSelected) {
-            shouldShowPoint = true;
-          } else if (remainingCustomPointBudget > 0) {
-            shouldShowPoint = true;
-            remainingCustomPointBudget -= 1;
-          }
-          const shouldShowLabel = isSelected;
+          const shouldShowPoint = true;
+          const shouldShowLabel = false;
           if (entity.point?.show !== shouldShowPoint) {
             entity.point.show = shouldShowPoint;
             changed = true;
