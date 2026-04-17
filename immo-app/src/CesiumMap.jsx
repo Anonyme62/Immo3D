@@ -100,11 +100,11 @@ const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
     // then restore sharper quality once the camera settles.
     movingResolutionScale: 0.86,
     movingGlobeSse: 2.05,
-    movingTilesetSse: 20,
+    movingTilesetSse: 22,
     movingMsaa: 1,
     idleResolutionScale: 1.06,
     idleGlobeSse: 1.28,
-    idleTilesetSse: 8.4,
+    idleTilesetSse: 9.2,
     idleMsaa: 2,
     ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
     ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
@@ -113,7 +113,7 @@ const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
     fastTilesetSse: 16,
     premiumTilesetSse: 8.4,
     adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
-    idleRestoreDelayMs: 480,
+    idleRestoreDelayMs: 720,
     ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
   },
   high: {
@@ -4073,20 +4073,24 @@ function findPickedInteractiveData(
         selectedDesktopQualityProfile.movingGlobeSse;
 
       if (tileset && modeRef.current === "google3d") {
-        const useUniformMovingLod = selectedDesktopQualityProfileId === "auto";
+        const useAutoMovingCull = selectedDesktopQualityProfileId === "auto";
         tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.movingTilesetSse;
-        tileset.dynamicScreenSpaceError = !useUniformMovingLod;
-        tileset.foveatedScreenSpaceError = !useUniformMovingLod;
-        tileset.cullRequestsWhileMoving = false;
+        // In desktop auto, uniform moving LOD was causing expensive whole-view
+        // refinement during zoom-out and long pans. Keep movement more fluid by
+        // allowing Cesium to bias visible detail toward the center while culling
+        // transient requests until the camera settles.
+        tileset.dynamicScreenSpaceError = true;
+        tileset.foveatedScreenSpaceError = true;
+        tileset.cullRequestsWhileMoving = useAutoMovingCull;
         tileset.foveatedTimeDelay =
-          useUniformMovingLod
+          useAutoMovingCull
             ? GOOGLE_TILESET_FOVEATED_TIME_DELAY_MOVING_SECONDS
             : GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
         tileset.progressiveResolutionHeightFraction =
-          useUniformMovingLod
+          useAutoMovingCull
             ? GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION_MOVING
             : GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
-        tileset.preferLeaves = !useUniformMovingLod;
+        tileset.preferLeaves = true;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
