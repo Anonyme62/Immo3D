@@ -3342,12 +3342,12 @@ function findPickedInteractiveData(
       viewer.scene.globe.maximumScreenSpaceError =
         selectedDesktopQualityProfile.movingGlobeSse;
 
-      if (tileset && modeRef.current === "google3d") {
-        tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.movingTilesetSse;
-        tileset.dynamicScreenSpaceError = true;
-        tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = true;
-      }
+        if (tileset && modeRef.current === "google3d") {
+          tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.movingTilesetSse;
+          tileset.dynamicScreenSpaceError = true;
+          tileset.foveatedScreenSpaceError = true;
+          tileset.cullRequestsWhileMoving = false;
+        }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
         applyGoogleOverlayLayerState(osmImageryLayerRef.current, false);
@@ -3406,12 +3406,12 @@ function findPickedInteractiveData(
       viewer.resolutionScale = selectedMobileQualityProfile.movingResolutionScale;
       viewer.scene.globe.maximumScreenSpaceError = selectedMobileQualityProfile.movingGlobeSse;
 
-      if (tileset && modeRef.current === "google3d") {
-        tileset.maximumScreenSpaceError = selectedMobileQualityProfile.movingTilesetSse;
-        tileset.dynamicScreenSpaceError = true;
-        tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = true;
-      }
+        if (tileset && modeRef.current === "google3d") {
+          tileset.maximumScreenSpaceError = selectedMobileQualityProfile.movingTilesetSse;
+          tileset.dynamicScreenSpaceError = true;
+          tileset.foveatedScreenSpaceError = true;
+          tileset.cullRequestsWhileMoving = false;
+        }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
         applyGoogleOverlayLayerState(osmImageryLayerRef.current, true);
@@ -3502,7 +3502,7 @@ function findPickedInteractiveData(
         tileset.maximumScreenSpaceError = selectedMobileQualityProfile.fastTilesetSse;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = true;
+        tileset.cullRequestsWhileMoving = false;
         viewer.scene.requestRender();
         googleQualityTimeoutRef.current = window.setTimeout(() => {
           if (cancelled || !tilesetRef.current) return;
@@ -3518,7 +3518,7 @@ function findPickedInteractiveData(
       tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.fastTilesetSse;
       tileset.dynamicScreenSpaceError = true;
       tileset.foveatedScreenSpaceError = true;
-      tileset.cullRequestsWhileMoving = true;
+      tileset.cullRequestsWhileMoving = false;
       viewer.scene.requestRender();
       googleQualityTimeoutRef.current = window.setTimeout(() => {
         if (cancelled || !tilesetRef.current) return;
@@ -3641,7 +3641,7 @@ function findPickedInteractiveData(
             preloadFlightDestinations: true,
             skipLevelOfDetail: false,
             dynamicScreenSpaceError: isMobile && !isIOSDevice,
-            cullRequestsWhileMoving: true,
+            cullRequestsWhileMoving: false,
             cullWithChildrenBounds: true,
             preferLeaves: true,
             foveatedScreenSpaceError: isMobile && !isIOSDevice,
@@ -3665,7 +3665,7 @@ function findPickedInteractiveData(
             tileset.preloadFlightDestinations = true;
             tileset.skipLevelOfDetail = false;
             tileset.dynamicScreenSpaceError = isMobile && !isIOSDevice;
-            tileset.cullRequestsWhileMoving = true;
+            tileset.cullRequestsWhileMoving = false;
             tileset.preferLeaves = true;
             tileset.foveatedScreenSpaceError = isMobile && !isIOSDevice;
             tileset.progressiveResolutionHeightFraction =
