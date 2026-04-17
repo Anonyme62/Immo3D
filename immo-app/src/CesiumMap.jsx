@@ -1295,6 +1295,12 @@ export default function CesiumMap({
     sampleFrameMsTotal: 0,
     dropFrameStreak: 0,
   });
+  const tileLoadBurstStateRef = useRef({
+    active: false,
+    startedAt: 0,
+    peakRemainingTiles: 0,
+    lastRemainingTiles: 0,
+  });
   const appBootTimestampRef = useRef(Date.now());
   const tiltToggleBaseRangeRef = useRef(null);
   const activeZoneCacheKeyRef = useRef(buildZoneCacheKey(searchZone));
@@ -3222,7 +3228,95 @@ function findPickedInteractiveData(
     let googleLateReadyEvent = null;
     let googleLateReadyListener = null;
     let googleLateReadyTimeoutId = null;
+    let detachTilesetLoadTelemetry = null;
+    let longTaskObserver = null;
     const useTouchNavigation = isMobile && hasTouchInput();
+
+    const resetTileLoadBurstState = () => {
+      tileLoadBurstStateRef.current.active = false;
+      tileLoadBurstStateRef.current.startedAt = 0;
+      tileLoadBurstStateRef.current.peakRemainingTiles = 0;
+      tileLoadBurstStateRef.current.lastRemainingTiles = 0;
+    };
+
+    const trackTileLoadProgress = (remainingTiles = 0) => {
+      if (modeRef.current !== "google3d") return;
+
+      const state = tileLoadBurstStateRef.current;
+      const normalizedRemainingTiles = Math.max(
+        0,
+        Math.round(Number(remainingTiles) || 0)
+      );
+      state.lastRemainingTiles = normalizedRemainingTiles;
+
+      if (normalizedRemainingTiles > 0) {
+        if (!state.active) {
+          state.active = true;
+          state.startedAt = performance.now();
+          state.peakRemainingTiles = normalizedRemainingTiles;
+          return;
+        }
+        state.peakRemainingTiles = Math.max(
+          state.peakRemainingTiles,
+          normalizedRemainingTiles
+        );
+        return;
+      }
+
+      if (!state.active) return;
+
+      recordMapPerfEvent("tile_load_burst_complete", {
+        durationMs: performance.now() - state.startedAt,
+        peakRemainingTiles: state.peakRemainingTiles,
+        moving: adaptiveQualityStateRef.current.isMoving,
+        mode: modeRef.current,
+      });
+      resetTileLoadBurstState();
+    };
+
+    const attachTilesetLoadTelemetry = (tileset) => {
+      if (
+        !tileset?.tileLoadProgressEvent ||
+        typeof tileset.tileLoadProgressEvent.addEventListener !== "function"
+      ) {
+        return () => {};
+      }
+
+      const handleTileLoadProgress = (remainingTiles = 0) => {
+        if (cancelled) return;
+        trackTileLoadProgress(remainingTiles);
+      };
+
+      tileset.tileLoadProgressEvent.addEventListener(handleTileLoadProgress);
+      return () => {
+        tileset.tileLoadProgressEvent?.removeEventListener?.(
+          handleTileLoadProgress
+        );
+      };
+    };
+
+    if (
+      typeof PerformanceObserver !== "undefined" &&
+      Array.isArray(PerformanceObserver.supportedEntryTypes) &&
+      PerformanceObserver.supportedEntryTypes.includes("longtask")
+    ) {
+      try {
+        longTaskObserver = new PerformanceObserver((entryList) => {
+          if (cancelled || modeRef.current !== "google3d") return;
+          entryList.getEntries().forEach((entry) => {
+            recordMapPerfEvent("long_task", {
+              durationMs: entry.duration,
+              moving: adaptiveQualityStateRef.current.isMoving,
+              remainingTiles: tileLoadBurstStateRef.current.lastRemainingTiles,
+              mode: modeRef.current,
+            });
+          });
+        });
+        longTaskObserver.observe({ entryTypes: ["longtask"] });
+      } catch {
+        longTaskObserver = null;
+      }
+    }
 
     const clearGoogleLateReadyListener = () => {
       if (googleLateReadyEvent && googleLateReadyListener) {
@@ -3721,6 +3815,8 @@ function findPickedInteractiveData(
               ? selectedMobileQualityProfile.premiumTilesetSse
               : selectedDesktopQualityProfile.premiumTilesetSse;
             tilesetRef.current = tileset;
+            detachTilesetLoadTelemetry?.();
+            detachTilesetLoadTelemetry = attachTilesetLoadTelemetry(tileset);
             setSatelliteReadySafely(Boolean(tileset.tilesLoaded));
             if (!viewer.scene.primitives.contains(tileset)) {
               viewer.scene.primitives.add(tileset);
@@ -4133,6 +4229,11 @@ function findPickedInteractiveData(
 
     return () => {
       cancelled = true;
+      detachTilesetLoadTelemetry?.();
+      detachTilesetLoadTelemetry = null;
+      longTaskObserver?.disconnect?.();
+      longTaskObserver = null;
+      resetTileLoadBurstState();
       clearGoogleLateReadyListener();
       clearGoogleQualityTimeout();
       clearDesktopQualityRestoreTimeouts();

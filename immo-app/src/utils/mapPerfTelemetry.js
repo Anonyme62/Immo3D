@@ -47,6 +47,23 @@ function createDefaultTelemetry() {
       lastDurationMs: null,
       lastCount: 0,
     },
+    tileLoadBurst: {
+      runs: 0,
+      avgDurationMs: null,
+      lastDurationMs: null,
+      lastPeakRemainingTiles: 0,
+      lastWasMoving: false,
+      lastMode: null,
+    },
+    longTask: {
+      count: 0,
+      avgDurationMs: null,
+      maxDurationMs: null,
+      lastDurationMs: null,
+      lastWasMoving: false,
+      lastRemainingTiles: 0,
+      lastMode: null,
+    },
     recentEvents: [],
   };
 }
@@ -72,6 +89,14 @@ function parseTelemetry(value) {
       markerRefine: {
         ...createDefaultTelemetry().markerRefine,
         ...(parsed.markerRefine || {}),
+      },
+      tileLoadBurst: {
+        ...createDefaultTelemetry().tileLoadBurst,
+        ...(parsed.tileLoadBurst || {}),
+      },
+      longTask: {
+        ...createDefaultTelemetry().longTask,
+        ...(parsed.longTask || {}),
       },
       recentEvents: Array.isArray(parsed.recentEvents) ? parsed.recentEvents : [],
     };
@@ -209,6 +234,50 @@ export function recordMapPerfEvent(type, payload = {}) {
       appendEvent(telemetry, type, { durationMs, count });
       break;
     }
+    case "tile_load_burst_complete": {
+      const durationMs = roundMs(payload.durationMs);
+      const peakRemainingTiles = Math.max(0, Number(payload.peakRemainingTiles || 0));
+      const previousRuns = telemetry.tileLoadBurst.runs;
+      telemetry.tileLoadBurst.runs = previousRuns + 1;
+      telemetry.tileLoadBurst.lastDurationMs = durationMs;
+      telemetry.tileLoadBurst.lastPeakRemainingTiles = peakRemainingTiles;
+      telemetry.tileLoadBurst.lastWasMoving = Boolean(payload.moving);
+      telemetry.tileLoadBurst.lastMode = String(payload.mode || "");
+      telemetry.tileLoadBurst.avgDurationMs = roundMs(
+        updateAverage(telemetry.tileLoadBurst.avgDurationMs, durationMs, previousRuns)
+      );
+      appendEvent(telemetry, type, {
+        durationMs,
+        peakRemainingTiles,
+        moving: Boolean(payload.moving),
+        mode: String(payload.mode || ""),
+      });
+      break;
+    }
+    case "long_task": {
+      const durationMs = roundMs(payload.durationMs);
+      const remainingTiles = Math.max(0, Number(payload.remainingTiles || 0));
+      const previousCount = telemetry.longTask.count;
+      telemetry.longTask.count = previousCount + 1;
+      telemetry.longTask.lastDurationMs = durationMs;
+      telemetry.longTask.lastWasMoving = Boolean(payload.moving);
+      telemetry.longTask.lastRemainingTiles = remainingTiles;
+      telemetry.longTask.lastMode = String(payload.mode || "");
+      telemetry.longTask.maxDurationMs = Math.max(
+        Number(telemetry.longTask.maxDurationMs || 0),
+        Number(durationMs || 0)
+      );
+      telemetry.longTask.avgDurationMs = roundMs(
+        updateAverage(telemetry.longTask.avgDurationMs, durationMs, previousCount)
+      );
+      appendEvent(telemetry, type, {
+        durationMs,
+        moving: Boolean(payload.moving),
+        remainingTiles,
+        mode: String(payload.mode || ""),
+      });
+      break;
+    }
     default: {
       appendEvent(telemetry, type, payload);
       break;
@@ -222,4 +291,3 @@ export function recordMapPerfEvent(type, payload = {}) {
 export function getMapPerfTelemetry() {
   return readTelemetry();
 }
-
