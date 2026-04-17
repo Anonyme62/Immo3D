@@ -451,16 +451,21 @@ function getMobileQualityProfile(value, allowUltraFromDevice) {
     MOBILE_QUALITY_PROFILE_CONFIG[MOBILE_QUALITY_PROFILE_DEFAULT];
   return {
     ...baseProfile,
-    enableUltra: Boolean(baseProfile.enableUltra && allowUltraFromDevice),
+    enableUltra: Boolean(
+      normalized === "ultra" && baseProfile.enableUltra && allowUltraFromDevice
+    ),
   };
 }
 
 function getDesktopQualityProfile(value) {
   const normalized = normalizeDesktopQualityProfile(value);
-  return (
-    DESKTOP_QUALITY_PROFILE_CONFIG[normalized] ||
-    DESKTOP_QUALITY_PROFILE_CONFIG[DESKTOP_QUALITY_PROFILE_DEFAULT]
-  );
+  return {
+    ...(
+      DESKTOP_QUALITY_PROFILE_CONFIG[normalized] ||
+      DESKTOP_QUALITY_PROFILE_CONFIG[DESKTOP_QUALITY_PROFILE_DEFAULT]
+    ),
+    enableUltra: normalized === "ultra",
+  };
 }
 
 function getPreferredResolutionScale(isMobile, isIOSDevice = false) {
@@ -3287,7 +3292,7 @@ function findPickedInteractiveData(
         if (!isMobile) {
           clearDesktopQualityRestoreTimeouts();
           applyDesktopIdleQuality();
-          if (modeRef.current === "google3d") {
+          if (selectedDesktopQualityProfile.enableUltra && modeRef.current === "google3d") {
             desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
               if (cancelled) return;
               applyDesktopUltraQuality();
@@ -3532,10 +3537,12 @@ function findPickedInteractiveData(
       // Defer ultra quality a bit so initial view and mode switch stay responsive.
       const sinceBootMs = Date.now() - appBootTimestampRef.current;
       const ultraDelayMs = Math.max(900, GOOGLE_TILESET_ULTRA_PHASE_MS - sinceBootMs);
-      googleUltraQualityTimeoutRef.current = window.setTimeout(() => {
-        if (cancelled || !tilesetRef.current || modeRef.current !== "google3d") return;
-        applyDesktopUltraQuality(tilesetRef.current);
-      }, ultraDelayMs);
+      if (selectedDesktopQualityProfile.enableUltra) {
+        googleUltraQualityTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled || !tilesetRef.current || modeRef.current !== "google3d") return;
+          applyDesktopUltraQuality(tilesetRef.current);
+        }, ultraDelayMs);
+      }
     };
 
     const handleAdaptiveFrameQuality = () => {
@@ -3623,7 +3630,11 @@ function findPickedInteractiveData(
         return;
       }
 
-      if (!isMobile && avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps) {
+      if (
+        !isMobile &&
+        selectedDesktopQualityProfile.enableUltra &&
+        avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps
+      ) {
         applyDesktopUltraQuality();
       }
     };
@@ -4017,7 +4028,9 @@ function findPickedInteractiveData(
         if (cancelled) return;
         applyDesktopIdleQuality();
 
-        if (modeRef.current !== "google3d") return;
+        if (!selectedDesktopQualityProfile.enableUltra || modeRef.current !== "google3d") {
+          return;
+        }
         desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
           if (cancelled) return;
           applyDesktopUltraQuality();
