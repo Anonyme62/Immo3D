@@ -48,13 +48,13 @@ const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
 const SATELLITE_LOAD_WATCHDOG_MS = 15000;
 const DESKTOP_RESOLUTION_SCALE = 1.22;
 const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
-const DESKTOP_MOVING_RESOLUTION_SCALE = 1.02;
+const DESKTOP_MOVING_RESOLUTION_SCALE = 0.9;
 const MOBILE_RESOLUTION_SCALE = 1;
 const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
 const IOS_RESOLUTION_SCALE = 0.82;
 const DESKTOP_MSAA_SAMPLES = 4;
 const DESKTOP_ULTRA_MSAA_SAMPLES = 8;
-const DESKTOP_MOVING_MSAA_SAMPLES = 2;
+const DESKTOP_MOVING_MSAA_SAMPLES = 1;
 const MOBILE_MSAA_SAMPLES = 2;
 const MOBILE_MOVING_MSAA_SAMPLES = 1;
 const IOS_MSAA_SAMPLES = 1;
@@ -62,21 +62,21 @@ const MOBILE_GOOGLE_TILESET_FAST_SSE = 16;
 const MOBILE_GOOGLE_TILESET_PREMIUM_SSE = 9.5;
 const MOBILE_GOOGLE_TILESET_MOVING_SSE = 20;
 const MOBILE_GOOGLE_TILESET_IDLE_SSE = 8.5;
-const DESKTOP_GOOGLE_TILESET_MOVING_SSE = 13;
+const DESKTOP_GOOGLE_TILESET_MOVING_SSE = 17;
 const DESKTOP_GOOGLE_TILESET_IDLE_SSE = 6;
 const DESKTOP_GOOGLE_TILESET_ULTRA_SSE = 3.4;
 const MOBILE_GLOBE_SSE_MOVING = 2.2;
 const MOBILE_GLOBE_SSE_IDLE = 1.55;
-const DESKTOP_GLOBE_SSE_MOVING = 1.45;
+const DESKTOP_GLOBE_SSE_MOVING = 1.75;
 const DESKTOP_GLOBE_SSE_IDLE = 1.05;
 const DESKTOP_GLOBE_SSE_ULTRA = 0.9;
 const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
 const DESKTOP_QUALITY_ULTRA_DELAY_MS = 780;
 const MODE_TRANSITION_MIN_VISIBLE_MS = 620;
 const MODE_TRANSITION_VISUAL_FADE_OUT_MS = 260;
-const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
+const DESKTOP_GOOGLE_OSM_ALPHA = 0;
 const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
-const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
+const MOBILE_GOOGLE_OSM_ALPHA = 0;
 const MOBILE_QUALITY_ULTRA_DELAY_MS = 980;
 const MOBILE_ULTRA_RESOLUTION_SCALE = 1.08;
 const MOBILE_GOOGLE_TILESET_ULTRA_SSE = 6.9;
@@ -517,6 +517,14 @@ function tuneImageryLayer(imageryLayer, mode = "satellite") {
   imageryLayer.contrast = 1;
   imageryLayer.gamma = 1;
   imageryLayer.saturation = 1;
+}
+
+function applyGoogleOverlayLayerState(imageryLayer, isMobileDevice) {
+  if (!imageryLayer) return;
+  const overlayAlpha = isMobileDevice ? MOBILE_GOOGLE_OSM_ALPHA : DESKTOP_GOOGLE_OSM_ALPHA;
+  const shouldShowOverlay = overlayAlpha > 0.01;
+  imageryLayer.show = shouldShowOverlay;
+  imageryLayer.alpha = shouldShowOverlay ? overlayAlpha : 0;
 }
 
 function buildZoneCacheKey(searchZone) {
@@ -3338,11 +3346,11 @@ function findPickedInteractiveData(
         tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.movingTilesetSse;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = false;
+        tileset.cullRequestsWhileMoving = true;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
-        osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
+        applyGoogleOverlayLayerState(osmImageryLayerRef.current, false);
       }
 
       viewer.scene.requestRender();
@@ -3368,7 +3376,7 @@ function findPickedInteractiveData(
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
-        osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
+        applyGoogleOverlayLayerState(osmImageryLayerRef.current, false);
       }
 
       viewer.scene.requestRender();
@@ -3402,11 +3410,11 @@ function findPickedInteractiveData(
         tileset.maximumScreenSpaceError = selectedMobileQualityProfile.movingTilesetSse;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = false;
+        tileset.cullRequestsWhileMoving = true;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
-        osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
+        applyGoogleOverlayLayerState(osmImageryLayerRef.current, true);
       }
 
       viewer.scene.requestRender();
@@ -3428,7 +3436,7 @@ function findPickedInteractiveData(
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
-        osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
+        applyGoogleOverlayLayerState(osmImageryLayerRef.current, true);
       }
 
       viewer.scene.requestRender();
@@ -3461,7 +3469,7 @@ function findPickedInteractiveData(
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
-        osmImageryLayerRef.current.alpha = MOBILE_GOOGLE_OSM_ALPHA;
+        applyGoogleOverlayLayerState(osmImageryLayerRef.current, true);
       }
 
       viewer.scene.requestRender();
@@ -3494,7 +3502,7 @@ function findPickedInteractiveData(
         tileset.maximumScreenSpaceError = selectedMobileQualityProfile.fastTilesetSse;
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
-        tileset.cullRequestsWhileMoving = false;
+        tileset.cullRequestsWhileMoving = true;
         viewer.scene.requestRender();
         googleQualityTimeoutRef.current = window.setTimeout(() => {
           if (cancelled || !tilesetRef.current) return;
@@ -3510,7 +3518,7 @@ function findPickedInteractiveData(
       tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.fastTilesetSse;
       tileset.dynamicScreenSpaceError = true;
       tileset.foveatedScreenSpaceError = true;
-      tileset.cullRequestsWhileMoving = false;
+      tileset.cullRequestsWhileMoving = true;
       viewer.scene.requestRender();
       googleQualityTimeoutRef.current = window.setTimeout(() => {
         if (cancelled || !tilesetRef.current) return;
@@ -3633,7 +3641,7 @@ function findPickedInteractiveData(
             preloadFlightDestinations: true,
             skipLevelOfDetail: false,
             dynamicScreenSpaceError: isMobile && !isIOSDevice,
-            cullRequestsWhileMoving: false,
+            cullRequestsWhileMoving: true,
             cullWithChildrenBounds: true,
             preferLeaves: true,
             foveatedScreenSpaceError: isMobile && !isIOSDevice,
@@ -3657,7 +3665,7 @@ function findPickedInteractiveData(
             tileset.preloadFlightDestinations = true;
             tileset.skipLevelOfDetail = false;
             tileset.dynamicScreenSpaceError = isMobile && !isIOSDevice;
-            tileset.cullRequestsWhileMoving = false;
+            tileset.cullRequestsWhileMoving = true;
             tileset.preferLeaves = true;
             tileset.foveatedScreenSpaceError = isMobile && !isIOSDevice;
             tileset.progressiveResolutionHeightFraction =
@@ -3801,11 +3809,7 @@ function findPickedInteractiveData(
       viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
 
       if (osmImageryLayerRef.current) {
-        osmImageryLayerRef.current.show = true;
-        osmImageryLayerRef.current.alpha =
-          isMobile
-            ? MOBILE_GOOGLE_OSM_ALPHA
-            : DESKTOP_GOOGLE_OSM_ALPHA;
+        applyGoogleOverlayLayerState(osmImageryLayerRef.current, isMobile);
       }
       if (worldTerrainProviderRef.current) {
         viewer.terrainProvider = worldTerrainProviderRef.current;
@@ -4642,6 +4646,41 @@ function findPickedInteractiveData(
       ].join("|");
       if (markerLodRuntimeRef.current.lastSignature === signature) return;
       markerLodRuntimeRef.current.lastSignature = signature;
+
+      if (isMoving) {
+        bienEntities.forEach((entity) => {
+          const bienId = entity.bienData?.id;
+          const isSelected = bienId != null && bienId === selectedId;
+          const shouldShowPoint = isSelected || entity.showPointByPriority !== false;
+          const shouldShowLabel = isSelected;
+          if (entity.point?.show !== shouldShowPoint) {
+            entity.point.show = shouldShowPoint;
+            changed = true;
+          }
+          if (entity.label?.show !== shouldShowLabel) {
+            entity.label.show = shouldShowLabel;
+            changed = true;
+          }
+        });
+
+        customEntities.forEach((entity) => {
+          const shouldShowPoint = true;
+          const shouldShowLabel = false;
+          if (entity.point?.show !== shouldShowPoint) {
+            entity.point.show = shouldShowPoint;
+            changed = true;
+          }
+          if (entity.label?.show !== shouldShowLabel) {
+            entity.label.show = shouldShowLabel;
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          viewer.scene.requestRender();
+        }
+        return;
+      }
 
       const bienRanked = bienEntities
         .map((entity) => ({
