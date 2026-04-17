@@ -3450,19 +3450,20 @@ function findPickedInteractiveData(
         selectedDesktopQualityProfile.movingGlobeSse;
 
       if (tileset && modeRef.current === "google3d") {
+        const useUniformMovingLod = selectedDesktopQualityProfileId === "auto";
         tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.movingTilesetSse;
-        tileset.dynamicScreenSpaceError = true;
-        tileset.foveatedScreenSpaceError = true;
+        tileset.dynamicScreenSpaceError = !useUniformMovingLod;
+        tileset.foveatedScreenSpaceError = !useUniformMovingLod;
         tileset.cullRequestsWhileMoving = false;
         tileset.foveatedTimeDelay =
-          selectedDesktopQualityProfileId === "auto"
+          useUniformMovingLod
             ? GOOGLE_TILESET_FOVEATED_TIME_DELAY_MOVING_SECONDS
             : GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
         tileset.progressiveResolutionHeightFraction =
-          selectedDesktopQualityProfileId === "auto"
+          useUniformMovingLod
             ? GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION_MOVING
             : GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
-        tileset.preferLeaves = selectedDesktopQualityProfileId !== "auto";
+        tileset.preferLeaves = !useUniformMovingLod;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
