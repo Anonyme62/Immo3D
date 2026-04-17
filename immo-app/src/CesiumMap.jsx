@@ -23,7 +23,7 @@ import {
   getMarkerLabelOffset,
   getMarkerVisualState,
 } from "./utils/mapMarkerStyle";
-import { recordMapPerfEvent } from "./utils/mapPerfTelemetry";
+import { getMapPerfTelemetry, recordMapPerfEvent } from "./utils/mapPerfTelemetry";
 
 const GOOGLE_TILES_ASSET_ID = 2275207;
 
@@ -315,6 +315,21 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   0.58
 );
 const MOBILE_BIEN_CARD_HEIGHT = 134;
+const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
+const FPS_BENCHMARK_VERSION = 1;
+const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
+const FPS_BENCHMARK_MIN_DISTANCE_METERS = 220;
+const FPS_BENCHMARK_MAX_DISTANCE_METERS = 620;
+const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.48;
+const FPS_BENCHMARK_SEGMENTS = [
+  { durationMs: 1700, fromX: 0, fromY: 0, toX: 1.0, toY: 0.08 },
+  { durationMs: 1500, fromX: 1.0, fromY: 0.08, toX: 1.55, toY: -0.26 },
+  { durationMs: 1650, fromX: 1.55, fromY: -0.26, toX: 0.72, toY: -0.62 },
+];
+const FPS_BENCHMARK_TOTAL_DURATION_MS = FPS_BENCHMARK_SEGMENTS.reduce(
+  (total, segment) => total + segment.durationMs,
+  0
+);
 
 function captureCamera(viewer) {
   return {
@@ -567,6 +582,142 @@ function writeMapZoneCacheStore(nextStore) {
   } catch {
     // Ignore storage quota/runtime issues.
   }
+}
+
+function readFpsBenchmarkStore() {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(FPS_BENCHMARK_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFpsBenchmarkStore(nextStore) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      FPS_BENCHMARK_STORAGE_KEY,
+      JSON.stringify({
+        version: FPS_BENCHMARK_VERSION,
+        ...nextStore,
+      })
+    );
+  } catch {
+    // Ignore storage/runtime issues.
+  }
+}
+
+function isSerializableCameraStateValid(cameraState) {
+  return (
+    cameraState &&
+    Number.isFinite(Number(cameraState.longitude)) &&
+    Number.isFinite(Number(cameraState.latitude)) &&
+    Number.isFinite(Number(cameraState.height))
+  );
+}
+
+function getFpsBenchmarkDistanceMeters(cameraState) {
+  const height = Number(cameraState?.height);
+  if (!Number.isFinite(height)) return FPS_BENCHMARK_MIN_DISTANCE_METERS;
+  return Cesium.Math.clamp(
+    height * FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO,
+    FPS_BENCHMARK_MIN_DISTANCE_METERS,
+    FPS_BENCHMARK_MAX_DISTANCE_METERS
+  );
+}
+
+function getFpsBenchmarkOffsetAt(elapsedMs, distanceMeters) {
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return { x: 0, y: 0 };
+  }
+  let remaining = elapsedMs;
+  for (const segment of FPS_BENCHMARK_SEGMENTS) {
+    const durationMs = Number(segment.durationMs) || 0;
+    if (durationMs <= 0) continue;
+    if (remaining <= durationMs) {
+      const progress = Cesium.Math.clamp(remaining / durationMs, 0, 1);
+      return {
+        x:
+          Cesium.Math.lerp(segment.fromX, segment.toX, progress) * distanceMeters,
+        y:
+          Cesium.Math.lerp(segment.fromY, segment.toY, progress) * distanceMeters,
+      };
+    }
+    remaining -= durationMs;
+  }
+  const lastSegment = FPS_BENCHMARK_SEGMENTS[FPS_BENCHMARK_SEGMENTS.length - 1];
+  return {
+    x: Number(lastSegment?.toX || 0) * distanceMeters,
+    y: Number(lastSegment?.toY || 0) * distanceMeters,
+  };
+}
+
+function rotateBenchmarkOffsetByHeading(offsetX, offsetY, heading) {
+  const safeHeading = Number.isFinite(heading) ? heading : 0;
+  const cosHeading = Math.cos(safeHeading);
+  const sinHeading = Math.sin(safeHeading);
+  return {
+    east: offsetX * cosHeading - offsetY * sinHeading,
+    north: offsetX * sinHeading + offsetY * cosHeading,
+  };
+}
+
+function percentile(sortedValues, percentileRatio) {
+  if (!Array.isArray(sortedValues) || sortedValues.length === 0) return null;
+  const clampedRatio = Cesium.Math.clamp(percentileRatio, 0, 1);
+  const index = Math.min(
+    sortedValues.length - 1,
+    Math.max(0, Math.ceil(sortedValues.length * clampedRatio) - 1)
+  );
+  return sortedValues[index];
+}
+
+function roundBenchmarkValue(value, digits = 1) {
+  if (!Number.isFinite(value)) return null;
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
+  if (!Array.isArray(frameTimesMs) || frameTimesMs.length === 0) return null;
+  const safeFrameTimes = frameTimesMs.filter(
+    (value) => Number.isFinite(value) && value > 0
+  );
+  if (safeFrameTimes.length === 0) return null;
+  const sortedFrameTimes = [...safeFrameTimes].sort((left, right) => left - right);
+  const totalDurationMs = safeFrameTimes.reduce((sum, value) => sum + value, 0);
+  const averageFrameMs = totalDurationMs / safeFrameTimes.length;
+  const minFrameMs = sortedFrameTimes[0];
+  const maxFrameMs = sortedFrameTimes[sortedFrameTimes.length - 1];
+  const p95FrameMs = percentile(sortedFrameTimes, 0.95);
+
+  return {
+    ranAt: new Date().toISOString(),
+    sampleCount: safeFrameTimes.length,
+    durationMs: Math.round(totalDurationMs),
+    avgFps: roundBenchmarkValue(1000 / averageFrameMs),
+    minFps: roundBenchmarkValue(1000 / maxFrameMs),
+    maxFps: roundBenchmarkValue(1000 / minFrameMs),
+    avgFrameMs: roundBenchmarkValue(averageFrameMs),
+    p95FrameMs: roundBenchmarkValue(p95FrameMs),
+    maxFrameMs: roundBenchmarkValue(maxFrameMs),
+    ...extra,
+  };
+}
+
+function formatFpsBenchmarkSummary(result) {
+  if (!result || !Number.isFinite(result.avgFps)) return "";
+  const parts = [
+    `avg ${result.avgFps} fps`,
+    Number.isFinite(result.minFps) ? `min ${result.minFps}` : null,
+    Number.isFinite(result.p95FrameMs) ? `p95 ${result.p95FrameMs} ms` : null,
+    Number.isFinite(result.longTaskCount) ? `long tasks ${result.longTaskCount}` : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 function compactMapZoneCacheStore(store) {
@@ -1330,6 +1481,9 @@ export default function CesiumMap({
     movingStateApplied: false,
   });
   const markerLodSettleTimeoutRef = useRef(null);
+  const fpsBenchmarkRafRef = useRef(null);
+  const fpsBenchmarkStartTimeoutRef = useRef(null);
+  const fpsBenchmarkCameraInputsRef = useRef(null);
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -1390,6 +1544,20 @@ export default function CesiumMap({
     fading: false,
     snapshotDataUrl: "",
   });
+  const [fpsBenchmarkState, setFpsBenchmarkState] = useState(() => {
+    const store = readFpsBenchmarkStore();
+    return {
+      running: false,
+      scenario: isSerializableCameraStateValid(store?.scenario?.startCamera)
+        ? store.scenario
+        : null,
+      lastResult:
+        store?.lastResult && Number.isFinite(Number(store.lastResult.avgFps))
+          ? store.lastResult
+          : null,
+      message: "",
+    };
+  });
   const isSatelliteReadyRef = useRef(false);
   const isTouchNavigationDevice = isMobile && hasTouchInput();
 
@@ -1436,6 +1604,29 @@ export default function CesiumMap({
   useEffect(() => {
     isSatelliteReadyRef.current = isSatelliteReady;
   }, [isSatelliteReady]);
+
+  useEffect(() => {
+    return () => {
+      if (fpsBenchmarkRafRef.current) {
+        window.cancelAnimationFrame(fpsBenchmarkRafRef.current);
+        fpsBenchmarkRafRef.current = null;
+      }
+      if (fpsBenchmarkStartTimeoutRef.current) {
+        window.clearTimeout(fpsBenchmarkStartTimeoutRef.current);
+        fpsBenchmarkStartTimeoutRef.current = null;
+      }
+      const viewer = viewerRef.current;
+      if (
+        viewer &&
+        !viewer.isDestroyed() &&
+        fpsBenchmarkCameraInputsRef.current !== null
+      ) {
+        viewer.scene.screenSpaceCameraController.enableInputs =
+          fpsBenchmarkCameraInputsRef.current;
+      }
+      fpsBenchmarkCameraInputsRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     touchNavTuningRef.current = touchNavTuning || TOUCH_NAV_TUNING;
@@ -5431,7 +5622,8 @@ function findPickedInteractiveData(
     Boolean(satelliteIssueMessage) && currentResolvedMode !== "google3d";
   const canTiltCurrentView = currentResolvedMode === "google3d";
   const isTiltToggleDisabled = isMapModeTransitioning || isTiltTransitioning;
-  const desktopPlusBottom = canTiltCurrentView ? 148 : 84;
+  const desktopBenchmarkBottom = canTiltCurrentView ? 148 : 84;
+  const desktopPlusBottom = canTiltCurrentView ? 212 : 148;
   const modeTransitionLabel =
     modeTransition.target === "google3d"
       ? "Passage a la vue satellite..."
@@ -5448,6 +5640,21 @@ function findPickedInteractiveData(
     !hasVisibleSatelliteIssue &&
     (isSatelliteTogglePending || isSatelliteSwitchingTo3D);
   const isMapModeToggleDisabled = !canUseGoogle3D;
+  const isFpsBenchmarkButtonDisabled =
+    fpsBenchmarkState.running ||
+    isMapModeTransitioning ||
+    currentResolvedMode !== "google3d";
+  const fpsBenchmarkButtonLabel = fpsBenchmarkState.running
+    ? "Test..."
+    : fpsBenchmarkState.scenario?.startCamera
+      ? "Test FPS"
+      : "Init FPS";
+  const fpsBenchmarkButtonTitle = fpsBenchmarkState.running
+    ? "Benchmark FPS en cours..."
+    : fpsBenchmarkState.scenario?.startCamera
+      ? "Relance le meme trajet pour comparer les patches. Shift+clic pour redefinir le point de depart."
+      : "Memorise la vue actuelle puis lance un benchmark FPS reproductible.";
+  const fpsBenchmarkSummary = fpsBenchmarkState.message || "";
   const mapModeButtonLabel =
     currentResolvedMode === "google3d"
       ? "Vue plan"
@@ -5482,6 +5689,264 @@ function findPickedInteractiveData(
       ? "calc(env(safe-area-inset-top, 0px) + 60px)"
       : 68
     : 20;
+
+  function persistFpsBenchmarkState(updater) {
+    setFpsBenchmarkState((previousState) => {
+      const nextState =
+        typeof updater === "function" ? updater(previousState) : previousState;
+      writeFpsBenchmarkStore({
+        scenario: nextState?.scenario || null,
+        lastResult: nextState?.lastResult || null,
+      });
+      return nextState;
+    });
+  }
+
+  function finishFpsBenchmarkRun(viewer) {
+    if (fpsBenchmarkRafRef.current) {
+      window.cancelAnimationFrame(fpsBenchmarkRafRef.current);
+      fpsBenchmarkRafRef.current = null;
+    }
+    if (fpsBenchmarkStartTimeoutRef.current) {
+      window.clearTimeout(fpsBenchmarkStartTimeoutRef.current);
+      fpsBenchmarkStartTimeoutRef.current = null;
+    }
+    if (
+      viewer &&
+      !viewer.isDestroyed() &&
+      fpsBenchmarkCameraInputsRef.current !== null
+    ) {
+      viewer.scene.screenSpaceCameraController.enableInputs =
+        fpsBenchmarkCameraInputsRef.current;
+    }
+    fpsBenchmarkCameraInputsRef.current = null;
+  }
+
+  function runFpsBenchmark(viewer, scenario) {
+    if (
+      !viewer ||
+      viewer.isDestroyed() ||
+      !scenario ||
+      !isSerializableCameraStateValid(scenario.startCamera)
+    ) {
+      return;
+    }
+
+    finishFpsBenchmarkRun(viewer);
+
+    const startCamera = scenario.startCamera;
+    const runMode =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+        ? "google3d"
+        : "osm";
+    const qualityProfile = isMobile
+      ? normalizeMobileQualityProfile(mobileQualityProfileRef.current)
+      : normalizeDesktopQualityProfile(desktopQualityProfileRef.current);
+    const benchmarkDistanceMeters = getFpsBenchmarkDistanceMeters(startCamera);
+
+    fpsBenchmarkCameraInputsRef.current =
+      viewer.scene.screenSpaceCameraController.enableInputs;
+    viewer.scene.screenSpaceCameraController.enableInputs = false;
+    restoreSerializableCameraState(viewer, startCamera);
+    viewer.scene.requestRender();
+
+    persistFpsBenchmarkState((previousState) => ({
+      ...previousState,
+      running: true,
+      message: `Test FPS en cours (${Math.round(
+        benchmarkDistanceMeters
+      )} m)...`,
+    }));
+
+    fpsBenchmarkStartTimeoutRef.current = window.setTimeout(() => {
+      fpsBenchmarkStartTimeoutRef.current = null;
+      if (viewer.isDestroyed()) {
+        finishFpsBenchmarkRun(viewer);
+        return;
+      }
+
+      const telemetryStartedAt = new Date().toISOString();
+      const anchor = Cesium.Cartesian3.fromDegrees(
+        startCamera.longitude,
+        startCamera.latitude,
+        0
+      );
+      const benchmarkFrame = Cesium.Transforms.eastNorthUpToFixedFrame(anchor);
+      const benchmarkFrameInverse = Cesium.Matrix4.inverseTransformation(
+        benchmarkFrame,
+        new Cesium.Matrix4()
+      );
+      const startDestination = Cesium.Cartesian3.fromDegrees(
+        startCamera.longitude,
+        startCamera.latitude,
+        startCamera.height
+      );
+      const startLocalPosition = Cesium.Matrix4.multiplyByPoint(
+        benchmarkFrameInverse,
+        startDestination,
+        new Cesium.Cartesian3()
+      );
+      const frameTimesMs = [];
+      let benchmarkStartedAt = null;
+      let lastFrameAt = null;
+
+      const stepBenchmark = (timestamp) => {
+        if (viewer.isDestroyed()) {
+          finishFpsBenchmarkRun(viewer);
+          return;
+        }
+
+        if (benchmarkStartedAt === null) {
+          benchmarkStartedAt = timestamp;
+          lastFrameAt = timestamp;
+        }
+
+        const elapsedMs = Math.min(
+          timestamp - benchmarkStartedAt,
+          FPS_BENCHMARK_TOTAL_DURATION_MS
+        );
+        const offset = getFpsBenchmarkOffsetAt(
+          elapsedMs,
+          benchmarkDistanceMeters
+        );
+        const rotatedOffset = rotateBenchmarkOffsetByHeading(
+          offset.x,
+          offset.y,
+          startCamera.heading
+        );
+        const worldPosition = Cesium.Matrix4.multiplyByPoint(
+          benchmarkFrame,
+          new Cesium.Cartesian3(
+            rotatedOffset.east,
+            rotatedOffset.north,
+            startLocalPosition.z
+          ),
+          new Cesium.Cartesian3()
+        );
+
+        viewer.camera.setView({
+          destination: worldPosition,
+          orientation: {
+            heading: Number(startCamera.heading) || 0,
+            pitch:
+              Number(startCamera.pitch) || Cesium.Math.toRadians(-90),
+            roll: Number(startCamera.roll) || 0,
+          },
+        });
+        viewer.scene.requestRender();
+
+        if (lastFrameAt !== null && timestamp > lastFrameAt) {
+          frameTimesMs.push(timestamp - lastFrameAt);
+        }
+        lastFrameAt = timestamp;
+
+        if (elapsedMs < FPS_BENCHMARK_TOTAL_DURATION_MS) {
+          fpsBenchmarkRafRef.current =
+            window.requestAnimationFrame(stepBenchmark);
+          return;
+        }
+
+        finishFpsBenchmarkRun(viewer);
+
+        const telemetry = getMapPerfTelemetry();
+        const benchmarkLongTasks = (telemetry.recentEvents || []).filter(
+          (event) =>
+            event?.type === "long_task" &&
+            String(event?.at || "") >= telemetryStartedAt
+        );
+        const benchmarkTileBursts = (telemetry.recentEvents || []).filter(
+          (event) =>
+            event?.type === "tile_load_burst_complete" &&
+            String(event?.at || "") >= telemetryStartedAt
+        );
+        const result = buildFpsBenchmarkResult(frameTimesMs, {
+          distanceMeters: Math.round(benchmarkDistanceMeters),
+          mode: runMode,
+          qualityProfile,
+          longTaskCount: benchmarkLongTasks.length,
+          maxLongTaskMs: roundBenchmarkValue(
+            benchmarkLongTasks.reduce(
+              (maxDuration, event) =>
+                Math.max(maxDuration, Number(event?.durationMs) || 0),
+              0
+            )
+          ),
+          tileBurstCount: benchmarkTileBursts.length,
+        });
+        if (!result) {
+          persistFpsBenchmarkState((previousState) => ({
+            ...previousState,
+            running: false,
+            message: "Test FPS impossible a mesurer.",
+          }));
+          return;
+        }
+
+        recordMapPerfEvent("fps_benchmark_complete", {
+          avgFps: result.avgFps,
+          minFps: result.minFps,
+          p95FrameMs: result.p95FrameMs,
+          durationMs: result.durationMs,
+          mode: runMode,
+          qualityProfile,
+          longTaskCount: result.longTaskCount,
+        });
+        persistFpsBenchmarkState((previousState) => ({
+          ...previousState,
+          running: false,
+          lastResult: result,
+          message: formatFpsBenchmarkSummary(result),
+        }));
+      };
+
+      fpsBenchmarkRafRef.current = window.requestAnimationFrame(stepBenchmark);
+    }, FPS_BENCHMARK_PREPARE_DELAY_MS);
+  }
+
+  function handleStartFpsBenchmark(event) {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed() || fpsBenchmarkState.running) return;
+
+    const liveMode =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+        ? "google3d"
+        : "osm";
+    if (liveMode !== "google3d") {
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        message: "Passe d'abord en vue satellite pour comparer les FPS.",
+      }));
+      return;
+    }
+
+    const shouldRedefineScenario =
+      Boolean(event?.shiftKey) || !fpsBenchmarkState.scenario?.startCamera;
+    let nextScenario = fpsBenchmarkState.scenario;
+
+    if (shouldRedefineScenario) {
+      const startCamera = captureSerializableCameraState(viewer);
+      if (!isSerializableCameraStateValid(startCamera)) {
+        persistFpsBenchmarkState((previousState) => ({
+          ...previousState,
+          message: "Impossible de memoriser ce point de depart.",
+        }));
+        return;
+      }
+      nextScenario = {
+        createdAt: Date.now(),
+        startCamera,
+      };
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        scenario: nextScenario,
+        message: shouldRedefineScenario
+          ? "Point de depart FPS memorise."
+          : previousState.message,
+      }));
+    }
+
+    runFpsBenchmark(viewer, nextScenario);
+  }
 
   function forcePlanModeImmediate(options = {}) {
     const { keepTransition = false } = options;
@@ -5566,6 +6031,31 @@ function findPickedInteractiveData(
       style={{ width: "100%", height: "100%", position: "relative" }}
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+      {!isMobile && fpsBenchmarkSummary ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 20,
+            right: 88,
+            zIndex: 8,
+            maxWidth: 360,
+            padding: "10px 14px",
+            borderRadius: 14,
+            border: "1px solid rgba(15, 23, 42, 0.12)",
+            background: "rgba(255,255,255,0.92)",
+            color: "var(--text-primary)",
+            boxShadow: "0 14px 26px rgba(15, 23, 42, 0.14)",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
+            fontSize: 13,
+            fontWeight: 700,
+            lineHeight: 1.4,
+          }}
+        >
+          Test FPS: {fpsBenchmarkSummary}
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -5761,6 +6251,20 @@ function findPickedInteractiveData(
             title="Ajouter une note"
           >
             +
+          </button>
+          <button
+            onClick={handleStartFpsBenchmark}
+            disabled={isFpsBenchmarkButtonDisabled}
+            style={desktopMapButtonStyle(
+              desktopBenchmarkBottom,
+              !isFpsBenchmarkButtonDisabled
+            )}
+            title={fpsBenchmarkButtonTitle}
+          >
+            <span style={mapModeButtonContentStyle()}>
+              {fpsBenchmarkState.running ? <LoadingSpinner size={14} /> : null}
+              <span>{fpsBenchmarkButtonLabel}</span>
+            </span>
           </button>
           <button
             onClick={handleToggleMapMode}
