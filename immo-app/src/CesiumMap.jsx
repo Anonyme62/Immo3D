@@ -316,8 +316,8 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
 );
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
-const FPS_BENCHMARK_VERSION = 5;
-const FPS_BENCHMARK_ROUTE_VERSION = 5;
+const FPS_BENCHMARK_VERSION = 6;
+const FPS_BENCHMARK_ROUTE_VERSION = 6;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
 const FPS_BENCHMARK_MAX_DISTANCE_METERS = 980;
@@ -329,58 +329,58 @@ const FPS_BENCHMARK_MARKER_CONTEXT_RADIUS_METERS = 620;
 const FPS_BENCHMARK_MARKER_SEARCH_RADIUS_METERS = 2800;
 const FPS_BENCHMARK_SEGMENTS = [
   {
-    durationMs: 2400,
+    durationMs: 4800,
     fromX: 0,
     fromY: 0,
-    toX: 0.95,
-    toY: 0.06,
-    fromHeightScale: 1,
-    toHeightScale: 1,
+    toX: 1.9,
+    toY: 0.12,
+    fromHeightScale: 0.82,
+    toHeightScale: 0.82,
   },
   {
-    durationMs: 2200,
-    fromX: 0.95,
-    fromY: 0.06,
-    toX: 1.82,
-    toY: -0.08,
-    fromHeightScale: 1,
-    toHeightScale: 1,
+    durationMs: 4400,
+    fromX: 1.9,
+    fromY: 0.12,
+    toX: 3.64,
+    toY: -0.16,
+    fromHeightScale: 0.82,
+    toHeightScale: 0.82,
   },
   {
-    durationMs: 5000,
-    fromX: 1.82,
-    fromY: -0.08,
-    toX: 1.82,
-    toY: -0.08,
-    fromHeightScale: 1,
-    toHeightScale: 1.28,
+    durationMs: 2500,
+    fromX: 3.64,
+    fromY: -0.16,
+    toX: 3.64,
+    toY: -0.16,
+    fromHeightScale: 0.82,
+    toHeightScale: 1.42,
   },
   {
-    durationMs: 5000,
-    fromX: 1.82,
-    fromY: -0.08,
-    toX: 1.82,
-    toY: -0.08,
-    fromHeightScale: 1.28,
-    toHeightScale: 1,
+    durationMs: 2500,
+    fromX: 3.64,
+    fromY: -0.16,
+    toX: 3.64,
+    toY: -0.16,
+    fromHeightScale: 1.42,
+    toHeightScale: 0.82,
   },
   {
-    durationMs: 2300,
-    fromX: 1.82,
-    fromY: -0.08,
-    toX: 2.74,
-    toY: -0.24,
-    fromHeightScale: 1,
-    toHeightScale: 1,
+    durationMs: 4600,
+    fromX: 3.64,
+    fromY: -0.16,
+    toX: 5.48,
+    toY: -0.48,
+    fromHeightScale: 0.82,
+    toHeightScale: 0.82,
   },
   {
-    durationMs: 2200,
-    fromX: 2.74,
-    fromY: -0.24,
-    toX: 3.55,
-    toY: -0.38,
-    fromHeightScale: 1,
-    toHeightScale: 1,
+    durationMs: 4400,
+    fromX: 5.48,
+    fromY: -0.48,
+    toX: 7.1,
+    toY: -0.76,
+    fromHeightScale: 0.82,
+    toHeightScale: 0.82,
   },
 ];
 const FPS_BENCHMARK_TOTAL_DURATION_MS = FPS_BENCHMARK_SEGMENTS.reduce(
