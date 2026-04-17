@@ -25,7 +25,7 @@ import {
 } from "./api";
 import AppMenu from "./components/AppMenu";
 import BiensSidebar from "./components/BiensSidebar";
-import { APP_BUILD_REF, APP_BUILD_VERSION, CESIUM_ION_TOKEN } from "./config";
+import { APP_BUILD_REF, APP_BUILD_VERSION, GOOGLE_3D_TILES_API_KEY } from "./config";
 import LoginScreen from "./components/LoginScreen";
 import SelectedBienPanel from "./components/SelectedBienPanel";
 import SubscriptionScreen from "./components/SubscriptionScreen";
@@ -226,7 +226,7 @@ function App() {
   const isIOSDevice = useMemo(() => isLikelyIOSDevice(), []);
   const isStandalonePwa = useMemo(() => isStandaloneDisplayMode(), []);
   const isIOSStandalonePwa = isIOSDevice && isStandalonePwa;
-  const canUseGoogle3D = Boolean(CESIUM_ION_TOKEN);
+  const canUseGoogle3D = Boolean(GOOGLE_3D_TILES_API_KEY);
   const mobileViewportHeight = "var(--immo3d-mobile-vh, 100svh)";
 
   const boundaryQuery = useMemo(

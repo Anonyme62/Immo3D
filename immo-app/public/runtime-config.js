@@ -16,9 +16,9 @@ window.__IMMO3D_RUNTIME_CONFIG__.apiBaseUrl =
   window.__IMMO3D_RUNTIME_CONFIG__.apiBaseUrl ||
   (isLocalHost ? "" : "https://api.pigepro.fr");
 
-// Optionnel: surcharge du token Cesium sans rebuild.
-window.__IMMO3D_RUNTIME_CONFIG__.cesiumIonToken =
-  window.__IMMO3D_RUNTIME_CONFIG__.cesiumIonToken || "";
+// Optionnel: surcharge de la cle Google 3D Tiles sans rebuild.
+window.__IMMO3D_RUNTIME_CONFIG__.google3dApiKey =
+  window.__IMMO3D_RUNTIME_CONFIG__.google3dApiKey || "";
 
 window.__IMMO3D_RUNTIME_CONFIG__.buildVersion =
   window.__IMMO3D_RUNTIME_CONFIG__.buildVersion || "";
