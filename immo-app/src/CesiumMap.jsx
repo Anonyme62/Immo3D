@@ -319,6 +319,7 @@ const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
 const FPS_BENCHMARK_VERSION = 6;
 const FPS_BENCHMARK_ROUTE_VERSION = 6;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
+const FPS_BENCHMARK_COLD_START_QUALITY_LOCK_MS = 420;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
 const FPS_BENCHMARK_MAX_DISTANCE_METERS = 980;
 const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.92;
@@ -1900,6 +1901,7 @@ export default function CesiumMap({
   const fpsBenchmarkStartTimeoutRef = useRef(null);
   const fpsBenchmarkCameraInputsRef = useRef(null);
   const fpsBenchmarkRunCountRef = useRef(0);
+  const fpsBenchmarkQualityLockTimeoutRef = useRef(null);
   const fpsBenchmarkQualityLockRef = useRef(false);
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
   const releaseFpsBenchmarkMovingQualityRef = useRef(() => {});
@@ -4248,7 +4250,7 @@ function findPickedInteractiveData(
       viewer.scene.requestRender();
     };
 
-    const applyBenchmarkMovingQualityLock = () => {
+    const applyBenchmarkMovingQualityLock = (durationMs = null) => {
       fpsBenchmarkQualityLockRef.current = true;
       adaptiveQualityStateRef.current.isMoving = true;
       clearQualityRecoverySafetyTimeout();
@@ -4256,6 +4258,16 @@ function findPickedInteractiveData(
       clearMobileQualityRestoreTimeout();
       clearMobileUltraRestoreTimeout();
       resetAdaptiveQualityStats();
+      if (fpsBenchmarkQualityLockTimeoutRef.current) {
+        window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
+        fpsBenchmarkQualityLockTimeoutRef.current = null;
+      }
+      if (Number.isFinite(durationMs) && durationMs > 0) {
+        fpsBenchmarkQualityLockTimeoutRef.current = window.setTimeout(() => {
+          fpsBenchmarkQualityLockTimeoutRef.current = null;
+          releaseBenchmarkMovingQualityLock();
+        }, durationMs);
+      }
       if (isMobile) {
         applyMobileMovingQuality();
         return;
@@ -4267,6 +4279,10 @@ function findPickedInteractiveData(
       if (!fpsBenchmarkQualityLockRef.current) return;
 
       fpsBenchmarkQualityLockRef.current = false;
+      if (fpsBenchmarkQualityLockTimeoutRef.current) {
+        window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
+        fpsBenchmarkQualityLockTimeoutRef.current = null;
+      }
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       resetAdaptiveQualityStats();
@@ -4941,6 +4957,10 @@ function findPickedInteractiveData(
       clearMobileUltraRestoreTimeout();
       clearQualityRecoverySafetyTimeout();
       clearSatelliteLoadWatchdogTimeout();
+      if (fpsBenchmarkQualityLockTimeoutRef.current) {
+        window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
+        fpsBenchmarkQualityLockTimeoutRef.current = null;
+      }
       adaptiveQualityStateRef.current.isMoving = false;
       adaptiveQualityStateRef.current.isUltraActive = false;
       fpsBenchmarkQualityLockRef.current = false;
@@ -6226,6 +6246,10 @@ function findPickedInteractiveData(
       window.clearTimeout(fpsBenchmarkStartTimeoutRef.current);
       fpsBenchmarkStartTimeoutRef.current = null;
     }
+    if (fpsBenchmarkQualityLockTimeoutRef.current) {
+      window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
+      fpsBenchmarkQualityLockTimeoutRef.current = null;
+    }
     if (
       viewer &&
       !viewer.isDestroyed() &&
@@ -6315,7 +6339,11 @@ function findPickedInteractiveData(
     fpsBenchmarkCameraInputsRef.current =
       viewer.scene.screenSpaceCameraController.enableInputs;
     viewer.scene.screenSpaceCameraController.enableInputs = false;
-    applyFpsBenchmarkMovingQualityRef.current?.();
+    if (isColdStart) {
+      applyFpsBenchmarkMovingQualityRef.current?.(
+        FPS_BENCHMARK_COLD_START_QUALITY_LOCK_MS
+      );
+    }
     restoreSerializableCameraState(viewer, startCamera);
     viewer.scene.requestRender();
 
