@@ -1326,6 +1326,7 @@ export default function CesiumMap({
   const markerLodRuntimeRef = useRef({
     nextUpdateAt: 0,
     lastSignature: "",
+    movingStateApplied: false,
   });
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
@@ -4436,19 +4437,24 @@ function findPickedInteractiveData(
         biensAvecCoordonnees.forEach((bien, index) => {
           const entity = bienEntitiesByIndex[index];
           if (!entity) return;
-          entity.position = resolveBienPointPosition(
+          const resolvedPosition = resolveBienPointPosition(
             bien,
             index,
             positions,
             bienPositionById
           );
+          entity.position = resolvedPosition;
+          entity.markerPositionCartesian = resolvedPosition;
         });
       };
       const applyCustomEntityPositions = (positions) => {
         customMarkers.forEach((marker, markerIndex) => {
           const entity = customEntitiesByIndex[markerIndex];
           if (!entity) return;
-          entity.position = positions[markerIndex] || rawCustomPositions[markerIndex];
+          const resolvedPosition =
+            positions[markerIndex] || rawCustomPositions[markerIndex];
+          entity.position = resolvedPosition;
+          entity.markerPositionCartesian = resolvedPosition;
         });
       };
       const initialBienPositionById = buildBienPositionById(finalBienPositions);
@@ -4519,6 +4525,7 @@ function findPickedInteractiveData(
         entity.bienData = bien;
         entity.showPointByPriority = shouldShowPoint;
         entity.stackBienIds = (stackByBienId.get(bien.id) || [bien]).map((item) => item.id);
+        entity.markerPositionCartesian = pointPosition;
         entitiesRef.current.push(entity);
         bienEntitiesByIndex[index] = entity;
         markerDataByIdRef.current.set(bien.id, bien);
@@ -4561,6 +4568,8 @@ function findPickedInteractiveData(
         });
 
         entity.customMarkerData = marker;
+        entity.markerPositionCartesian =
+          finalCustomPositions[markerIndex] || rawCustomPositions[markerIndex];
         customMarkerEntitiesRef.current.push(entity);
         customEntitiesByIndex[markerIndex] = entity;
       });
@@ -4711,11 +4720,6 @@ function findPickedInteractiveData(
     const applyMarkerLod = () => {
       if (cancelled || !viewer || viewer.isDestroyed()) return;
 
-      const now = performance.now();
-      if (now < markerLodRuntimeRef.current.nextUpdateAt) return;
-      markerLodRuntimeRef.current.nextUpdateAt =
-        now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
-
       const isSatelliteMode =
         modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
       const bienEntities = entitiesRef.current;
@@ -4724,12 +4728,23 @@ function findPickedInteractiveData(
       if (!Array.isArray(bienEntities) || bienEntities.length === 0) return;
 
       const selectedId = selectedBienIdRef.current;
+      const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
+      if (isMoving && markerLodRuntimeRef.current.movingStateApplied) {
+        return;
+      }
+
+      const now = performance.now();
+      if (!isMoving && now < markerLodRuntimeRef.current.nextUpdateAt) return;
+      markerLodRuntimeRef.current.nextUpdateAt =
+        now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
+
       let changed = false;
 
       if (!isSatelliteMode) {
         const signature = `osm|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
         if (markerLodRuntimeRef.current.lastSignature === signature) return;
         markerLodRuntimeRef.current.lastSignature = signature;
+        markerLodRuntimeRef.current.movingStateApplied = false;
 
         bienEntities.forEach((entity) => {
           const shouldShowPoint = entity.showPointByPriority !== false;
@@ -4761,7 +4776,6 @@ function findPickedInteractiveData(
       const cameraPosition = viewer.camera?.positionWC;
       if (!cameraPosition) return;
       const cameraHeight = getCameraHeight(viewer);
-      const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
       const currentMobileProfile = normalizeMobileQualityProfile(
         mobileQualityProfileRef.current
       );
@@ -4799,7 +4813,9 @@ function findPickedInteractiveData(
           entity,
           distanceSquared: Cesium.Cartesian3.distanceSquared(
             cameraPosition,
-            entity.position?.getValue?.(viewer.clock.currentTime) || cameraPosition
+            entity.markerPositionCartesian ||
+              entity.position?.getValue?.(viewer.clock.currentTime) ||
+              cameraPosition
           ),
         }))
         .sort((left, right) => left.distanceSquared - right.distanceSquared);
@@ -4808,7 +4824,9 @@ function findPickedInteractiveData(
           entity,
           distanceSquared: Cesium.Cartesian3.distanceSquared(
             cameraPosition,
-            entity.position?.getValue?.(viewer.clock.currentTime) || cameraPosition
+            entity.markerPositionCartesian ||
+              entity.position?.getValue?.(viewer.clock.currentTime) ||
+              cameraPosition
           ),
         }))
         .sort((left, right) => left.distanceSquared - right.distanceSquared);
@@ -4856,6 +4874,8 @@ function findPickedInteractiveData(
         }
       });
 
+      markerLodRuntimeRef.current.movingStateApplied = isMoving;
+
       if (changed) {
         viewer.scene.requestRender();
       }
@@ -4864,6 +4884,7 @@ function findPickedInteractiveData(
     const invalidateMarkerLod = () => {
       markerLodRuntimeRef.current.nextUpdateAt = 0;
       markerLodRuntimeRef.current.lastSignature = "";
+      markerLodRuntimeRef.current.movingStateApplied = false;
       applyMarkerLod();
     };
 
@@ -4876,6 +4897,7 @@ function findPickedInteractiveData(
       cancelled = true;
       markerLodRuntimeRef.current.nextUpdateAt = 0;
       markerLodRuntimeRef.current.lastSignature = "";
+      markerLodRuntimeRef.current.movingStateApplied = false;
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(applyMarkerLod);
         viewer.camera.moveStart.removeEventListener(invalidateMarkerLod);
