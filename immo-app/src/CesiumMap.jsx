@@ -318,13 +318,14 @@ const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
 const FPS_BENCHMARK_VERSION = 1;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
-const FPS_BENCHMARK_MIN_DISTANCE_METERS = 220;
-const FPS_BENCHMARK_MAX_DISTANCE_METERS = 620;
-const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.48;
+const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
+const FPS_BENCHMARK_MAX_DISTANCE_METERS = 1100;
+const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.92;
 const FPS_BENCHMARK_SEGMENTS = [
-  { durationMs: 1700, fromX: 0, fromY: 0, toX: 1.0, toY: 0.08 },
-  { durationMs: 1500, fromX: 1.0, fromY: 0.08, toX: 1.55, toY: -0.26 },
-  { durationMs: 1650, fromX: 1.55, fromY: -0.26, toX: 0.72, toY: -0.62 },
+  { durationMs: 2400, fromX: 0, fromY: 0, toX: 0.95, toY: 0.06 },
+  { durationMs: 2200, fromX: 0.95, fromY: 0.06, toX: 1.82, toY: -0.08 },
+  { durationMs: 2300, fromX: 1.82, fromY: -0.08, toX: 2.74, toY: -0.24 },
+  { durationMs: 2200, fromX: 2.74, fromY: -0.24, toX: 3.55, toY: -0.38 },
 ];
 const FPS_BENCHMARK_TOTAL_DURATION_MS = FPS_BENCHMARK_SEGMENTS.reduce(
   (total, segment) => total + segment.durationMs,
