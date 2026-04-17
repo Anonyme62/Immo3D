@@ -92,26 +92,26 @@ const MOBILE_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
 const DESKTOP_QUALITY_PROFILE_DEFAULT = "auto";
 const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
   const DESKTOP_QUALITY_PROFILE_CONFIG = {
-    auto: {
-      // Auto should feel like Google Earth Web while moving: prioritize fluidity,
-      // then restore sharper quality once the camera settles.
-      movingResolutionScale: 0.86,
-      movingGlobeSse: 1.95,
-      movingTilesetSse: 18,
-      movingMsaa: DESKTOP_MOVING_MSAA_SAMPLES,
-      idleResolutionScale: DESKTOP_RESOLUTION_SCALE,
-      idleGlobeSse: DESKTOP_GLOBE_SSE_IDLE,
-      idleTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
-      idleMsaa: DESKTOP_MSAA_SAMPLES,
-      ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
-      ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
-      ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
-      ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
-      fastTilesetSse: 14,
-      premiumTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
-      adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
-      idleRestoreDelayMs: DESKTOP_QUALITY_RESTORE_DELAY_MS,
-      ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
+  auto: {
+    // Auto should feel like Google Earth Web while moving: prioritize fluidity,
+    // then restore sharper quality once the camera settles.
+    movingResolutionScale: 0.86,
+    movingGlobeSse: 2.05,
+    movingTilesetSse: 20,
+    movingMsaa: 1,
+    idleResolutionScale: 1.06,
+    idleGlobeSse: 1.28,
+    idleTilesetSse: 8.4,
+    idleMsaa: 2,
+    ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
+    ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
+    ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
+    ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
+    fastTilesetSse: 16,
+    premiumTilesetSse: 8.4,
+    adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
+    idleRestoreDelayMs: 480,
+    ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
   },
   high: {
     movingResolutionScale: 1.08,
