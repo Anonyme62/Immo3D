@@ -329,6 +329,10 @@ const FPS_BENCHMARK_MARKER_CONTEXT_RADIUS_METERS = 620;
 const FPS_BENCHMARK_MARKER_SEARCH_RADIUS_METERS = 2800;
 const FPS_BENCHMARK_SEGMENTS = [
   {
+    key: "pan_start",
+    label: "pan debut",
+    phaseKey: "pan_start",
+    phaseLabel: "pan debut",
     durationMs: 4800,
     fromX: 0,
     fromY: 0,
@@ -338,6 +342,10 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 0.30,
   },
   {
+    key: "pan_mid",
+    label: "pan suite",
+    phaseKey: "pan_mid",
+    phaseLabel: "pan suite",
     durationMs: 4400,
     fromX: 1.9,
     fromY: 0.12,
@@ -347,6 +355,10 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 0.30,
   },
   {
+    key: "zoom_out",
+    label: "dezoom",
+    phaseKey: "zoom_out",
+    phaseLabel: "dezoom",
     durationMs: 2500,
     fromX: 3.64,
     fromY: -0.16,
@@ -356,6 +368,10 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 1.42,
   },
   {
+    key: "zoom_in",
+    label: "rezoom",
+    phaseKey: "zoom_in",
+    phaseLabel: "rezoom",
     durationMs: 2500,
     fromX: 3.64,
     fromY: -0.16,
@@ -365,6 +381,10 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 0.30,
   },
   {
+    key: "pan_finish_a",
+    label: "fin trajet 1",
+    phaseKey: "finish",
+    phaseLabel: "fin trajet",
     durationMs: 4600,
     fromX: 3.64,
     fromY: -0.16,
@@ -374,6 +394,10 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 0.30,
   },
   {
+    key: "pan_finish_b",
+    label: "fin trajet 2",
+    phaseKey: "finish",
+    phaseLabel: "fin trajet",
     durationMs: 4400,
     fromX: 5.48,
     fromY: -0.48,
@@ -383,10 +407,24 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 0.30,
   },
 ];
-const FPS_BENCHMARK_TOTAL_DURATION_MS = FPS_BENCHMARK_SEGMENTS.reduce(
-  (total, segment) => total + segment.durationMs,
-  0
+const FPS_BENCHMARK_SEGMENT_TIMELINE = FPS_BENCHMARK_SEGMENTS.reduce(
+  (timeline, segment, index) => {
+    const previousEndMs =
+      timeline.length > 0 ? timeline[timeline.length - 1].endMs : 0;
+    const durationMs = Math.max(0, Number(segment.durationMs) || 0);
+    timeline.push({
+      ...segment,
+      index,
+      startMs: previousEndMs,
+      endMs: previousEndMs + durationMs,
+    });
+    return timeline;
+  },
+  []
 );
+const FPS_BENCHMARK_TOTAL_DURATION_MS =
+  FPS_BENCHMARK_SEGMENT_TIMELINE[FPS_BENCHMARK_SEGMENT_TIMELINE.length - 1]
+    ?.endMs || 0;
 
 function captureCamera(viewer) {
   return {
@@ -690,40 +728,58 @@ function getFpsBenchmarkDistanceMeters(cameraState) {
 }
 
 function getFpsBenchmarkOffsetAt(elapsedMs, distanceMeters) {
-  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+  const segmentMeta = getFpsBenchmarkSegmentMetaAt(elapsedMs);
+  if (!segmentMeta?.segment) {
     return { x: 0, y: 0, heightScale: 1 };
   }
-  let remaining = elapsedMs;
-  for (const segment of FPS_BENCHMARK_SEGMENTS) {
-    const durationMs = Number(segment.durationMs) || 0;
-    if (durationMs <= 0) continue;
-    if (remaining <= durationMs) {
-      const progress = Cesium.Math.clamp(remaining / durationMs, 0, 1);
-      return {
-        x:
-          Cesium.Math.lerp(segment.fromX, segment.toX, progress) * distanceMeters,
-        y:
-          Cesium.Math.lerp(segment.fromY, segment.toY, progress) * distanceMeters,
-        heightScale: Cesium.Math.lerp(
-          Number.isFinite(Number(segment.fromHeightScale))
-            ? Number(segment.fromHeightScale)
-            : 1,
-          Number.isFinite(Number(segment.toHeightScale))
-            ? Number(segment.toHeightScale)
-            : 1,
-          progress
-        ),
-      };
-    }
-    remaining -= durationMs;
-  }
-  const lastSegment = FPS_BENCHMARK_SEGMENTS[FPS_BENCHMARK_SEGMENTS.length - 1];
+  const { progress, segment } = segmentMeta;
   return {
-    x: Number(lastSegment?.toX || 0) * distanceMeters,
-    y: Number(lastSegment?.toY || 0) * distanceMeters,
-    heightScale: Number.isFinite(Number(lastSegment?.toHeightScale))
-      ? Number(lastSegment.toHeightScale)
-      : 1,
+    x: Cesium.Math.lerp(segment.fromX, segment.toX, progress) * distanceMeters,
+    y: Cesium.Math.lerp(segment.fromY, segment.toY, progress) * distanceMeters,
+    heightScale: Cesium.Math.lerp(
+      Number.isFinite(Number(segment.fromHeightScale))
+        ? Number(segment.fromHeightScale)
+        : 1,
+      Number.isFinite(Number(segment.toHeightScale))
+        ? Number(segment.toHeightScale)
+        : 1,
+      progress
+    ),
+  };
+}
+
+function getFpsBenchmarkSegmentMetaAt(elapsedMs) {
+  if (FPS_BENCHMARK_SEGMENT_TIMELINE.length === 0) return null;
+  const clampedElapsedMs = Number.isFinite(elapsedMs)
+    ? Cesium.Math.clamp(elapsedMs, 0, FPS_BENCHMARK_TOTAL_DURATION_MS)
+    : 0;
+  const lastSegment =
+    FPS_BENCHMARK_SEGMENT_TIMELINE[FPS_BENCHMARK_SEGMENT_TIMELINE.length - 1];
+  const matchingSegment =
+    FPS_BENCHMARK_SEGMENT_TIMELINE.find(
+      (segment) => clampedElapsedMs <= segment.endMs
+    ) || lastSegment;
+  const segmentDurationMs = Math.max(
+    1,
+    Number(matchingSegment?.durationMs) || 0
+  );
+  const segmentElapsedMs = Cesium.Math.clamp(
+    clampedElapsedMs - Number(matchingSegment?.startMs || 0),
+    0,
+    segmentDurationMs
+  );
+  return {
+    index: Number(matchingSegment?.index || 0),
+    key: String(matchingSegment?.key || ""),
+    label: String(matchingSegment?.label || ""),
+    phaseKey: String(matchingSegment?.phaseKey || ""),
+    phaseLabel: String(matchingSegment?.phaseLabel || ""),
+    startMs: Math.max(0, Number(matchingSegment?.startMs || 0)),
+    endMs: Math.max(0, Number(matchingSegment?.endMs || 0)),
+    durationMs: segmentDurationMs,
+    elapsedMs: clampedElapsedMs,
+    progress: segmentElapsedMs / segmentDurationMs,
+    segment: matchingSegment,
   };
 }
 
@@ -755,6 +811,10 @@ function roundBenchmarkValue(value, digits = 1) {
 
 function sanitizeBenchmarkHistoryEntry(entry) {
   if (!entry || !Number.isFinite(Number(entry.avgFps))) return null;
+  const runKind =
+    String(entry.runKind || "").toLowerCase() === "cold" || Boolean(entry.coldStart)
+      ? "cold"
+      : "warm";
   return {
     ranAt: String(entry.ranAt || ""),
     avgFps: roundBenchmarkValue(Number(entry.avgFps)),
@@ -765,6 +825,7 @@ function sanitizeBenchmarkHistoryEntry(entry) {
     longTaskCount: Math.max(0, Number(entry.longTaskCount || 0)),
     maxLongTaskMs: roundBenchmarkValue(Number(entry.maxLongTaskMs)),
     qualityProfile: String(entry.qualityProfile || ""),
+    runKind,
     coldStart: Boolean(entry.coldStart),
     distanceMeters: Math.max(0, Number(entry.distanceMeters || 0)),
   };
@@ -872,8 +933,7 @@ function formatMetricSample(values = []) {
   return `[${values.map((value) => `${value}ms`).join(", ")}]`;
 }
 
-function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
-  if (!Array.isArray(frameTimesMs) || frameTimesMs.length === 0) return null;
+function buildBenchmarkFrameStats(frameTimesMs = []) {
   const safeFrameTimes = frameTimesMs.filter(
     (value) => Number.isFinite(value) && value > 0
   );
@@ -884,13 +944,8 @@ function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
   const minFrameMs = sortedFrameTimes[0];
   const maxFrameMs = sortedFrameTimes[sortedFrameTimes.length - 1];
   const p95FrameMs = percentile(sortedFrameTimes, 0.95);
-  const topFrameSpikesMs = [...sortedFrameTimes]
-    .reverse()
-    .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT)
-    .map((value) => roundBenchmarkValue(value));
 
   return {
-    ranAt: new Date().toISOString(),
     sampleCount: safeFrameTimes.length,
     durationMs: Math.round(totalDurationMs),
     avgFps: roundBenchmarkValue(1000 / averageFrameMs),
@@ -899,7 +954,139 @@ function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
     avgFrameMs: roundBenchmarkValue(averageFrameMs),
     p95FrameMs: roundBenchmarkValue(p95FrameMs),
     maxFrameMs: roundBenchmarkValue(maxFrameMs),
-    topFrameSpikesMs,
+  };
+}
+
+function buildBenchmarkFrameGroupStats(
+  frameSamples = [],
+  { keyField, labelField, orderField }
+) {
+  if (!Array.isArray(frameSamples) || frameSamples.length === 0) return [];
+  const groups = [];
+  const groupsByKey = new Map();
+
+  frameSamples.forEach((sample) => {
+    const key = String(sample?.[keyField] || "");
+    if (!key) return;
+
+    if (!groupsByKey.has(key)) {
+      const nextGroup = {
+        key,
+        label: String(sample?.[labelField] || key),
+        order: Number.isFinite(Number(sample?.[orderField]))
+          ? Number(sample[orderField])
+          : groups.length,
+        frameTimesMs: [],
+      };
+      groupsByKey.set(key, nextGroup);
+      groups.push(nextGroup);
+    }
+
+    groupsByKey.get(key).frameTimesMs.push(Number(sample?.frameMs) || 0);
+  });
+
+  return groups
+    .sort((left, right) => left.order - right.order)
+    .map((group) => {
+      const stats = buildBenchmarkFrameStats(group.frameTimesMs);
+      return stats
+        ? {
+            key: group.key,
+            label: group.label,
+            ...stats,
+          }
+        : null;
+    })
+    .filter(Boolean);
+}
+
+function buildBenchmarkPerfEventSamples(events = [], benchmarkStartedAtMs) {
+  if (!Array.isArray(events) || !Number.isFinite(benchmarkStartedAtMs)) return [];
+  return events
+    .map((event) => {
+      const eventAtMs = Date.parse(String(event?.at || ""));
+      const elapsedMs = Number.isFinite(eventAtMs)
+        ? Math.max(0, eventAtMs - benchmarkStartedAtMs)
+        : null;
+      const segmentMeta =
+        Number.isFinite(elapsedMs) && elapsedMs !== null
+          ? getFpsBenchmarkSegmentMetaAt(elapsedMs)
+          : null;
+      const durationMs = roundBenchmarkValue(Number(event?.durationMs) || 0);
+      if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+
+      return {
+        at: String(event?.at || ""),
+        elapsedMs: roundBenchmarkValue(elapsedMs),
+        durationMs,
+        segmentKey: segmentMeta?.key || null,
+        segmentLabel: segmentMeta?.label || null,
+        phaseKey: segmentMeta?.phaseKey || null,
+        phaseLabel: segmentMeta?.phaseLabel || null,
+        moving:
+          typeof event?.moving === "boolean" ? Boolean(event.moving) : null,
+        remainingTiles: Number.isFinite(Number(event?.remainingTiles))
+          ? Math.max(0, Math.round(Number(event.remainingTiles)))
+          : null,
+        peakRemainingTiles: Number.isFinite(Number(event?.peakRemainingTiles))
+          ? Math.max(0, Math.round(Number(event.peakRemainingTiles)))
+          : null,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.durationMs - left.durationMs)
+    .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
+}
+
+function buildFpsBenchmarkResult(frameSamples, extra = {}) {
+  if (!Array.isArray(frameSamples) || frameSamples.length === 0) return null;
+  const safeFrameSamples = frameSamples.filter(
+    (sample) => Number.isFinite(Number(sample?.frameMs)) && Number(sample.frameMs) > 0
+  );
+  if (safeFrameSamples.length === 0) return null;
+
+  const frameStats = buildBenchmarkFrameStats(
+    safeFrameSamples.map((sample) => Number(sample.frameMs))
+  );
+  if (!frameStats) return null;
+
+  const topFrameSpikeEvents = [...safeFrameSamples]
+    .sort((left, right) => Number(right.frameMs) - Number(left.frameMs))
+    .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT)
+    .map((sample) => ({
+      frameMs: roundBenchmarkValue(Number(sample.frameMs)),
+      elapsedMs: roundBenchmarkValue(Number(sample.elapsedMs)),
+      segmentKey: String(sample.segmentKey || ""),
+      segmentLabel: String(sample.segmentLabel || ""),
+      phaseKey: String(sample.phaseKey || ""),
+      phaseLabel: String(sample.phaseLabel || ""),
+    }));
+
+  return {
+    ranAt: new Date().toISOString(),
+    ...frameStats,
+    topFrameSpikesMs: topFrameSpikeEvents.map((sample) => sample.frameMs),
+    topFrameSpikeEvents,
+    segmentTimeline: FPS_BENCHMARK_SEGMENT_TIMELINE.map((segment) => ({
+      index: segment.index + 1,
+      key: segment.key,
+      label: segment.label,
+      phaseKey: segment.phaseKey,
+      phaseLabel: segment.phaseLabel,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      durationMs: segment.durationMs,
+    })),
+    segmentStats: buildBenchmarkFrameGroupStats(safeFrameSamples, {
+      keyField: "segmentKey",
+      labelField: "segmentLabel",
+      orderField: "segmentIndex",
+    }),
+    phaseStats: buildBenchmarkFrameGroupStats(safeFrameSamples, {
+      keyField: "phaseKey",
+      labelField: "phaseLabel",
+      orderField: "phaseOrder",
+    }),
     ...extra,
   };
 }
@@ -916,6 +1103,17 @@ function formatFpsBenchmarkSummary(result) {
     Number.isFinite(result.maxLongTaskMs) ? `max LT ${result.maxLongTaskMs} ms` : null,
   ].filter(Boolean);
   return parts.join(" · ");
+}
+
+function formatFpsBenchmarkSummaryDisplay(result) {
+  const baseSummary = formatFpsBenchmarkSummary(result);
+  if (!baseSummary) return "";
+  const normalizedSummary = baseSummary
+    .split(" Â· ")
+    .join(" | ")
+    .split(" · ")
+    .join(" | ");
+  return `${result.runKind === "cold" ? "cold" : "warm"} | ${normalizedSummary}`;
 }
 
 function buildFpsBenchmarkLogPayload(result, history = []) {
@@ -6031,6 +6229,8 @@ function findPickedInteractiveData(
       ? normalizeMobileQualityProfile(mobileQualityProfileRef.current)
       : normalizeDesktopQualityProfile(desktopQualityProfileRef.current);
     const benchmarkDistanceMeters = getFpsBenchmarkDistanceMeters(startCamera);
+    const isColdStart = fpsBenchmarkRunCountRef.current === 0;
+    const runKind = isColdStart ? "cold" : "warm";
 
     fpsBenchmarkCameraInputsRef.current =
       viewer.scene.screenSpaceCameraController.enableInputs;
@@ -6041,7 +6241,7 @@ function findPickedInteractiveData(
     persistFpsBenchmarkState((previousState) => ({
       ...previousState,
       running: true,
-      message: `Test FPS en cours (${Math.round(
+      message: `Test FPS ${runKind} en cours (${Math.round(
         benchmarkDistanceMeters
       )} m)...`,
     }));
@@ -6053,7 +6253,7 @@ function findPickedInteractiveData(
         return;
       }
 
-      const telemetryStartedAt = new Date().toISOString();
+      const telemetryStartedAtMs = Date.now();
       const anchor = Cesium.Cartesian3.fromDegrees(
         startCamera.longitude,
         startCamera.latitude,
@@ -6074,7 +6274,7 @@ function findPickedInteractiveData(
         startDestination,
         new Cesium.Cartesian3()
       );
-      const frameTimesMs = [];
+      const frameSamples = [];
       let benchmarkStartedAt = null;
       let lastFrameAt = null;
 
@@ -6093,6 +6293,7 @@ function findPickedInteractiveData(
           timestamp - benchmarkStartedAt,
           FPS_BENCHMARK_TOTAL_DURATION_MS
         );
+        const segmentMeta = getFpsBenchmarkSegmentMetaAt(elapsedMs);
         const offset = getFpsBenchmarkOffsetAt(
           elapsedMs,
           benchmarkDistanceMeters
@@ -6127,7 +6328,19 @@ function findPickedInteractiveData(
         viewer.scene.requestRender();
 
         if (lastFrameAt !== null && timestamp > lastFrameAt) {
-          frameTimesMs.push(timestamp - lastFrameAt);
+          frameSamples.push({
+            frameMs: timestamp - lastFrameAt,
+            elapsedMs,
+            segmentIndex: Number(segmentMeta?.index || 0),
+            segmentKey: String(segmentMeta?.key || ""),
+            segmentLabel: String(segmentMeta?.label || ""),
+            phaseKey: String(segmentMeta?.phaseKey || ""),
+            phaseLabel: String(segmentMeta?.phaseLabel || ""),
+            phaseOrder:
+              String(segmentMeta?.phaseKey || "") === "finish"
+                ? 4
+                : Number(segmentMeta?.index || 0),
+          });
         }
         lastFrameAt = timestamp;
 
@@ -6143,12 +6356,20 @@ function findPickedInteractiveData(
         const benchmarkLongTasks = (telemetry.recentEvents || []).filter(
           (event) =>
             event?.type === "long_task" &&
-            String(event?.at || "") >= telemetryStartedAt
+            Date.parse(String(event?.at || "")) >= telemetryStartedAtMs
         );
         const benchmarkTileBursts = (telemetry.recentEvents || []).filter(
           (event) =>
             event?.type === "tile_load_burst_complete" &&
-            String(event?.at || "") >= telemetryStartedAt
+            Date.parse(String(event?.at || "")) >= telemetryStartedAtMs
+        );
+        const longTaskEvents = buildBenchmarkPerfEventSamples(
+          benchmarkLongTasks,
+          telemetryStartedAtMs
+        );
+        const tileBurstEvents = buildBenchmarkPerfEventSamples(
+          benchmarkTileBursts,
+          telemetryStartedAtMs
         );
         const sortedLongTaskDurationsMs = benchmarkLongTasks
           .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
@@ -6160,9 +6381,10 @@ function findPickedInteractiveData(
           .filter((value) => Number.isFinite(value) && value > 0)
           .sort((left, right) => right - left)
           .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
-        const result = buildFpsBenchmarkResult(frameTimesMs, {
+        const result = buildFpsBenchmarkResult(frameSamples, {
           routeVersion: FPS_BENCHMARK_ROUTE_VERSION,
-          coldStart: fpsBenchmarkRunCountRef.current === 0,
+          coldStart: isColdStart,
+          runKind,
           runIndexSinceReload: fpsBenchmarkRunCountRef.current + 1,
           distanceMeters: Math.round(benchmarkDistanceMeters),
           mode: runMode,
@@ -6177,8 +6399,10 @@ function findPickedInteractiveData(
             )
           ),
           longTaskDurationsMs: sortedLongTaskDurationsMs,
+          longTaskEvents,
           tileBurstCount: benchmarkTileBursts.length,
           tileBurstDurationsMs: sortedTileBurstDurationsMs,
+          tileBurstEvents,
         });
         if (!result) {
           persistFpsBenchmarkState((previousState) => ({
@@ -6194,6 +6418,7 @@ function findPickedInteractiveData(
           minFps: result.minFps,
           p95FrameMs: result.p95FrameMs,
           durationMs: result.durationMs,
+          runKind,
           mode: runMode,
           qualityProfile,
           longTaskCount: result.longTaskCount,
@@ -6215,7 +6440,7 @@ function findPickedInteractiveData(
           lastResult: result,
           history: nextHistory,
           lastLogText: logText,
-          message: formatFpsBenchmarkSummary(result),
+          message: formatFpsBenchmarkSummaryDisplay(result),
         }));
       };
 
