@@ -278,6 +278,7 @@ const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = true;
 const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE = true;
 const SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE = Number.POSITIVE_INFINITY;
 const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS = 140;
+const SATELLITE_MARKER_LOD_SETTLE_DELAY_MS = 260;
 const GOOGLE_EARTH_TOUCH_PROFILE = {
   google3dOrbitGainMultiplier: 1.28,
 };
@@ -1328,6 +1329,7 @@ export default function CesiumMap({
     lastSignature: "",
     movingStateApplied: false,
   });
+  const markerLodSettleTimeoutRef = useRef(null);
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -4717,6 +4719,13 @@ function findPickedInteractiveData(
 
     let cancelled = false;
 
+    const clearMarkerLodSettleTimeout = () => {
+      if (markerLodSettleTimeoutRef.current) {
+        window.clearTimeout(markerLodSettleTimeoutRef.current);
+        markerLodSettleTimeoutRef.current = null;
+      }
+    };
+
     const applyMarkerLod = () => {
       if (cancelled || !viewer || viewer.isDestroyed()) return;
 
@@ -4882,26 +4891,43 @@ function findPickedInteractiveData(
     };
 
     const invalidateMarkerLod = () => {
+      clearMarkerLodSettleTimeout();
       markerLodRuntimeRef.current.nextUpdateAt = 0;
       markerLodRuntimeRef.current.lastSignature = "";
       markerLodRuntimeRef.current.movingStateApplied = false;
       applyMarkerLod();
     };
 
+    const settleMarkerLodAfterMotion = () => {
+      clearMarkerLodSettleTimeout();
+      markerLodRuntimeRef.current.nextUpdateAt =
+        performance.now() + SATELLITE_MARKER_LOD_SETTLE_DELAY_MS;
+      markerLodRuntimeRef.current.lastSignature = "";
+      markerLodRuntimeRef.current.movingStateApplied = false;
+      markerLodSettleTimeoutRef.current = window.setTimeout(() => {
+        markerLodSettleTimeoutRef.current = null;
+        if (cancelled || viewer.isDestroyed()) return;
+        if (adaptiveQualityStateRef.current.isMoving) return;
+        markerLodRuntimeRef.current.nextUpdateAt = 0;
+        applyMarkerLod();
+      }, SATELLITE_MARKER_LOD_SETTLE_DELAY_MS);
+    };
+
     viewer.scene.postRender.addEventListener(applyMarkerLod);
     viewer.camera.moveStart.addEventListener(invalidateMarkerLod);
-    viewer.camera.moveEnd.addEventListener(invalidateMarkerLod);
+    viewer.camera.moveEnd.addEventListener(settleMarkerLodAfterMotion);
     applyMarkerLod();
 
     return () => {
       cancelled = true;
+      clearMarkerLodSettleTimeout();
       markerLodRuntimeRef.current.nextUpdateAt = 0;
       markerLodRuntimeRef.current.lastSignature = "";
       markerLodRuntimeRef.current.movingStateApplied = false;
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(applyMarkerLod);
         viewer.camera.moveStart.removeEventListener(invalidateMarkerLod);
-        viewer.camera.moveEnd.removeEventListener(invalidateMarkerLod);
+        viewer.camera.moveEnd.removeEventListener(settleMarkerLodAfterMotion);
       }
     };
   }, [
