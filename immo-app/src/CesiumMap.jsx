@@ -40,6 +40,9 @@ const GOOGLE_TILESET_SWITCH_TIMEOUT_MS = 4800;
 const GOOGLE_TILESET_PREMIUM_SSE = 6;
 const GOOGLE_TILESET_FAST_PHASE_MS = 420;
 const GOOGLE_TILESET_ULTRA_PHASE_MS = 2600;
+const GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS = 0.2;
+const GOOGLE_TILESET_FOVEATED_TIME_DELAY_MOVING_SECONDS = 0.0;
+const GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION_MOVING = 0.3;
 const GOOGLE_WARMUP_START_DELAY_MS = 220;
 const SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_DESKTOP = 260;
 const SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_MOBILE = 760;
@@ -3333,6 +3336,9 @@ function findPickedInteractiveData(
       mobileQualityProfileRef.current,
       allowMobileUltraFromDevice
     );
+    const selectedDesktopQualityProfileId = normalizeDesktopQualityProfile(
+      desktopQualityProfileRef.current
+    );
     const selectedDesktopQualityProfile = getDesktopQualityProfile(
       desktopQualityProfileRef.current
     );
@@ -3354,6 +3360,15 @@ function findPickedInteractiveData(
         tileset.dynamicScreenSpaceError = true;
         tileset.foveatedScreenSpaceError = true;
         tileset.cullRequestsWhileMoving = false;
+        tileset.foveatedTimeDelay =
+          selectedDesktopQualityProfileId === "auto"
+            ? GOOGLE_TILESET_FOVEATED_TIME_DELAY_MOVING_SECONDS
+            : GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
+        tileset.progressiveResolutionHeightFraction =
+          selectedDesktopQualityProfileId === "auto"
+            ? GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION_MOVING
+            : GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
+        tileset.preferLeaves = selectedDesktopQualityProfileId !== "auto";
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
@@ -3380,6 +3395,10 @@ function findPickedInteractiveData(
         tileset.dynamicScreenSpaceError = false;
         tileset.foveatedScreenSpaceError = false;
         tileset.cullRequestsWhileMoving = false;
+        tileset.foveatedTimeDelay = GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
+        tileset.progressiveResolutionHeightFraction =
+          GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
+        tileset.preferLeaves = true;
       }
 
       if (osmImageryLayerRef.current && modeRef.current === "google3d") {
@@ -3400,6 +3419,10 @@ function findPickedInteractiveData(
         tileset.dynamicScreenSpaceError = false;
         tileset.foveatedScreenSpaceError = false;
         tileset.cullRequestsWhileMoving = false;
+        tileset.foveatedTimeDelay = GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
+        tileset.progressiveResolutionHeightFraction =
+          GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
+        tileset.preferLeaves = true;
       }
 
       applyUltraViewerQuality();
@@ -3658,6 +3681,7 @@ function findPickedInteractiveData(
             cullWithChildrenBounds: true,
             preferLeaves: true,
             foveatedScreenSpaceError: isMobile && !isIOSDevice,
+            foveatedTimeDelay: GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS,
             progressiveResolutionHeightFraction:
               GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION,
             immediatelyLoadDesiredLevelOfDetail:
@@ -3681,6 +3705,8 @@ function findPickedInteractiveData(
             tileset.cullRequestsWhileMoving = false;
             tileset.preferLeaves = true;
             tileset.foveatedScreenSpaceError = isMobile && !isIOSDevice;
+            tileset.foveatedTimeDelay =
+              GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
             tileset.progressiveResolutionHeightFraction =
               GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
             tileset.immediatelyLoadDesiredLevelOfDetail =
