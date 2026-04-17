@@ -275,6 +275,10 @@ const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS = true;
 const SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE = true;
 const SATELLITE_MARKER_DISABLE_DEPTH_TEST_DISTANCE = Number.POSITIVE_INFINITY;
 const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS = 140;
+const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MOVING_MS_DESKTOP = 320;
+const SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MOVING_MS_MOBILE = 460;
+const SATELLITE_MARKER_LOD_CAMERA_BUCKET_SIZE_IDLE = 140;
+const SATELLITE_MARKER_LOD_CAMERA_BUCKET_SIZE_MOVING = 420;
 const GOOGLE_EARTH_TOUCH_PROFILE = {
   google3dOrbitGainMultiplier: 1.28,
 };
@@ -4308,19 +4312,23 @@ function findPickedInteractiveData(
         biensAvecCoordonnees.forEach((bien, index) => {
           const entity = bienEntitiesByIndex[index];
           if (!entity) return;
-          entity.position = resolveBienPointPosition(
+          const resolvedPosition = resolveBienPointPosition(
             bien,
             index,
             positions,
             bienPositionById
           );
+          entity.position = resolvedPosition;
+          entity.lodPosition = resolvedPosition;
         });
       };
       const applyCustomEntityPositions = (positions) => {
         customMarkers.forEach((marker, markerIndex) => {
           const entity = customEntitiesByIndex[markerIndex];
           if (!entity) return;
-          entity.position = positions[markerIndex] || rawCustomPositions[markerIndex];
+          const resolvedPosition = positions[markerIndex] || rawCustomPositions[markerIndex];
+          entity.position = resolvedPosition;
+          entity.lodPosition = resolvedPosition;
         });
       };
       const initialBienPositionById = buildBienPositionById(finalBienPositions);
@@ -4389,6 +4397,7 @@ function findPickedInteractiveData(
         });
 
         entity.bienData = bien;
+        entity.lodPosition = pointPosition;
         entity.showPointByPriority = shouldShowPoint;
         entity.stackBienIds = (stackByBienId.get(bien.id) || [bien]).map((item) => item.id);
         entitiesRef.current.push(entity);
@@ -4433,6 +4442,7 @@ function findPickedInteractiveData(
         });
 
         entity.customMarkerData = marker;
+        entity.lodPosition = finalCustomPositions[markerIndex] || rawCustomPositions[markerIndex];
         customMarkerEntitiesRef.current.push(entity);
         customEntitiesByIndex[markerIndex] = entity;
       });
@@ -4583,10 +4593,16 @@ function findPickedInteractiveData(
     const applyMarkerLod = () => {
       if (cancelled || !viewer || viewer.isDestroyed()) return;
 
+      const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
       const now = performance.now();
       if (now < markerLodRuntimeRef.current.nextUpdateAt) return;
+      const updateIntervalMs = isMoving
+        ? isMobile
+          ? SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MOVING_MS_MOBILE
+          : SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MOVING_MS_DESKTOP
+        : SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
       markerLodRuntimeRef.current.nextUpdateAt =
-        now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
+        now + updateIntervalMs;
 
       const isSatelliteMode =
         modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
@@ -4633,7 +4649,6 @@ function findPickedInteractiveData(
       const cameraPosition = viewer.camera?.positionWC;
       if (!cameraPosition) return;
       const cameraHeight = getCameraHeight(viewer);
-      const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
       const currentMobileProfile = normalizeMobileQualityProfile(
         mobileQualityProfileRef.current
       );
@@ -4647,8 +4662,11 @@ function findPickedInteractiveData(
         currentMobileProfile,
         currentDesktopProfile
       );
+      const cameraBucketSize = isMoving
+        ? SATELLITE_MARKER_LOD_CAMERA_BUCKET_SIZE_MOVING
+        : SATELLITE_MARKER_LOD_CAMERA_BUCKET_SIZE_IDLE;
       const cameraBucket = Number.isFinite(cameraHeight)
-        ? Math.round(Math.min(12000, cameraHeight) / 140)
+        ? Math.round(Math.min(12000, cameraHeight) / cameraBucketSize)
         : -1;
       const signature = [
         "sat",
@@ -4671,7 +4689,9 @@ function findPickedInteractiveData(
           entity,
           distanceSquared: Cesium.Cartesian3.distanceSquared(
             cameraPosition,
-            entity.position?.getValue?.(viewer.clock.currentTime) || cameraPosition
+            entity.lodPosition ||
+              entity.position?.getValue?.(viewer.clock.currentTime) ||
+              cameraPosition
           ),
         }))
         .sort((left, right) => left.distanceSquared - right.distanceSquared);
@@ -4680,7 +4700,9 @@ function findPickedInteractiveData(
           entity,
           distanceSquared: Cesium.Cartesian3.distanceSquared(
             cameraPosition,
-            entity.position?.getValue?.(viewer.clock.currentTime) || cameraPosition
+            entity.lodPosition ||
+              entity.position?.getValue?.(viewer.clock.currentTime) ||
+              cameraPosition
           ),
         }))
         .sort((left, right) => left.distanceSquared - right.distanceSquared);
