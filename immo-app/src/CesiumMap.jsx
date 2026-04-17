@@ -91,25 +91,27 @@ const MOBILE_QUALITY_PROFILE_DEFAULT = "auto";
 const MOBILE_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
 const DESKTOP_QUALITY_PROFILE_DEFAULT = "auto";
 const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
-const DESKTOP_QUALITY_PROFILE_CONFIG = {
-  auto: {
-    movingResolutionScale: DESKTOP_MOVING_RESOLUTION_SCALE,
-    movingGlobeSse: DESKTOP_GLOBE_SSE_MOVING,
-    movingTilesetSse: DESKTOP_GOOGLE_TILESET_MOVING_SSE,
-    movingMsaa: DESKTOP_MOVING_MSAA_SAMPLES,
-    idleResolutionScale: DESKTOP_RESOLUTION_SCALE,
-    idleGlobeSse: DESKTOP_GLOBE_SSE_IDLE,
-    idleTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
-    idleMsaa: DESKTOP_MSAA_SAMPLES,
-    ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
-    ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
-    ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
-    ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
-    fastTilesetSse: DESKTOP_GOOGLE_TILESET_MOVING_SSE,
-    premiumTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
-    adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
-    idleRestoreDelayMs: DESKTOP_QUALITY_RESTORE_DELAY_MS,
-    ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
+  const DESKTOP_QUALITY_PROFILE_CONFIG = {
+    auto: {
+      // Auto should feel like Google Earth Web while moving: prioritize fluidity,
+      // then restore sharper quality once the camera settles.
+      movingResolutionScale: 0.86,
+      movingGlobeSse: 1.95,
+      movingTilesetSse: 18,
+      movingMsaa: DESKTOP_MOVING_MSAA_SAMPLES,
+      idleResolutionScale: DESKTOP_RESOLUTION_SCALE,
+      idleGlobeSse: DESKTOP_GLOBE_SSE_IDLE,
+      idleTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
+      idleMsaa: DESKTOP_MSAA_SAMPLES,
+      ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
+      ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
+      ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
+      ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
+      fastTilesetSse: 14,
+      premiumTilesetSse: DESKTOP_GOOGLE_TILESET_IDLE_SSE,
+      adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
+      idleRestoreDelayMs: DESKTOP_QUALITY_RESTORE_DELAY_MS,
+      ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
   },
   high: {
     movingResolutionScale: 1.08,
@@ -364,19 +366,27 @@ function getSatelliteMarkerLodBudget(
   mobileQualityProfile = MOBILE_QUALITY_PROFILE_DEFAULT,
   desktopQualityProfile = DESKTOP_QUALITY_PROFILE_DEFAULT
 ) {
+  const effectiveMobileQualityProfile =
+    isMoving && mobileQualityProfile === "auto"
+      ? "perf"
+      : mobileQualityProfile;
+  const effectiveDesktopQualityProfile =
+    isMoving && desktopQualityProfile === "auto"
+      ? "perf"
+      : desktopQualityProfile;
   const profileMultiplier = isMobile
-    ? mobileQualityProfile === "perf"
+    ? effectiveMobileQualityProfile === "perf"
       ? 0.62
-      : mobileQualityProfile === "high"
+      : effectiveMobileQualityProfile === "high"
         ? 1.22
-        : mobileQualityProfile === "ultra"
+        : effectiveMobileQualityProfile === "ultra"
           ? 1.62
           : 1
-    : desktopQualityProfile === "perf"
+    : effectiveDesktopQualityProfile === "perf"
       ? 0.75
-      : desktopQualityProfile === "high"
+      : effectiveDesktopQualityProfile === "high"
         ? 1.25
-        : desktopQualityProfile === "ultra"
+        : effectiveDesktopQualityProfile === "ultra"
           ? 1.62
           : 1;
   const applyMultiplier = (budget) => Math.max(1, Math.round(budget * profileMultiplier));
