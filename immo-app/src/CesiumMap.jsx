@@ -54,7 +54,7 @@ const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
 const DESKTOP_MOVING_RESOLUTION_SCALE = 1.02;
 const MOBILE_RESOLUTION_SCALE = 1;
 const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
-const IOS_RESOLUTION_SCALE = 0.82;
+const IOS_RESOLUTION_SCALE = 0.30;
 const DESKTOP_MSAA_SAMPLES = 4;
 const DESKTOP_ULTRA_MSAA_SAMPLES = 8;
 const DESKTOP_MOVING_MSAA_SAMPLES = 2;
@@ -230,7 +230,7 @@ const MOBILE_QUALITY_PROFILE_CONFIG = {
     movingResolutionScale: 0.7,
     movingGlobeSse: 3.0,
     movingTilesetSse: 30,
-    idleResolutionScale: 0.82,
+    idleResolutionScale: 0.30,
     idleGlobeSse: 2.25,
     idleTilesetSse: 16,
     ultraResolutionScaleCap: 0.86,
@@ -334,8 +334,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: 0,
     toX: 1.9,
     toY: 0.12,
-    fromHeightScale: 0.82,
-    toHeightScale: 0.82,
+    fromHeightScale: 0.30,
+    toHeightScale: 0.30,
   },
   {
     durationMs: 4400,
@@ -343,8 +343,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: 0.12,
     toX: 3.64,
     toY: -0.16,
-    fromHeightScale: 0.82,
-    toHeightScale: 0.82,
+    fromHeightScale: 0.30,
+    toHeightScale: 0.30,
   },
   {
     durationMs: 2500,
@@ -352,7 +352,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: -0.16,
     toX: 3.64,
     toY: -0.16,
-    fromHeightScale: 0.82,
+    fromHeightScale: 0.30,
     toHeightScale: 1.42,
   },
   {
@@ -362,7 +362,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     toX: 3.64,
     toY: -0.16,
     fromHeightScale: 1.42,
-    toHeightScale: 0.82,
+    toHeightScale: 0.30,
   },
   {
     durationMs: 4600,
@@ -370,8 +370,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: -0.16,
     toX: 5.48,
     toY: -0.48,
-    fromHeightScale: 0.82,
-    toHeightScale: 0.82,
+    fromHeightScale: 0.30,
+    toHeightScale: 0.30,
   },
   {
     durationMs: 4400,
@@ -379,8 +379,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: -0.48,
     toX: 7.1,
     toY: -0.76,
-    fromHeightScale: 0.82,
-    toHeightScale: 0.82,
+    fromHeightScale: 0.30,
+    toHeightScale: 0.30,
   },
 ];
 const FPS_BENCHMARK_TOTAL_DURATION_MS = FPS_BENCHMARK_SEGMENTS.reduce(
