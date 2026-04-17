@@ -6,7 +6,7 @@ import {
   getStreetSuggestions,
   uploadPhotoAsset,
 } from "./api";
-import { GOOGLE_3D_TILES_API_KEY } from "./config";
+import { CESIUM_ION_TOKEN } from "./config";
 import { TOUCH_NAV_TUNING } from "./config/touchNavigationTuning";
 import {
   formatMarkerPrix,
@@ -25,17 +25,15 @@ import {
 } from "./utils/mapMarkerStyle";
 import { recordMapPerfEvent } from "./utils/mapPerfTelemetry";
 
-const GOOGLE_3D_TILES_ROOT_URL = "https://tile.googleapis.com/v1/3dtiles/root.json";
+const GOOGLE_TILES_ASSET_ID = 2275207;
 
-if (!GOOGLE_3D_TILES_API_KEY) {
+if (!CESIUM_ION_TOKEN) {
   console.warn(
-    "VITE_GOOGLE_3D_TILES_API_KEY est absente. La vue Google 3D restera indisponible tant que la cle n'est pas configuree."
+    "VITE_CESIUM_ION_TOKEN est absent. La vue Google 3D restera indisponible tant que le token n'est pas configure."
   );
 }
 
-if (GOOGLE_3D_TILES_API_KEY) {
-  Cesium.GoogleMaps.defaultApiKey = GOOGLE_3D_TILES_API_KEY;
-}
+Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
 const GOOGLE_TILESET_READY_TIMEOUT_MS = 9000;
 const GOOGLE_TILESET_SWITCH_TIMEOUT_MS = 4800;
@@ -346,7 +344,7 @@ function refreshViewer(viewer) {
 }
 
 function resolveMode(mapMode) {
-  return mapMode === "google3d" && GOOGLE_3D_TILES_API_KEY ? "google3d" : "osm";
+  return mapMode === "google3d" && CESIUM_ION_TOKEN ? "google3d" : "osm";
 }
 
 function normalizeMobileQualityProfile(value) {
@@ -801,7 +799,7 @@ function buildSatelliteFailureMessage(error) {
     rawMessage.includes("unauthorized") ||
     rawMessage.includes("forbidden")
   ) {
-    return "Vue satellite indisponible: cle Google 3D Tiles non autorisee pour ce domaine ou API Map Tiles inactive.";
+    return "Vue satellite indisponible: token Cesium non autorise pour ce domaine.";
   }
 
   if (
@@ -820,20 +818,6 @@ function createTimeoutError(message, code) {
   const error = new Error(message);
   error.code = code;
   return error;
-}
-
-function createGoogleTilesetResource(apiKey) {
-  const credits = [];
-  const defaultCredit = Cesium.GoogleMaps?.getDefaultCredit?.();
-  if (defaultCredit) {
-    credits.push(defaultCredit);
-  }
-
-  return new Cesium.Resource({
-    url: GOOGLE_3D_TILES_ROOT_URL,
-    queryParameters: { key: apiKey },
-    credits: credits.length > 0 ? credits : undefined,
-  });
 }
 
 function withPromiseTimeout(promise, timeoutMs, message, code) {
@@ -2439,6 +2423,32 @@ function findPickedInteractiveData(
       show: false,
     });
 
+    if (canUseGoogle3D && CESIUM_ION_TOKEN) {
+      Cesium.createWorldTerrainAsync({
+        requestVertexNormals: !isMobile,
+        requestWaterMask: !isMobile,
+      })
+        .then((terrainProvider) => {
+          if (disposed || viewer.isDestroyed()) return;
+          worldTerrainProviderRef.current = terrainProvider;
+          if (modeRef.current === "google3d") {
+            viewer.terrainProvider = terrainProvider;
+            viewer.scene.globe.maximumScreenSpaceError = isIOSDevice
+              ? 2.1
+              : isMobile
+                ? initialMobileQualityProfile.idleGlobeSse
+                : 0.85;
+          }
+          viewer.scene.requestRender();
+        })
+        .catch((error) => {
+          console.warn(
+            "Impossible de charger Cesium World Terrain, terrain ellipsoidal conserve.",
+            error
+          );
+        });
+    }
+
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction((click) => {
       if (ignoreNextClickRef.current) {
@@ -3223,7 +3233,7 @@ function findPickedInteractiveData(
       }
     };
 
-    if (canUseGoogle3D) {
+    if (canUseGoogle3D && CESIUM_ION_TOKEN) {
       setSatelliteReadySafely(Boolean(tilesetRef.current));
       setSatelliteWarmupBlockExpiredSafely(isMobile);
     } else {
@@ -3624,18 +3634,9 @@ function findPickedInteractiveData(
         return tilesetRef.current;
       }
 
-      if (!GOOGLE_3D_TILES_API_KEY) {
-        throw new Error(
-          "VITE_GOOGLE_3D_TILES_API_KEY est absente. Impossible d'activer Google 3D."
-        );
-      }
-
       if (!tilesetPromiseRef.current) {
-        const googleTilesetResource = createGoogleTilesetResource(
-          GOOGLE_3D_TILES_API_KEY
-        );
-        tilesetPromiseRef.current = Cesium.Cesium3DTileset.fromUrl(
-          googleTilesetResource,
+        tilesetPromiseRef.current = Cesium.Cesium3DTileset.fromIonAssetId(
+          GOOGLE_TILES_ASSET_ID,
           {
             showCreditsOnScreen: true,
             preloadWhenHidden: true,
@@ -3704,7 +3705,7 @@ function findPickedInteractiveData(
     }
 
     async function warmupGoogleUntilReady() {
-      if (!canUseGoogle3D || !GOOGLE_3D_TILES_API_KEY) return;
+      if (!canUseGoogle3D || !CESIUM_ION_TOKEN) return;
       if (tilesetRef.current) {
         setSatelliteReadySafely(true);
         setSatelliteWarmupBlockExpiredSafely(false);
@@ -4073,7 +4074,7 @@ function findPickedInteractiveData(
       Date.now() - activeZoneWarmAt < SATELLITE_PREDICTIVE_WARMUP_FRESH_MS;
     const shouldRunPredictiveWarmup =
       canUseGoogle3D &&
-      GOOGLE_3D_TILES_API_KEY &&
+      CESIUM_ION_TOKEN &&
       (mapModeRef.current === "google3d" || hasPredictiveZoneContext || !isMobile) &&
       !hasFreshZoneWarmup;
 
@@ -5269,7 +5270,7 @@ function findPickedInteractiveData(
       ? satelliteIssueMessage
       : "Passer a la vue plan"
     : !canUseGoogle3D
-      ? "Ajoute une cle Google 3D Tiles pour activer la vue satellite"
+      ? "Ajoute un token Cesium ion pour activer Google 3D"
       : currentResolvedMode === "google3d"
         ? "Passer a la vue plan"
         : isSatelliteTogglePending

@@ -101,7 +101,7 @@ python scripts/migrate_sqlite_to_postgres.py \
 
 Set these project variables:
 - `VITE_API_BASE_URL=https://<API_DOMAIN>`
-- `VITE_GOOGLE_3D_TILES_API_KEY=<domain-restricted-google-map-tiles-api-key>`
+- `VITE_CESIUM_ION_TOKEN=<restricted-token>`
 
 Build settings:
 - Framework: Vite
