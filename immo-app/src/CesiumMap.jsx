@@ -338,8 +338,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: 0,
     toX: 1.9,
     toY: 0.12,
-    fromHeightScale: 0.30,
-    toHeightScale: 0.30,
+    fromHeightScale: 0.50,
+    toHeightScale: 0.50,
   },
   {
     key: "pan_mid",
@@ -351,8 +351,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: 0.12,
     toX: 3.64,
     toY: -0.16,
-    fromHeightScale: 0.30,
-    toHeightScale: 0.30,
+    fromHeightScale: 0.50,
+    toHeightScale: 0.50,
   },
   {
     key: "zoom_out",
@@ -364,7 +364,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: -0.16,
     toX: 3.64,
     toY: -0.16,
-    fromHeightScale: 0.30,
+    fromHeightScale: 0.50,
     toHeightScale: 1.42,
   },
   {
@@ -378,7 +378,7 @@ const FPS_BENCHMARK_SEGMENTS = [
     toX: 3.64,
     toY: -0.16,
     fromHeightScale: 1.42,
-    toHeightScale: 0.30,
+    toHeightScale: 0.50,
   },
   {
     key: "pan_finish_a",
@@ -390,8 +390,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: -0.16,
     toX: 5.48,
     toY: -0.48,
-    fromHeightScale: 0.30,
-    toHeightScale: 0.30,
+    fromHeightScale: 0.50,
+    toHeightScale: 0.50,
   },
   {
     key: "pan_finish_b",
@@ -403,8 +403,8 @@ const FPS_BENCHMARK_SEGMENTS = [
     fromY: -0.48,
     toX: 7.1,
     toY: -0.76,
-    fromHeightScale: 0.30,
-    toHeightScale: 0.30,
+    fromHeightScale: 0.50,
+    toHeightScale: 0.50,
   },
 ];
 const FPS_BENCHMARK_SEGMENT_TIMELINE = FPS_BENCHMARK_SEGMENTS.reduce(
