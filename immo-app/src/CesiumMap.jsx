@@ -1900,6 +1900,9 @@ export default function CesiumMap({
   const fpsBenchmarkStartTimeoutRef = useRef(null);
   const fpsBenchmarkCameraInputsRef = useRef(null);
   const fpsBenchmarkRunCountRef = useRef(0);
+  const fpsBenchmarkQualityLockRef = useRef(false);
+  const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
+  const releaseFpsBenchmarkMovingQualityRef = useRef(() => {});
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -4245,6 +4248,59 @@ function findPickedInteractiveData(
       viewer.scene.requestRender();
     };
 
+    const applyBenchmarkMovingQualityLock = () => {
+      fpsBenchmarkQualityLockRef.current = true;
+      adaptiveQualityStateRef.current.isMoving = true;
+      clearQualityRecoverySafetyTimeout();
+      clearDesktopQualityRestoreTimeouts();
+      clearMobileQualityRestoreTimeout();
+      clearMobileUltraRestoreTimeout();
+      resetAdaptiveQualityStats();
+      if (isMobile) {
+        applyMobileMovingQuality();
+        return;
+      }
+      applyDesktopMovingQuality();
+    };
+
+    const releaseBenchmarkMovingQualityLock = () => {
+      if (!fpsBenchmarkQualityLockRef.current) return;
+
+      fpsBenchmarkQualityLockRef.current = false;
+      adaptiveQualityStateRef.current.isMoving = false;
+      clearQualityRecoverySafetyTimeout();
+      resetAdaptiveQualityStats();
+
+      if (modeRef.current !== "google3d") return;
+
+      if (isMobile) {
+        clearMobileQualityRestoreTimeout();
+        clearMobileUltraRestoreTimeout();
+        applyMobileIdleQuality();
+        if (!selectedMobileQualityProfile.enableUltra) return;
+        mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled) return;
+          if (adaptiveQualityStateRef.current.isMoving) return;
+          if (modeRef.current !== "google3d") return;
+          applyMobileUltraQuality();
+        }, selectedMobileQualityProfile.ultraRestoreDelayMs);
+        return;
+      }
+
+      clearDesktopQualityRestoreTimeouts();
+      applyDesktopIdleQuality();
+      if (!selectedDesktopQualityProfile.enableUltra) return;
+      desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        if (adaptiveQualityStateRef.current.isMoving) return;
+        if (modeRef.current !== "google3d") return;
+        applyDesktopUltraQuality();
+      }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
+    };
+
+    applyFpsBenchmarkMovingQualityRef.current = applyBenchmarkMovingQualityLock;
+    releaseFpsBenchmarkMovingQualityRef.current = releaseBenchmarkMovingQualityLock;
+
     const applyFastThenPremiumGoogleQuality = (tileset) => {
       if (!tileset) return;
       clearGoogleQualityTimeout();
@@ -4761,6 +4817,10 @@ function findPickedInteractiveData(
 
     const handleDesktopMoveStart = () => {
       if (useTouchNavigation) return;
+      if (fpsBenchmarkQualityLockRef.current) {
+        adaptiveQualityStateRef.current.isMoving = true;
+        return;
+      }
       adaptiveQualityStateRef.current.isMoving = true;
       clearMobileUltraRestoreTimeout();
       clearDesktopQualityRestoreTimeouts();
@@ -4770,6 +4830,10 @@ function findPickedInteractiveData(
 
     const handleDesktopMoveEnd = () => {
       if (useTouchNavigation) return;
+      if (fpsBenchmarkQualityLockRef.current) {
+        adaptiveQualityStateRef.current.isMoving = true;
+        return;
+      }
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       clearDesktopQualityRestoreTimeouts();
@@ -4790,6 +4854,10 @@ function findPickedInteractiveData(
 
     const handleMobileMoveStart = () => {
       if (!useTouchNavigation) return;
+      if (fpsBenchmarkQualityLockRef.current) {
+        adaptiveQualityStateRef.current.isMoving = true;
+        return;
+      }
       adaptiveQualityStateRef.current.isMoving = true;
       clearMobileUltraRestoreTimeout();
       clearMobileQualityRestoreTimeout();
@@ -4799,6 +4867,10 @@ function findPickedInteractiveData(
 
     const handleMobileMoveEnd = () => {
       if (!useTouchNavigation) return;
+      if (fpsBenchmarkQualityLockRef.current) {
+        adaptiveQualityStateRef.current.isMoving = true;
+        return;
+      }
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       clearMobileQualityRestoreTimeout();
@@ -4871,6 +4943,9 @@ function findPickedInteractiveData(
       clearSatelliteLoadWatchdogTimeout();
       adaptiveQualityStateRef.current.isMoving = false;
       adaptiveQualityStateRef.current.isUltraActive = false;
+      fpsBenchmarkQualityLockRef.current = false;
+      applyFpsBenchmarkMovingQualityRef.current = () => {};
+      releaseFpsBenchmarkMovingQualityRef.current = () => {};
       resetAdaptiveQualityStats();
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(handleAdaptiveFrameQuality);
@@ -6160,6 +6235,7 @@ function findPickedInteractiveData(
         fpsBenchmarkCameraInputsRef.current;
     }
     fpsBenchmarkCameraInputsRef.current = null;
+    releaseFpsBenchmarkMovingQualityRef.current?.();
   }
 
   function getPreferredFpsBenchmarkStartCamera(viewer, baseCamera) {
@@ -6239,6 +6315,7 @@ function findPickedInteractiveData(
     fpsBenchmarkCameraInputsRef.current =
       viewer.scene.screenSpaceCameraController.enableInputs;
     viewer.scene.screenSpaceCameraController.enableInputs = false;
+    applyFpsBenchmarkMovingQualityRef.current?.();
     restoreSerializableCameraState(viewer, startCamera);
     viewer.scene.requestRender();
 
