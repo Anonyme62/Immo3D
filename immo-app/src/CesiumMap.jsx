@@ -316,16 +316,99 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
 );
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
-const FPS_BENCHMARK_VERSION = 1;
+const FPS_BENCHMARK_VERSION = 3;
+const FPS_BENCHMARK_ROUTE_VERSION = 3;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
-const FPS_BENCHMARK_MAX_DISTANCE_METERS = 1100;
+const FPS_BENCHMARK_MAX_DISTANCE_METERS = 980;
 const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.92;
+const FPS_BENCHMARK_HISTORY_LIMIT = 18;
+const FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT = 6;
+const FPS_BENCHMARK_MARKER_CLUSTER_RADIUS_METERS = 260;
+const FPS_BENCHMARK_MARKER_CONTEXT_RADIUS_METERS = 620;
+const FPS_BENCHMARK_MARKER_SEARCH_RADIUS_METERS = 2800;
 const FPS_BENCHMARK_SEGMENTS = [
-  { durationMs: 2400, fromX: 0, fromY: 0, toX: 0.95, toY: 0.06 },
-  { durationMs: 2200, fromX: 0.95, fromY: 0.06, toX: 1.82, toY: -0.08 },
-  { durationMs: 2300, fromX: 1.82, fromY: -0.08, toX: 2.74, toY: -0.24 },
-  { durationMs: 2200, fromX: 2.74, fromY: -0.24, toX: 3.55, toY: -0.38 },
+  {
+    durationMs: 1400,
+    fromX: 0,
+    fromY: 0,
+    toX: 0.18,
+    toY: 0.12,
+    fromHeightScale: 1.08,
+    toHeightScale: 0.98,
+  },
+  {
+    durationMs: 1500,
+    fromX: 0.18,
+    fromY: 0.12,
+    toX: 0.44,
+    toY: 0.38,
+    fromHeightScale: 0.98,
+    toHeightScale: 0.84,
+  },
+  {
+    durationMs: 1400,
+    fromX: 0.44,
+    fromY: 0.38,
+    toX: 0.78,
+    toY: 0.46,
+    fromHeightScale: 0.84,
+    toHeightScale: 0.78,
+  },
+  {
+    durationMs: 1500,
+    fromX: 0.78,
+    fromY: 0.46,
+    toX: 0.92,
+    toY: 0.12,
+    fromHeightScale: 0.78,
+    toHeightScale: 0.88,
+  },
+  {
+    durationMs: 1600,
+    fromX: 0.92,
+    fromY: 0.12,
+    toX: 0.46,
+    toY: -0.26,
+    fromHeightScale: 0.88,
+    toHeightScale: 1.08,
+  },
+  {
+    durationMs: 1500,
+    fromX: 0.46,
+    fromY: -0.26,
+    toX: -0.08,
+    toY: -0.34,
+    fromHeightScale: 1.08,
+    toHeightScale: 1.16,
+  },
+  {
+    durationMs: 1500,
+    fromX: -0.08,
+    fromY: -0.34,
+    toX: -0.32,
+    toY: 0.02,
+    fromHeightScale: 1.16,
+    toHeightScale: 0.98,
+  },
+  {
+    durationMs: 1700,
+    fromX: -0.32,
+    fromY: 0.02,
+    toX: 0.12,
+    toY: 0.32,
+    fromHeightScale: 0.98,
+    toHeightScale: 0.86,
+  },
+  {
+    durationMs: 1700,
+    fromX: 0.12,
+    fromY: 0.32,
+    toX: 0.62,
+    toY: 0.18,
+    fromHeightScale: 0.86,
+    toHeightScale: 1.02,
+  },
 ];
 const FPS_BENCHMARK_TOTAL_DURATION_MS = FPS_BENCHMARK_SEGMENTS.reduce(
   (total, segment) => total + segment.durationMs,
@@ -591,7 +674,9 @@ function readFpsBenchmarkStore() {
     const raw = window.localStorage.getItem(FPS_BENCHMARK_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    if (Number(parsed.version || 0) !== FPS_BENCHMARK_VERSION) return {};
+    return parsed;
   } catch {
     return {};
   }
@@ -633,7 +718,7 @@ function getFpsBenchmarkDistanceMeters(cameraState) {
 
 function getFpsBenchmarkOffsetAt(elapsedMs, distanceMeters) {
   if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
-    return { x: 0, y: 0 };
+    return { x: 0, y: 0, heightScale: 1 };
   }
   let remaining = elapsedMs;
   for (const segment of FPS_BENCHMARK_SEGMENTS) {
@@ -646,6 +731,15 @@ function getFpsBenchmarkOffsetAt(elapsedMs, distanceMeters) {
           Cesium.Math.lerp(segment.fromX, segment.toX, progress) * distanceMeters,
         y:
           Cesium.Math.lerp(segment.fromY, segment.toY, progress) * distanceMeters,
+        heightScale: Cesium.Math.lerp(
+          Number.isFinite(Number(segment.fromHeightScale))
+            ? Number(segment.fromHeightScale)
+            : 1,
+          Number.isFinite(Number(segment.toHeightScale))
+            ? Number(segment.toHeightScale)
+            : 1,
+          progress
+        ),
       };
     }
     remaining -= durationMs;
@@ -654,6 +748,9 @@ function getFpsBenchmarkOffsetAt(elapsedMs, distanceMeters) {
   return {
     x: Number(lastSegment?.toX || 0) * distanceMeters,
     y: Number(lastSegment?.toY || 0) * distanceMeters,
+    heightScale: Number.isFinite(Number(lastSegment?.toHeightScale))
+      ? Number(lastSegment.toHeightScale)
+      : 1,
   };
 }
 
@@ -683,6 +780,125 @@ function roundBenchmarkValue(value, digits = 1) {
   return Math.round(value * factor) / factor;
 }
 
+function sanitizeBenchmarkHistoryEntry(entry) {
+  if (!entry || !Number.isFinite(Number(entry.avgFps))) return null;
+  return {
+    ranAt: String(entry.ranAt || ""),
+    avgFps: roundBenchmarkValue(Number(entry.avgFps)),
+    minFps: roundBenchmarkValue(Number(entry.minFps)),
+    avgFrameMs: roundBenchmarkValue(Number(entry.avgFrameMs)),
+    p95FrameMs: roundBenchmarkValue(Number(entry.p95FrameMs)),
+    maxFrameMs: roundBenchmarkValue(Number(entry.maxFrameMs)),
+    longTaskCount: Math.max(0, Number(entry.longTaskCount || 0)),
+    maxLongTaskMs: roundBenchmarkValue(Number(entry.maxLongTaskMs)),
+    qualityProfile: String(entry.qualityProfile || ""),
+    coldStart: Boolean(entry.coldStart),
+    distanceMeters: Math.max(0, Number(entry.distanceMeters || 0)),
+  };
+}
+
+function normalizeBenchmarkHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map(sanitizeBenchmarkHistoryEntry)
+    .filter(Boolean)
+    .slice(0, FPS_BENCHMARK_HISTORY_LIMIT);
+}
+
+function getBenchmarkSurfaceDistanceMeters(pointA, pointB) {
+  if (!pointA || !pointB) return Number.POSITIVE_INFINITY;
+  const geodesic = new Cesium.EllipsoidGeodesic(
+    Cesium.Cartographic.fromDegrees(pointA.longitude, pointA.latitude),
+    Cesium.Cartographic.fromDegrees(pointB.longitude, pointB.latitude)
+  );
+  return Number.isFinite(geodesic.surfaceDistance)
+    ? geodesic.surfaceDistance
+    : Number.POSITIVE_INFINITY;
+}
+
+function extractBenchmarkMarkerCandidates(entities = []) {
+  const nextCandidates = [];
+  const seenKeys = new Set();
+  entities.forEach((entity) => {
+    const cartesian =
+      entity?.markerPositionCartesian ||
+      entity?.position?.getValue?.(Cesium.JulianDate.now?.());
+    if (!cartesian) return;
+    const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+    if (!cartographic) return;
+    const longitude = Cesium.Math.toDegrees(cartographic.longitude);
+    const latitude = Cesium.Math.toDegrees(cartographic.latitude);
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
+    const key = `${longitude.toFixed(6)}:${latitude.toFixed(6)}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    nextCandidates.push({ longitude, latitude });
+  });
+  return nextCandidates;
+}
+
+function findPreferredBenchmarkMarkerCluster(cameraState, markerCandidates) {
+  if (!isSerializableCameraStateValid(cameraState) || markerCandidates.length === 0) {
+    return null;
+  }
+
+  const nearbyCandidates = markerCandidates.filter(
+    (candidate) =>
+      getBenchmarkSurfaceDistanceMeters(cameraState, candidate) <=
+      FPS_BENCHMARK_MARKER_SEARCH_RADIUS_METERS
+  );
+  const northernCandidates = nearbyCandidates.filter(
+    (candidate) => candidate.latitude >= cameraState.latitude
+  );
+  const searchPool =
+    northernCandidates.length >= 4 ? northernCandidates : nearbyCandidates;
+  if (searchPool.length === 0) return null;
+
+  let bestCluster = null;
+  searchPool.forEach((candidate) => {
+    let nearCount = 0;
+    let contextCount = 0;
+    let sumLongitude = 0;
+    let sumLatitude = 0;
+
+    searchPool.forEach((otherCandidate) => {
+      const distanceMeters = getBenchmarkSurfaceDistanceMeters(candidate, otherCandidate);
+      if (distanceMeters <= FPS_BENCHMARK_MARKER_CONTEXT_RADIUS_METERS) {
+        contextCount += 1;
+        sumLongitude += otherCandidate.longitude;
+        sumLatitude += otherCandidate.latitude;
+      }
+      if (distanceMeters <= FPS_BENCHMARK_MARKER_CLUSTER_RADIUS_METERS) {
+        nearCount += 1;
+      }
+    });
+
+    if (contextCount === 0) return;
+
+    const latitudeBias = Math.max(0, candidate.latitude - cameraState.latitude) * 100000;
+    const distancePenalty =
+      getBenchmarkSurfaceDistanceMeters(cameraState, candidate) /
+      FPS_BENCHMARK_MARKER_SEARCH_RADIUS_METERS;
+    const score = nearCount * 10 + contextCount * 4 + latitudeBias - distancePenalty * 6;
+
+    if (!bestCluster || score > bestCluster.score) {
+      bestCluster = {
+        score,
+        markerCount: contextCount,
+        longitude: sumLongitude / contextCount,
+        latitude: sumLatitude / contextCount,
+      };
+    }
+  });
+
+  return bestCluster;
+}
+
+function formatMetricSample(values = []) {
+  if (!Array.isArray(values) || values.length === 0) return "[]";
+  return `[${values.map((value) => `${value}ms`).join(", ")}]`;
+}
+
 function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
   if (!Array.isArray(frameTimesMs) || frameTimesMs.length === 0) return null;
   const safeFrameTimes = frameTimesMs.filter(
@@ -695,6 +911,10 @@ function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
   const minFrameMs = sortedFrameTimes[0];
   const maxFrameMs = sortedFrameTimes[sortedFrameTimes.length - 1];
   const p95FrameMs = percentile(sortedFrameTimes, 0.95);
+  const topFrameSpikesMs = [...sortedFrameTimes]
+    .reverse()
+    .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT)
+    .map((value) => roundBenchmarkValue(value));
 
   return {
     ranAt: new Date().toISOString(),
@@ -706,6 +926,7 @@ function buildFpsBenchmarkResult(frameTimesMs, extra = {}) {
     avgFrameMs: roundBenchmarkValue(averageFrameMs),
     p95FrameMs: roundBenchmarkValue(p95FrameMs),
     maxFrameMs: roundBenchmarkValue(maxFrameMs),
+    topFrameSpikesMs,
     ...extra,
   };
 }
@@ -714,11 +935,33 @@ function formatFpsBenchmarkSummary(result) {
   if (!result || !Number.isFinite(result.avgFps)) return "";
   const parts = [
     `avg ${result.avgFps} fps`,
-    Number.isFinite(result.minFps) ? `min ${result.minFps}` : null,
+    Number.isFinite(result.minFps) ? `min ${result.minFps} fps` : null,
+    Number.isFinite(result.avgFrameMs) ? `avg ${result.avgFrameMs} ms` : null,
     Number.isFinite(result.p95FrameMs) ? `p95 ${result.p95FrameMs} ms` : null,
-    Number.isFinite(result.longTaskCount) ? `long tasks ${result.longTaskCount}` : null,
+    Number.isFinite(result.maxFrameMs) ? `max ${result.maxFrameMs} ms` : null,
+    Number.isFinite(result.longTaskCount) ? `LT ${result.longTaskCount}` : null,
+    Number.isFinite(result.maxLongTaskMs) ? `max LT ${result.maxLongTaskMs} ms` : null,
   ].filter(Boolean);
   return parts.join(" · ");
+}
+
+function buildFpsBenchmarkLogPayload(result, history = []) {
+  if (!result) return null;
+  return {
+    latest: result,
+    history: normalizeBenchmarkHistory(history),
+  };
+}
+
+function formatFpsBenchmarkLogText(payload) {
+  if (!payload?.latest) return "";
+  return JSON.stringify(payload, null, 2);
+}
+
+function publishFpsBenchmarkLogs(payload) {
+  if (typeof window === "undefined" || !payload?.latest) return;
+  window.__IMMO3D_FPS_BENCHMARK_LOGS__ = payload;
+  window.__IMMO3D_FPS_BENCHMARK_LOG_TEXT__ = formatFpsBenchmarkLogText(payload);
 }
 
 function compactMapZoneCacheStore(store) {
@@ -1485,6 +1728,7 @@ export default function CesiumMap({
   const fpsBenchmarkRafRef = useRef(null);
   const fpsBenchmarkStartTimeoutRef = useRef(null);
   const fpsBenchmarkCameraInputsRef = useRef(null);
+  const fpsBenchmarkRunCountRef = useRef(0);
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -1556,9 +1800,22 @@ export default function CesiumMap({
         store?.lastResult && Number.isFinite(Number(store.lastResult.avgFps))
           ? store.lastResult
           : null,
+      history: normalizeBenchmarkHistory(store?.history),
+      lastLogText: String(store?.lastLogText || ""),
       message: "",
     };
   });
+
+  useEffect(() => {
+    if (!fpsBenchmarkState.lastResult) return;
+    publishFpsBenchmarkLogs(
+      buildFpsBenchmarkLogPayload(
+        fpsBenchmarkState.lastResult,
+        fpsBenchmarkState.history
+      )
+    );
+  }, [fpsBenchmarkState.history, fpsBenchmarkState.lastResult]);
+
   const isSatelliteReadyRef = useRef(false);
   const isTouchNavigationDevice = isMobile && hasTouchInput();
 
@@ -5645,6 +5902,8 @@ function findPickedInteractiveData(
     fpsBenchmarkState.running ||
     isMapModeTransitioning ||
     currentResolvedMode !== "google3d";
+  const isFpsBenchmarkLogButtonDisabled =
+    fpsBenchmarkState.running || !fpsBenchmarkState.lastLogText;
   const fpsBenchmarkButtonLabel = fpsBenchmarkState.running
     ? "Test..."
     : fpsBenchmarkState.scenario?.startCamera
@@ -5654,7 +5913,10 @@ function findPickedInteractiveData(
     ? "Benchmark FPS en cours..."
     : fpsBenchmarkState.scenario?.startCamera
       ? "Relance le meme trajet pour comparer les patches. Shift+clic pour redefinir le point de depart."
-      : "Memorise la vue actuelle puis lance un benchmark FPS reproductible.";
+      : "Memorise une zone benchmark orientee repères, puis lance un test FPS reproductible.";
+  const fpsBenchmarkLogButtonTitle = fpsBenchmarkState.lastLogText
+    ? "Copie le dernier benchmark FPS en JSON, avec ms, pics de lag et historique recent."
+    : "Lance d'abord un benchmark FPS pour generer des logs.";
   const fpsBenchmarkSummary = fpsBenchmarkState.message || "";
   const mapModeButtonLabel =
     currentResolvedMode === "google3d"
@@ -5698,6 +5960,8 @@ function findPickedInteractiveData(
       writeFpsBenchmarkStore({
         scenario: nextState?.scenario || null,
         lastResult: nextState?.lastResult || null,
+        history: normalizeBenchmarkHistory(nextState?.history),
+        lastLogText: String(nextState?.lastLogText || ""),
       });
       return nextState;
     });
@@ -5721,6 +5985,56 @@ function findPickedInteractiveData(
         fpsBenchmarkCameraInputsRef.current;
     }
     fpsBenchmarkCameraInputsRef.current = null;
+  }
+
+  function getPreferredFpsBenchmarkStartCamera(viewer, baseCamera) {
+    if (!isSerializableCameraStateValid(baseCamera)) {
+      return { startCamera: baseCamera, markerCluster: null };
+    }
+
+    const markerCandidates = extractBenchmarkMarkerCandidates([
+      ...entitiesRef.current,
+      ...customMarkerEntitiesRef.current,
+    ]);
+    const markerCluster = findPreferredBenchmarkMarkerCluster(
+      baseCamera,
+      markerCandidates
+    );
+    if (!markerCluster) {
+      return { startCamera: baseCamera, markerCluster: null };
+    }
+
+    return {
+      startCamera: {
+        ...baseCamera,
+        longitude: markerCluster.longitude,
+        latitude: markerCluster.latitude,
+      },
+      markerCluster: {
+        longitude: roundBenchmarkValue(markerCluster.longitude, 6),
+        latitude: roundBenchmarkValue(markerCluster.latitude, 6),
+        markerCount: markerCluster.markerCount,
+      },
+    };
+  }
+
+  async function handleCopyFpsBenchmarkLogs() {
+    if (!fpsBenchmarkState.lastLogText) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(fpsBenchmarkState.lastLogText);
+      }
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        message: "Logs FPS copies. Tu peux me les coller directement.",
+      }));
+    } catch {
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        message:
+          "Logs FPS prets dans window.__IMMO3D_FPS_BENCHMARK_LOG_TEXT__. Copie-les depuis la console.",
+      }));
+    }
   }
 
   function runFpsBenchmark(viewer, scenario) {
@@ -5820,7 +6134,10 @@ function findPickedInteractiveData(
           new Cesium.Cartesian3(
             rotatedOffset.east,
             rotatedOffset.north,
-            startLocalPosition.z
+            startLocalPosition.z *
+              (Number.isFinite(Number(offset.heightScale))
+                ? Number(offset.heightScale)
+                : 1)
           ),
           new Cesium.Cartesian3()
         );
@@ -5860,10 +6177,24 @@ function findPickedInteractiveData(
             event?.type === "tile_load_burst_complete" &&
             String(event?.at || "") >= telemetryStartedAt
         );
+        const sortedLongTaskDurationsMs = benchmarkLongTasks
+          .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
+          .filter((value) => Number.isFinite(value) && value > 0)
+          .sort((left, right) => right - left)
+          .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
+        const sortedTileBurstDurationsMs = benchmarkTileBursts
+          .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
+          .filter((value) => Number.isFinite(value) && value > 0)
+          .sort((left, right) => right - left)
+          .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
         const result = buildFpsBenchmarkResult(frameTimesMs, {
+          routeVersion: FPS_BENCHMARK_ROUTE_VERSION,
+          coldStart: fpsBenchmarkRunCountRef.current === 0,
+          runIndexSinceReload: fpsBenchmarkRunCountRef.current + 1,
           distanceMeters: Math.round(benchmarkDistanceMeters),
           mode: runMode,
           qualityProfile,
+          markerCluster: scenario.markerCluster || null,
           longTaskCount: benchmarkLongTasks.length,
           maxLongTaskMs: roundBenchmarkValue(
             benchmarkLongTasks.reduce(
@@ -5872,7 +6203,9 @@ function findPickedInteractiveData(
               0
             )
           ),
+          longTaskDurationsMs: sortedLongTaskDurationsMs,
           tileBurstCount: benchmarkTileBursts.length,
+          tileBurstDurationsMs: sortedTileBurstDurationsMs,
         });
         if (!result) {
           persistFpsBenchmarkState((previousState) => ({
@@ -5892,10 +6225,23 @@ function findPickedInteractiveData(
           qualityProfile,
           longTaskCount: result.longTaskCount,
         });
+        fpsBenchmarkRunCountRef.current += 1;
+        const nextHistory = [
+          sanitizeBenchmarkHistoryEntry(result),
+          ...fpsBenchmarkState.history,
+        ]
+          .filter(Boolean)
+          .slice(0, FPS_BENCHMARK_HISTORY_LIMIT);
+        const logPayload = buildFpsBenchmarkLogPayload(result, nextHistory);
+        const logText = formatFpsBenchmarkLogText(logPayload);
+        publishFpsBenchmarkLogs(logPayload);
+        console.info("IMMO3D_FPS_BENCHMARK", logPayload);
         persistFpsBenchmarkState((previousState) => ({
           ...previousState,
           running: false,
           lastResult: result,
+          history: nextHistory,
+          lastLogText: logText,
           message: formatFpsBenchmarkSummary(result),
         }));
       };
@@ -5925,23 +6271,32 @@ function findPickedInteractiveData(
     let nextScenario = fpsBenchmarkState.scenario;
 
     if (shouldRedefineScenario) {
-      const startCamera = captureSerializableCameraState(viewer);
-      if (!isSerializableCameraStateValid(startCamera)) {
+      const baseCamera = captureSerializableCameraState(viewer);
+      if (!isSerializableCameraStateValid(baseCamera)) {
         persistFpsBenchmarkState((previousState) => ({
           ...previousState,
           message: "Impossible de memoriser ce point de depart.",
         }));
         return;
       }
+      const { startCamera, markerCluster } = getPreferredFpsBenchmarkStartCamera(
+        viewer,
+        baseCamera
+      );
       nextScenario = {
         createdAt: Date.now(),
+        routeVersion: FPS_BENCHMARK_ROUTE_VERSION,
+        baseCamera,
         startCamera,
+        markerCluster,
       };
       persistFpsBenchmarkState((previousState) => ({
         ...previousState,
         scenario: nextScenario,
         message: shouldRedefineScenario
-          ? "Point de depart FPS memorise."
+          ? markerCluster
+            ? `Point de depart FPS memorise dans une zone avec ${markerCluster.markerCount} reperes.`
+            : "Point de depart FPS memorise."
           : previousState.message,
       }));
     }
@@ -6040,7 +6395,7 @@ function findPickedInteractiveData(
             top: 20,
             right: 88,
             zIndex: 8,
-            maxWidth: 360,
+            maxWidth: 520,
             padding: "10px 14px",
             borderRadius: 14,
             border: "1px solid rgba(15, 23, 42, 0.12)",
@@ -6054,7 +6409,28 @@ function findPickedInteractiveData(
             lineHeight: 1.4,
           }}
         >
-          Test FPS: {fpsBenchmarkSummary}
+          <div>Test FPS: {fpsBenchmarkSummary}</div>
+          {fpsBenchmarkState.lastLogText ? (
+            <button
+              onClick={handleCopyFpsBenchmarkLogs}
+              disabled={isFpsBenchmarkLogButtonDisabled}
+              title={fpsBenchmarkLogButtonTitle}
+              style={{
+                marginTop: 8,
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(15, 23, 42, 0.12)",
+                background: "rgba(255,255,255,0.9)",
+                color: "var(--text-primary)",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: isFpsBenchmarkLogButtonDisabled ? "not-allowed" : "pointer",
+                opacity: isFpsBenchmarkLogButtonDisabled ? 0.6 : 1,
+              }}
+            >
+              Copier logs FPS
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -7014,3 +7390,4 @@ function markerActionButtonStyle(background, color, borderColor = background) {
     fontWeight: 600,
   };
 }
+
