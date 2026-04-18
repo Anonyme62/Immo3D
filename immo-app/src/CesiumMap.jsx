@@ -75,6 +75,10 @@ const DESKTOP_GLOBE_SSE_IDLE = 1.05;
 const DESKTOP_GLOBE_SSE_ULTRA = 0.9;
 const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
 const DESKTOP_QUALITY_ULTRA_DELAY_MS = 780;
+const DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS = 1150;
+const DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS = 180;
+const DESKTOP_AUTO_SETTLE_POSITION_EPSILON_METERS = 1.8;
+const DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD = Cesium.Math.toRadians(0.18);
 const MODE_TRANSITION_MIN_VISIBLE_MS = 620;
 const MODE_TRANSITION_VISUAL_FADE_OUT_MS = 260;
 const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
@@ -546,6 +550,48 @@ function refreshViewer(viewer) {
   viewer.resize();
   restoreCamera(viewer, cameraState);
   viewer.scene.requestRender();
+}
+
+function captureQualityCameraSnapshot(viewer) {
+  if (!viewer?.camera) return null;
+  return {
+    position: Cesium.Cartesian3.clone(viewer.camera.position),
+    heading: Number(viewer.camera.heading) || 0,
+    pitch: Number(viewer.camera.pitch) || Cesium.Math.toRadians(-90),
+    roll: Number(viewer.camera.roll) || 0,
+  };
+}
+
+function getAngleDeltaRadians(a, b) {
+  return Math.abs(Cesium.Math.negativePiToPi((Number(a) || 0) - (Number(b) || 0)));
+}
+
+function isQualityCameraSnapshotStable(previousSnapshot, nextSnapshot) {
+  if (!previousSnapshot?.position || !nextSnapshot?.position) return false;
+  const positionDeltaMeters = Cesium.Cartesian3.distance(
+    previousSnapshot.position,
+    nextSnapshot.position
+  );
+  if (positionDeltaMeters > DESKTOP_AUTO_SETTLE_POSITION_EPSILON_METERS) return false;
+  if (
+    getAngleDeltaRadians(previousSnapshot.heading, nextSnapshot.heading) >
+    DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
+  ) {
+    return false;
+  }
+  if (
+    getAngleDeltaRadians(previousSnapshot.pitch, nextSnapshot.pitch) >
+    DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
+  ) {
+    return false;
+  }
+  if (
+    getAngleDeltaRadians(previousSnapshot.roll, nextSnapshot.roll) >
+    DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function resolveMode(mapMode) {
@@ -2024,6 +2070,9 @@ export default function CesiumMap({
   const fpsBenchmarkQualityLockTimeoutRef = useRef(null);
   const fpsBenchmarkQualityLockRef = useRef(false);
   const fpsBenchmarkLastSegmentKeyRef = useRef("");
+  const desktopIdleRestoreAttemptRef = useRef(0);
+  const desktopSettleSnapshotRef = useRef(null);
+  const desktopMovingVisibleUntilRef = useRef(0);
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
   const releaseFpsBenchmarkMovingQualityRef = useRef(() => {});
   const applyFpsBenchmarkSegmentQualityRef = useRef(() => {});
@@ -4164,6 +4213,54 @@ function findPickedInteractiveData(
       }, SATELLITE_MOVE_RECOVERY_DELAY_MS);
     };
 
+    const scheduleDesktopIdleRestore = (attemptId, delayMs) => {
+      desktopQualityRestoreTimeoutRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
+        if (adaptiveQualityStateRef.current.isMoving) return;
+
+        if (selectedDesktopQualityProfileId === "auto") {
+          const remainingMovingVisibleMs =
+            desktopMovingVisibleUntilRef.current - Date.now();
+          if (remainingMovingVisibleMs > 0) {
+            scheduleDesktopIdleRestore(
+              attemptId,
+              Math.max(
+                DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS,
+                remainingMovingVisibleMs
+              )
+            );
+            return;
+          }
+
+          const currentSnapshot = captureQualityCameraSnapshot(viewer);
+          const previousSnapshot =
+            desktopSettleSnapshotRef.current || currentSnapshot;
+          if (!isQualityCameraSnapshotStable(previousSnapshot, currentSnapshot)) {
+            desktopSettleSnapshotRef.current = currentSnapshot;
+            scheduleDesktopIdleRestore(
+              attemptId,
+              DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS
+            );
+            return;
+          }
+        }
+
+        applyDesktopIdleQuality();
+        desktopSettleSnapshotRef.current = null;
+
+        if (!selectedDesktopQualityProfile.enableUltra || modeRef.current !== "google3d") {
+          return;
+        }
+        desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+          if (cancelled) return;
+          if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
+          if (adaptiveQualityStateRef.current.isMoving) return;
+          applyDesktopUltraQuality();
+        }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
+      }, Math.max(0, Number(delayMs) || 0));
+    };
+
     const startSatelliteLoadWatchdog = () => {
       clearSatelliteLoadWatchdogTimeout();
       satelliteLoadWatchdogTimeoutRef.current = window.setTimeout(() => {
@@ -4188,6 +4285,8 @@ function findPickedInteractiveData(
         window.clearTimeout(desktopUltraRestoreTimeoutRef.current);
         desktopUltraRestoreTimeoutRef.current = null;
       }
+      desktopIdleRestoreAttemptRef.current += 1;
+      desktopSettleSnapshotRef.current = null;
     };
 
     const allowMobileUltraFromDevice = canEnableMobileUltraQuality(isIOSDevice);
@@ -5120,6 +5219,15 @@ function findPickedInteractiveData(
         adaptiveQualityStateRef.current.isMoving = true;
         return;
       }
+      if (selectedDesktopQualityProfileId === "auto") {
+        desktopMovingVisibleUntilRef.current = Math.max(
+          desktopMovingVisibleUntilRef.current,
+          Date.now() + DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS
+        );
+      } else {
+        desktopMovingVisibleUntilRef.current = 0;
+      }
+      desktopSettleSnapshotRef.current = null;
       adaptiveQualityStateRef.current.isMoving = true;
       clearMobileUltraRestoreTimeout();
       clearDesktopQualityRestoreTimeouts();
@@ -5136,19 +5244,12 @@ function findPickedInteractiveData(
       adaptiveQualityStateRef.current.isMoving = false;
       clearQualityRecoverySafetyTimeout();
       clearDesktopQualityRestoreTimeouts();
-
-      desktopQualityRestoreTimeoutRef.current = window.setTimeout(() => {
-        if (cancelled) return;
-        applyDesktopIdleQuality();
-
-        if (!selectedDesktopQualityProfile.enableUltra || modeRef.current !== "google3d") {
-          return;
-        }
-        desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
-          if (cancelled) return;
-          applyDesktopUltraQuality();
-        }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
-      }, selectedDesktopQualityProfile.idleRestoreDelayMs);
+      const restoreAttemptId = desktopIdleRestoreAttemptRef.current;
+      desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+      scheduleDesktopIdleRestore(
+        restoreAttemptId,
+        selectedDesktopQualityProfile.idleRestoreDelayMs
+      );
     };
 
     const handleMobileMoveStart = () => {
