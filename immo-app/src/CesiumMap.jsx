@@ -77,9 +77,24 @@ const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
 const DESKTOP_QUALITY_ULTRA_DELAY_MS = 780;
 const DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS = 1150;
 const DESKTOP_AUTO_INPUT_INTENT_MS = 1400;
+const DESKTOP_AUTO_WHEEL_INTENT_MS = 1800;
 const DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS = 180;
 const DESKTOP_AUTO_SETTLE_POSITION_EPSILON_METERS = 1.8;
 const DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD = Cesium.Math.toRadians(0.18);
+const DESKTOP_AUTO_SETTLE_HEIGHT_EPSILON_METERS = 24;
+const DESKTOP_AUTO_SETTLE_HEIGHT_EPSILON_RATIO = 0.012;
+const DESKTOP_AUTO_HIGH_ALTITUDE_METERS = 2600;
+const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_METERS = 7000;
+const DESKTOP_AUTO_HIGH_ALTITUDE_MOVING_VISIBLE_MS = 1450;
+const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_MOVING_VISIBLE_MS = 1900;
+const DESKTOP_AUTO_HIGH_ALTITUDE_WHEEL_INTENT_MS = 2200;
+const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_WHEEL_INTENT_MS = 2600;
+const DESKTOP_AUTO_HIGH_ALTITUDE_IDLE_RESTORE_MS = 920;
+const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_IDLE_RESTORE_MS = 1280;
+const DESKTOP_AUTO_HIGH_ALTITUDE_SETTLE_HOLD_MS = 1200;
+const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_SETTLE_HOLD_MS = 1600;
+const DESKTOP_AUTO_HIGH_ALTITUDE_RECHECK_MS = 220;
+const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_RECHECK_MS = 320;
 const MODE_TRANSITION_MIN_VISIBLE_MS = 620;
 const MODE_TRANSITION_VISUAL_FADE_OUT_MS = 260;
 const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
@@ -613,10 +628,71 @@ function captureQualityCameraSnapshot(viewer) {
   if (!viewer?.camera) return null;
   return {
     position: Cesium.Cartesian3.clone(viewer.camera.position),
+    height: getCameraHeight(viewer),
     heading: Number(viewer.camera.heading) || 0,
     pitch: Number(viewer.camera.pitch) || Cesium.Math.toRadians(-90),
     roll: Number(viewer.camera.roll) || 0,
   };
+}
+
+function getDesktopAutoStabilityProfile(viewerOrSnapshot = null) {
+  const baseProfile = DESKTOP_QUALITY_PROFILE_CONFIG.auto;
+  const snapshotHeight = Number(viewerOrSnapshot?.height);
+  const cameraHeight = Number.isFinite(snapshotHeight)
+    ? snapshotHeight
+    : getCameraHeight(viewerOrSnapshot);
+
+  const baseConfig = {
+    movingVisibleMs: DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS,
+    wheelIntentMs: DESKTOP_AUTO_WHEEL_INTENT_MS,
+    idleRestoreDelayMs: baseProfile.idleRestoreDelayMs,
+    settleHoldMs: baseProfile.settleHoldMs,
+    settleRecheckDelayMs: DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS,
+  };
+
+  if (!Number.isFinite(cameraHeight)) {
+    return baseConfig;
+  }
+
+  if (cameraHeight >= DESKTOP_AUTO_VERY_HIGH_ALTITUDE_METERS) {
+    return {
+      movingVisibleMs: DESKTOP_AUTO_VERY_HIGH_ALTITUDE_MOVING_VISIBLE_MS,
+      wheelIntentMs: DESKTOP_AUTO_VERY_HIGH_ALTITUDE_WHEEL_INTENT_MS,
+      idleRestoreDelayMs: Math.max(
+        baseConfig.idleRestoreDelayMs,
+        DESKTOP_AUTO_VERY_HIGH_ALTITUDE_IDLE_RESTORE_MS
+      ),
+      settleHoldMs: Math.max(
+        baseConfig.settleHoldMs,
+        DESKTOP_AUTO_VERY_HIGH_ALTITUDE_SETTLE_HOLD_MS
+      ),
+      settleRecheckDelayMs: Math.max(
+        baseConfig.settleRecheckDelayMs,
+        DESKTOP_AUTO_VERY_HIGH_ALTITUDE_RECHECK_MS
+      ),
+    };
+  }
+
+  if (cameraHeight >= DESKTOP_AUTO_HIGH_ALTITUDE_METERS) {
+    return {
+      movingVisibleMs: DESKTOP_AUTO_HIGH_ALTITUDE_MOVING_VISIBLE_MS,
+      wheelIntentMs: DESKTOP_AUTO_HIGH_ALTITUDE_WHEEL_INTENT_MS,
+      idleRestoreDelayMs: Math.max(
+        baseConfig.idleRestoreDelayMs,
+        DESKTOP_AUTO_HIGH_ALTITUDE_IDLE_RESTORE_MS
+      ),
+      settleHoldMs: Math.max(
+        baseConfig.settleHoldMs,
+        DESKTOP_AUTO_HIGH_ALTITUDE_SETTLE_HOLD_MS
+      ),
+      settleRecheckDelayMs: Math.max(
+        baseConfig.settleRecheckDelayMs,
+        DESKTOP_AUTO_HIGH_ALTITUDE_RECHECK_MS
+      ),
+    };
+  }
+
+  return baseConfig;
 }
 
 function getAngleDeltaRadians(a, b) {
@@ -630,6 +706,14 @@ function isQualityCameraSnapshotStable(previousSnapshot, nextSnapshot) {
     nextSnapshot.position
   );
   if (positionDeltaMeters > DESKTOP_AUTO_SETTLE_POSITION_EPSILON_METERS) return false;
+  const previousHeight = Math.max(0, Number(previousSnapshot.height) || 0);
+  const nextHeight = Math.max(0, Number(nextSnapshot.height) || 0);
+  const heightDeltaMeters = Math.abs(previousHeight - nextHeight);
+  const maxHeightDeltaMeters = Math.max(
+    DESKTOP_AUTO_SETTLE_HEIGHT_EPSILON_METERS,
+    Math.max(previousHeight, nextHeight) * DESKTOP_AUTO_SETTLE_HEIGHT_EPSILON_RATIO
+  );
+  if (heightDeltaMeters > maxHeightDeltaMeters) return false;
   if (
     getAngleDeltaRadians(previousSnapshot.heading, nextSnapshot.heading) >
     DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
@@ -4793,35 +4877,40 @@ function findPickedInteractiveData(
         if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
         if (adaptiveQualityStateRef.current.isMoving) return;
 
+        const currentSnapshot = captureQualityCameraSnapshot(viewer);
+        const autoStabilityProfile =
+          selectedDesktopQualityProfileId === "auto"
+            ? getDesktopAutoStabilityProfile(currentSnapshot)
+            : null;
+        const settleRecheckDelayMs =
+          autoStabilityProfile?.settleRecheckDelayMs ??
+          DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS;
+
         if (selectedDesktopQualityProfileId === "auto") {
           const blockedRecoveryDelayMs = getAutoRecoveryBlockDelayMs();
           if (blockedRecoveryDelayMs > 0) {
             scheduleDesktopIdleRestore(
               attemptId,
-              Math.max(
-                DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS,
-                blockedRecoveryDelayMs
-              )
+              Math.max(settleRecheckDelayMs, blockedRecoveryDelayMs)
             );
             return;
           }
 
-          const currentSnapshot = captureQualityCameraSnapshot(viewer);
           const previousSnapshot =
             desktopSettleSnapshotRef.current || currentSnapshot;
           if (!isQualityCameraSnapshotStable(previousSnapshot, currentSnapshot)) {
             desktopSettleSnapshotRef.current = currentSnapshot;
-            scheduleDesktopIdleRestore(
-              attemptId,
-              DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS
-            );
+            scheduleDesktopIdleRestore(attemptId, settleRecheckDelayMs);
             return;
           }
         }
 
+        const settleHoldMs =
+          autoStabilityProfile?.settleHoldMs ??
+          selectedDesktopQualityProfile.settleHoldMs;
         const shouldUseDesktopSettleStage =
           selectedDesktopQualityProfileId === "auto" &&
-          selectedDesktopQualityProfile.settleHoldMs > 0;
+          settleHoldMs > 0;
         if (shouldUseDesktopSettleStage) {
           applyDesktopSettleQuality();
           desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
@@ -4836,11 +4925,14 @@ function findPickedInteractiveData(
               selectedDesktopQualityProfileId === "auto" &&
               blockedRecoveryDelayMs > 0
             ) {
-              desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+              const delayedSnapshot = captureQualityCameraSnapshot(viewer);
+              const delayedAutoStabilityProfile =
+                getDesktopAutoStabilityProfile(delayedSnapshot);
+              desktopSettleSnapshotRef.current = delayedSnapshot;
               scheduleDesktopIdleRestore(
                 attemptId,
                 Math.max(
-                  DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS,
+                  delayedAutoStabilityProfile.settleRecheckDelayMs,
                   blockedRecoveryDelayMs
                 )
               );
@@ -4848,14 +4940,18 @@ function findPickedInteractiveData(
             }
 
             const currentSnapshot = captureQualityCameraSnapshot(viewer);
+            const finalizeAutoStabilityProfile =
+              selectedDesktopQualityProfileId === "auto"
+                ? getDesktopAutoStabilityProfile(currentSnapshot)
+                : null;
+            const finalizeSettleRecheckDelayMs =
+              finalizeAutoStabilityProfile?.settleRecheckDelayMs ??
+              DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS;
             const previousSnapshot =
               desktopSettleSnapshotRef.current || currentSnapshot;
             if (!isQualityCameraSnapshotStable(previousSnapshot, currentSnapshot)) {
               desktopSettleSnapshotRef.current = currentSnapshot;
-              scheduleDesktopIdleRestore(
-                attemptId,
-                DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS
-              );
+              scheduleDesktopIdleRestore(attemptId, finalizeSettleRecheckDelayMs);
               return;
             }
 
@@ -4874,7 +4970,7 @@ function findPickedInteractiveData(
               if (adaptiveQualityStateRef.current.isMoving) return;
               applyDesktopUltraQuality();
             }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
-          }, selectedDesktopQualityProfile.settleHoldMs);
+          }, settleHoldMs);
           return;
         }
 
@@ -4894,7 +4990,7 @@ function findPickedInteractiveData(
           ) {
             scheduleDesktopIdleRestore(
               attemptId,
-              DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS
+              settleRecheckDelayMs
             );
             return;
           }
@@ -6243,7 +6339,8 @@ function findPickedInteractiveData(
 
     const handleDesktopWheelIntent = () => {
       if (useTouchNavigation) return;
-      markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
+      const autoStabilityProfile = getDesktopAutoStabilityProfile(viewer);
+      markDesktopNavigationIntent(autoStabilityProfile.wheelIntentMs, true);
     };
 
     const handleDesktopMoveStart = () => {
@@ -6255,9 +6352,10 @@ function findPickedInteractiveData(
         return;
       }
       if (selectedDesktopQualityProfileId === "auto") {
+        const autoStabilityProfile = getDesktopAutoStabilityProfile(viewer);
         desktopMovingVisibleUntilRef.current = Math.max(
           desktopMovingVisibleUntilRef.current,
-          Date.now() + DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS
+          Date.now() + autoStabilityProfile.movingVisibleMs
         );
       } else {
         desktopMovingVisibleUntilRef.current = 0;
@@ -6283,9 +6381,14 @@ function findPickedInteractiveData(
       clearDesktopQualityRestoreTimeouts();
       const restoreAttemptId = desktopIdleRestoreAttemptRef.current;
       desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+      const autoStabilityProfile =
+        selectedDesktopQualityProfileId === "auto"
+          ? getDesktopAutoStabilityProfile(desktopSettleSnapshotRef.current)
+          : null;
       scheduleDesktopIdleRestore(
         restoreAttemptId,
-        selectedDesktopQualityProfile.idleRestoreDelayMs
+        autoStabilityProfile?.idleRestoreDelayMs ??
+          selectedDesktopQualityProfile.idleRestoreDelayMs
       );
     };
 
