@@ -2462,6 +2462,7 @@ export default function CesiumMap({
   const fpsBenchmarkRecordingMoveActiveRef = useRef(false);
   const fpsBenchmarkCameraInputsRef = useRef(null);
   const fpsBenchmarkRunCountRef = useRef(0);
+  const fpsBenchmarkActiveRef = useRef(false);
   const fpsBenchmarkQualityLockTimeoutRef = useRef(null);
   const fpsBenchmarkQualityLockRef = useRef(false);
   const fpsBenchmarkLastSegmentKeyRef = useRef("");
@@ -4710,6 +4711,7 @@ function findPickedInteractiveData(
       forceMovingQuality = false
     ) => {
       if (useTouchNavigation) return;
+      if (fpsBenchmarkActiveRef.current) return;
       if (selectedDesktopQualityProfileId !== "auto") return;
 
       desktopMovingVisibleUntilRef.current = Math.max(
@@ -5793,6 +5795,9 @@ function findPickedInteractiveData(
 
     const handleDesktopMoveStart = () => {
       if (useTouchNavigation) return;
+      if (fpsBenchmarkActiveRef.current) {
+        return;
+      }
       if (fpsBenchmarkQualityLockRef.current) {
         return;
       }
@@ -5814,6 +5819,9 @@ function findPickedInteractiveData(
 
     const handleDesktopMoveEnd = () => {
       if (useTouchNavigation) return;
+      if (fpsBenchmarkActiveRef.current) {
+        return;
+      }
       if (fpsBenchmarkQualityLockRef.current) {
         return;
       }
@@ -5830,6 +5838,9 @@ function findPickedInteractiveData(
 
     const handleMobileMoveStart = () => {
       if (!useTouchNavigation) return;
+      if (fpsBenchmarkActiveRef.current) {
+        return;
+      }
       if (fpsBenchmarkQualityLockRef.current) {
         return;
       }
@@ -5842,6 +5853,9 @@ function findPickedInteractiveData(
 
     const handleMobileMoveEnd = () => {
       if (!useTouchNavigation) return;
+      if (fpsBenchmarkActiveRef.current) {
+        return;
+      }
       if (fpsBenchmarkQualityLockRef.current) {
         return;
       }
@@ -5935,6 +5949,7 @@ function findPickedInteractiveData(
         window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
         fpsBenchmarkQualityLockTimeoutRef.current = null;
       }
+      fpsBenchmarkActiveRef.current = false;
       adaptiveQualityStateRef.current.isMoving = false;
       adaptiveQualityStateRef.current.isUltraActive = false;
       fpsBenchmarkQualityLockRef.current = false;
@@ -7317,6 +7332,7 @@ function findPickedInteractiveData(
         fpsBenchmarkCameraInputsRef.current;
     }
     fpsBenchmarkCameraInputsRef.current = null;
+    fpsBenchmarkActiveRef.current = false;
     fpsBenchmarkLastSegmentKeyRef.current = "";
     releaseFpsBenchmarkMovingQualityRef.current?.();
   }
@@ -7417,6 +7433,15 @@ function findPickedInteractiveData(
 
     finishFpsBenchmarkRecording();
     finishFpsBenchmarkRun(viewer);
+    fpsBenchmarkActiveRef.current = true;
+    clearQualityRecoverySafetyTimeout();
+    clearGoogleQualityTimeout();
+    clearDesktopQualityRestoreTimeouts();
+    clearMobileQualityRestoreTimeout();
+    clearMobileUltraRestoreTimeout();
+    resetAdaptiveQualityStats();
+    desktopMovingVisibleUntilRef.current = 0;
+    desktopSettleSnapshotRef.current = null;
 
     const recording = sanitizeBenchmarkRecording(safeScenario.recording);
     const benchmarkSegmentTimeline =
@@ -7453,6 +7478,7 @@ function findPickedInteractiveData(
       typeof initialSegmentMeta?.benchmarkMoving === "boolean"
         ? Boolean(initialSegmentMeta.benchmarkMoving)
         : true;
+    adaptiveQualityStateRef.current.isMoving = initialSegmentShouldMove;
     if (initialSegmentMeta?.key) {
       fpsBenchmarkLastSegmentKeyRef.current = initialSegmentMeta.key;
     }
