@@ -93,6 +93,16 @@ const SATELLITE_MOVE_RECOVERY_DELAY_MS = 1600;
 const ADAPTIVE_QUALITY_SAMPLE_WINDOW_MS = 1450;
 const ADAPTIVE_QUALITY_DROP_FRAME_MS = 34;
 const ADAPTIVE_QUALITY_DROP_STREAK_LIMIT = 7;
+const ADAPTIVE_QUALITY_AUTO_DROP_FRAME_MS = 36;
+const ADAPTIVE_QUALITY_AUTO_SEVERE_FRAME_MS = 58;
+const ADAPTIVE_QUALITY_AUTO_DROP_STREAK_LIMIT = 2;
+const ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS = 2200;
+const ADAPTIVE_QUALITY_AUTO_LONG_TASK_RECOVERY_MS = 3400;
+const ADAPTIVE_QUALITY_AUTO_TILE_RECOVERY_MS = 1800;
+const ADAPTIVE_QUALITY_AUTO_RECOVERY_RECHECK_MS = 240;
+const ADAPTIVE_QUALITY_AUTO_TILE_BUSY_THRESHOLD = 10;
+const ADAPTIVE_QUALITY_AUTO_DROP_MIN_INTERVAL_MS = 420;
+const ADAPTIVE_QUALITY_AUTO_SLOW_AVG_FRAME_MS = 17.5;
 const ADAPTIVE_QUALITY_RAISE_FPS_MOBILE = 52;
 const ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP = 57;
 const MOBILE_QUALITY_PROFILE_DEFAULT = "auto";
@@ -2501,6 +2511,12 @@ export default function CesiumMap({
     sampleFrameCount: 0,
     sampleFrameMsTotal: 0,
     dropFrameStreak: 0,
+    overloadFrameStreak: 0,
+    stabilityHoldUntil: 0,
+    lastOverloadAt: 0,
+    lastLongTaskAt: 0,
+    lastTileActivityAt: 0,
+    lastDefensiveDropAt: 0,
   });
   const tileLoadBurstStateRef = useRef({
     active: false,
@@ -4563,6 +4579,7 @@ function findPickedInteractiveData(
       if (modeRef.current !== "google3d") return;
 
       const state = tileLoadBurstStateRef.current;
+      const adaptiveState = adaptiveQualityStateRef.current;
       const normalizedRemainingTiles = Math.max(
         0,
         Math.round(Number(remainingTiles) || 0)
@@ -4570,16 +4587,33 @@ function findPickedInteractiveData(
       state.lastRemainingTiles = normalizedRemainingTiles;
 
       if (normalizedRemainingTiles > 0) {
+        adaptiveState.lastTileActivityAt = Date.now();
         if (!state.active) {
           state.active = true;
           state.startedAt = performance.now();
           state.peakRemainingTiles = normalizedRemainingTiles;
+          if (
+            normalizedRemainingTiles >= ADAPTIVE_QUALITY_AUTO_TILE_BUSY_THRESHOLD &&
+            !adaptiveState.isMoving
+          ) {
+            triggerAutoStabilityDrop({
+              holdMs: ADAPTIVE_QUALITY_AUTO_TILE_RECOVERY_MS,
+            });
+          }
           return;
         }
         state.peakRemainingTiles = Math.max(
           state.peakRemainingTiles,
           normalizedRemainingTiles
         );
+        if (
+          normalizedRemainingTiles >= ADAPTIVE_QUALITY_AUTO_TILE_BUSY_THRESHOLD &&
+          !adaptiveState.isMoving
+        ) {
+          triggerAutoStabilityDrop({
+            holdMs: ADAPTIVE_QUALITY_AUTO_TILE_RECOVERY_MS,
+          });
+        }
         return;
       }
 
@@ -4637,6 +4671,16 @@ function findPickedInteractiveData(
               remainingTiles: tileLoadBurstStateRef.current.lastRemainingTiles,
               mode: modeRef.current,
             });
+            if (entry.duration >= 40) {
+              adaptiveQualityStateRef.current.lastLongTaskAt = Date.now();
+              triggerAutoStabilityDrop({
+                holdMs: Math.max(
+                  ADAPTIVE_QUALITY_AUTO_LONG_TASK_RECOVERY_MS,
+                  Math.round(entry.duration * 12)
+                ),
+                downgrade: !adaptiveQualityStateRef.current.isMoving,
+              });
+            }
           });
         });
         longTaskObserver.observe({ entryTypes: ["longtask"] });
@@ -4701,6 +4745,14 @@ function findPickedInteractiveData(
       adaptiveQualityStateRef.current.sampleFrameCount = 0;
       adaptiveQualityStateRef.current.sampleFrameMsTotal = 0;
       adaptiveQualityStateRef.current.dropFrameStreak = 0;
+      adaptiveQualityStateRef.current.overloadFrameStreak = 0;
+    };
+    const clearAdaptiveQualityPressure = () => {
+      adaptiveQualityStateRef.current.stabilityHoldUntil = 0;
+      adaptiveQualityStateRef.current.lastOverloadAt = 0;
+      adaptiveQualityStateRef.current.lastLongTaskAt = 0;
+      adaptiveQualityStateRef.current.lastTileActivityAt = 0;
+      adaptiveQualityStateRef.current.lastDefensiveDropAt = 0;
     };
 
     const scheduleQualityRecoverySafety = () => {
@@ -4714,6 +4766,14 @@ function findPickedInteractiveData(
           return;
         }
         if (!isMobile) {
+          const blockedRecoveryDelayMs = getAutoRecoveryBlockDelayMs();
+          if (
+            selectedDesktopQualityProfileId === "auto" &&
+            blockedRecoveryDelayMs > 0
+          ) {
+            scheduleQualityRecoverySafety();
+            return;
+          }
           clearDesktopQualityRestoreTimeouts();
           applyDesktopIdleQuality();
           if (selectedDesktopQualityProfile.enableUltra && modeRef.current === "google3d") {
@@ -4734,14 +4794,13 @@ function findPickedInteractiveData(
         if (adaptiveQualityStateRef.current.isMoving) return;
 
         if (selectedDesktopQualityProfileId === "auto") {
-          const remainingMovingVisibleMs =
-            desktopMovingVisibleUntilRef.current - Date.now();
-          if (remainingMovingVisibleMs > 0) {
+          const blockedRecoveryDelayMs = getAutoRecoveryBlockDelayMs();
+          if (blockedRecoveryDelayMs > 0) {
             scheduleDesktopIdleRestore(
               attemptId,
               Math.max(
                 DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS,
-                remainingMovingVisibleMs
+                blockedRecoveryDelayMs
               )
             );
             return;
@@ -4771,6 +4830,22 @@ function findPickedInteractiveData(
             if (cancelled) return;
             if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
             if (adaptiveQualityStateRef.current.isMoving) return;
+
+            const blockedRecoveryDelayMs = getAutoRecoveryBlockDelayMs();
+            if (
+              selectedDesktopQualityProfileId === "auto" &&
+              blockedRecoveryDelayMs > 0
+            ) {
+              desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+              scheduleDesktopIdleRestore(
+                attemptId,
+                Math.max(
+                  DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS,
+                  blockedRecoveryDelayMs
+                )
+              );
+              return;
+            }
 
             const currentSnapshot = captureQualityCameraSnapshot(viewer);
             const previousSnapshot =
@@ -4813,6 +4888,16 @@ function findPickedInteractiveData(
           if (cancelled) return;
           if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
           if (adaptiveQualityStateRef.current.isMoving) return;
+          if (
+            selectedDesktopQualityProfileId === "auto" &&
+            getAutoRecoveryBlockDelayMs() > 0
+          ) {
+            scheduleDesktopIdleRestore(
+              attemptId,
+              DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS
+            );
+            return;
+          }
           applyDesktopUltraQuality();
         }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
       }, Math.max(0, Number(delayMs) || 0));
@@ -4892,6 +4977,96 @@ function findPickedInteractiveData(
       !isMobile &&
       (selectedDesktopQualityProfileId === "high" ||
         selectedDesktopQualityProfileId === "ultra");
+    const getAutoRecoveryBlockDelayMs = () => {
+      if (isMobile || selectedDesktopQualityProfileId !== "auto") return 0;
+
+      const now = Date.now();
+      const adaptiveState = adaptiveQualityStateRef.current;
+      let delayMs = Math.max(0, desktopMovingVisibleUntilRef.current - now);
+
+      delayMs = Math.max(
+        delayMs,
+        Math.max(0, adaptiveState.stabilityHoldUntil - now)
+      );
+
+      if (
+        tileLoadBurstStateRef.current.active ||
+        tileLoadBurstStateRef.current.lastRemainingTiles >=
+          ADAPTIVE_QUALITY_AUTO_TILE_BUSY_THRESHOLD
+      ) {
+        delayMs = Math.max(delayMs, ADAPTIVE_QUALITY_AUTO_RECOVERY_RECHECK_MS);
+      }
+
+      if (adaptiveState.lastTileActivityAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_TILE_RECOVERY_MS -
+              (now - adaptiveState.lastTileActivityAt)
+          )
+        );
+      }
+
+      if (adaptiveState.lastLongTaskAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_LONG_TASK_RECOVERY_MS -
+              (now - adaptiveState.lastLongTaskAt)
+          )
+        );
+      }
+
+      if (adaptiveState.lastOverloadAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS -
+              (now - adaptiveState.lastOverloadAt)
+          )
+        );
+      }
+
+      return delayMs;
+    };
+    const triggerAutoStabilityDrop = ({
+      holdMs = ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS,
+      downgrade = true,
+    } = {}) => {
+      if (isMobile || selectedDesktopQualityProfileId !== "auto") return;
+      if (fpsBenchmarkActiveRef.current || fpsBenchmarkQualityLockRef.current) return;
+      if (modeRef.current !== "google3d") return;
+
+      const now = Date.now();
+      const adaptiveState = adaptiveQualityStateRef.current;
+      adaptiveState.lastOverloadAt = now;
+      adaptiveState.stabilityHoldUntil = Math.max(
+        adaptiveState.stabilityHoldUntil,
+        now + Math.max(0, Number(holdMs) || 0)
+      );
+      desktopMovingVisibleUntilRef.current = Math.max(
+        desktopMovingVisibleUntilRef.current,
+        now + Math.max(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, Number(holdMs) || 0)
+      );
+
+      if (!downgrade) return;
+      if (
+        adaptiveState.lastDefensiveDropAt &&
+        now - adaptiveState.lastDefensiveDropAt <
+          ADAPTIVE_QUALITY_AUTO_DROP_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+
+      adaptiveState.lastDefensiveDropAt = now;
+      desktopSettleSnapshotRef.current = null;
+      clearQualityRecoverySafetyTimeout();
+      clearDesktopQualityRestoreTimeouts();
+      applyDesktopMovingQuality();
+    };
     const applyScenePresentationQuality = (
       activeMode = modeRef.current,
       tileset = tilesetRef.current
@@ -5549,6 +5724,40 @@ function findPickedInteractiveData(
       adaptiveQualityStateRef.current.sampleFrameCount += 1;
       adaptiveQualityStateRef.current.sampleFrameMsTotal += frameDeltaMs;
 
+      if (!isMobile && selectedDesktopQualityProfileId === "auto") {
+        if (frameDeltaMs >= ADAPTIVE_QUALITY_AUTO_SEVERE_FRAME_MS) {
+          adaptiveQualityStateRef.current.overloadFrameStreak = 0;
+          triggerAutoStabilityDrop({
+            holdMs: ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS + 1000,
+          });
+          resetAdaptiveQualityStats();
+          adaptiveQualityStateRef.current.lastFrameAt = now;
+          adaptiveQualityStateRef.current.sampleStartAt = now;
+          return;
+        }
+
+        if (frameDeltaMs >= ADAPTIVE_QUALITY_AUTO_DROP_FRAME_MS) {
+          adaptiveQualityStateRef.current.overloadFrameStreak += 1;
+        } else {
+          adaptiveQualityStateRef.current.overloadFrameStreak = Math.max(
+            0,
+            adaptiveQualityStateRef.current.overloadFrameStreak - 1
+          );
+        }
+
+        if (
+          adaptiveQualityStateRef.current.overloadFrameStreak >=
+          ADAPTIVE_QUALITY_AUTO_DROP_STREAK_LIMIT
+        ) {
+          adaptiveQualityStateRef.current.overloadFrameStreak = 0;
+          triggerAutoStabilityDrop();
+          resetAdaptiveQualityStats();
+          adaptiveQualityStateRef.current.lastFrameAt = now;
+          adaptiveQualityStateRef.current.sampleStartAt = now;
+          return;
+        }
+      }
+
       if (adaptiveQualityStateRef.current.isUltraActive) {
         if (frameDeltaMs > ADAPTIVE_QUALITY_DROP_FRAME_MS) {
           adaptiveQualityStateRef.current.dropFrameStreak += 1;
@@ -5592,6 +5801,18 @@ function findPickedInteractiveData(
       const avgFrameMs = totalFrameMs / frameCount;
       const avgFps = avgFrameMs > 0 ? 1000 / avgFrameMs : 0;
       if (!Number.isFinite(avgFps) || avgFps <= 0) return;
+
+      if (
+        !isMobile &&
+        selectedDesktopQualityProfileId === "auto" &&
+        avgFrameMs >= ADAPTIVE_QUALITY_AUTO_SLOW_AVG_FRAME_MS
+      ) {
+        triggerAutoStabilityDrop({
+          holdMs: ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS,
+        });
+        return;
+      }
+
       if (adaptiveQualityStateRef.current.isUltraActive) return;
 
       if (isMobile) {
@@ -5607,7 +5828,9 @@ function findPickedInteractiveData(
       if (
         !isMobile &&
         selectedDesktopQualityProfile.enableUltra &&
-        avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps
+        avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps &&
+        (selectedDesktopQualityProfileId !== "auto" ||
+          getAutoRecoveryBlockDelayMs() <= 0)
       ) {
         applyDesktopUltraQuality();
       }
@@ -5778,6 +6001,7 @@ function findPickedInteractiveData(
       adaptiveQualityStateRef.current.isUltraActive = false;
       adaptiveQualityStateRef.current.isMoving = false;
       resetAdaptiveQualityStats();
+      clearAdaptiveQualityPressure();
       applyBalancedViewerQuality();
       viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
       setSceneGoogleTilesetsVisibility(viewer, false);
@@ -6181,6 +6405,7 @@ function findPickedInteractiveData(
       fpsBenchmarkActiveRef.current = false;
       adaptiveQualityStateRef.current.isMoving = false;
       adaptiveQualityStateRef.current.isUltraActive = false;
+      clearAdaptiveQualityPressure();
       fpsBenchmarkQualityLockRef.current = false;
       fpsBenchmarkLastSegmentKeyRef.current = "";
       applyFpsBenchmarkMovingQualityRef.current = () => {};
