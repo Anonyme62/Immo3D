@@ -76,6 +76,7 @@ const DESKTOP_GLOBE_SSE_ULTRA = 0.9;
 const DESKTOP_QUALITY_RESTORE_DELAY_MS = 120;
 const DESKTOP_QUALITY_ULTRA_DELAY_MS = 780;
 const DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS = 1150;
+const DESKTOP_AUTO_INPUT_INTENT_MS = 1400;
 const DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS = 180;
 const DESKTOP_AUTO_SETTLE_POSITION_EPSILON_METERS = 1.8;
 const DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD = Cesium.Math.toRadians(0.18);
@@ -2071,6 +2072,7 @@ export default function CesiumMap({
   const fpsBenchmarkQualityLockRef = useRef(false);
   const fpsBenchmarkLastSegmentKeyRef = useRef("");
   const desktopIdleRestoreAttemptRef = useRef(0);
+  const desktopPointerNavigationActiveRef = useRef(false);
   const desktopSettleSnapshotRef = useRef(null);
   const desktopMovingVisibleUntilRef = useRef(0);
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
@@ -4261,6 +4263,32 @@ function findPickedInteractiveData(
       }, Math.max(0, Number(delayMs) || 0));
     };
 
+    const markDesktopNavigationIntent = (
+      intentMs = DESKTOP_AUTO_INPUT_INTENT_MS,
+      forceMovingQuality = false
+    ) => {
+      if (useTouchNavigation) return;
+      if (selectedDesktopQualityProfileId !== "auto") return;
+
+      desktopMovingVisibleUntilRef.current = Math.max(
+        desktopMovingVisibleUntilRef.current,
+        Date.now() + Math.max(0, Number(intentMs) || 0)
+      );
+
+      if (fpsBenchmarkQualityLockRef.current) return;
+
+      if (!forceMovingQuality && currentQualityTelemetryRef.current?.moving === true) {
+        return;
+      }
+
+      adaptiveQualityStateRef.current.isMoving = true;
+      desktopSettleSnapshotRef.current = null;
+      clearQualityRecoverySafetyTimeout();
+      clearDesktopQualityRestoreTimeouts();
+      applyDesktopMovingQuality();
+      scheduleQualityRecoverySafety();
+    };
+
     const startSatelliteLoadWatchdog = () => {
       clearSatelliteLoadWatchdogTimeout();
       satelliteLoadWatchdogTimeoutRef.current = window.setTimeout(() => {
@@ -4595,6 +4623,17 @@ function findPickedInteractiveData(
       resetAdaptiveQualityStats();
 
       if (shouldMove) {
+        if (!isMobile && selectedDesktopQualityProfileId === "auto") {
+          desktopMovingVisibleUntilRef.current = Math.max(
+            desktopMovingVisibleUntilRef.current,
+            Date.now() +
+              Math.max(
+                DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS,
+                Number(segmentMeta?.durationMs) || 0
+              )
+          );
+          desktopSettleSnapshotRef.current = null;
+        }
         clearDesktopQualityRestoreTimeouts();
         clearMobileQualityRestoreTimeout();
         clearMobileUltraRestoreTimeout();
@@ -4634,6 +4673,17 @@ function findPickedInteractiveData(
     const applyBenchmarkMovingQualityLock = (durationMs = null) => {
       fpsBenchmarkQualityLockRef.current = true;
       adaptiveQualityStateRef.current.isMoving = true;
+      if (!isMobile && selectedDesktopQualityProfileId === "auto") {
+        desktopMovingVisibleUntilRef.current = Math.max(
+          desktopMovingVisibleUntilRef.current,
+          Date.now() +
+            Math.max(
+              DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS,
+              Number(durationMs) || 0
+            )
+        );
+        desktopSettleSnapshotRef.current = null;
+      }
       clearQualityRecoverySafetyTimeout();
       clearDesktopQualityRestoreTimeouts();
       clearMobileQualityRestoreTimeout();
@@ -5213,6 +5263,32 @@ function findPickedInteractiveData(
       }
     }
 
+    const handleDesktopPointerDown = (event) => {
+      if (useTouchNavigation) return;
+      if (event?.button === 2) return;
+      desktopPointerNavigationActiveRef.current = true;
+      markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
+    };
+
+    const handleDesktopPointerMove = (event) => {
+      if (useTouchNavigation) return;
+      const buttons = Number(event?.buttons) || 0;
+      const isDragging =
+        desktopPointerNavigationActiveRef.current || Boolean(buttons & 1) || Boolean(buttons & 4);
+      if (!isDragging) return;
+      desktopPointerNavigationActiveRef.current = true;
+      markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
+    };
+
+    const handleDesktopPointerUp = () => {
+      desktopPointerNavigationActiveRef.current = false;
+    };
+
+    const handleDesktopWheelIntent = () => {
+      if (useTouchNavigation) return;
+      markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
+    };
+
     const handleDesktopMoveStart = () => {
       if (useTouchNavigation) return;
       if (fpsBenchmarkQualityLockRef.current) {
@@ -5293,6 +5369,21 @@ function findPickedInteractiveData(
       viewer.camera.moveEnd.addEventListener(handleMobileMoveEnd);
       applyMobileIdleQuality();
     } else {
+      viewer.canvas.addEventListener("mousedown", handleDesktopPointerDown, {
+        passive: true,
+      });
+      viewer.canvas.addEventListener("mousemove", handleDesktopPointerMove, {
+        passive: true,
+      });
+      window.addEventListener("mouseup", handleDesktopPointerUp, {
+        passive: true,
+      });
+      viewer.canvas.addEventListener("mouseleave", handleDesktopPointerUp, {
+        passive: true,
+      });
+      viewer.container.addEventListener("wheel", handleDesktopWheelIntent, {
+        passive: true,
+      });
       viewer.camera.moveStart.addEventListener(handleDesktopMoveStart);
       viewer.camera.moveEnd.addEventListener(handleDesktopMoveEnd);
       applyDesktopIdleQuality();
@@ -5372,6 +5463,11 @@ function findPickedInteractiveData(
         viewer.camera.moveStart.removeEventListener(handleMobileMoveStart);
         viewer.camera.moveEnd.removeEventListener(handleMobileMoveEnd);
       } else if (!viewer.isDestroyed()) {
+        viewer.canvas.removeEventListener("mousedown", handleDesktopPointerDown);
+        viewer.canvas.removeEventListener("mousemove", handleDesktopPointerMove);
+        window.removeEventListener("mouseup", handleDesktopPointerUp);
+        viewer.canvas.removeEventListener("mouseleave", handleDesktopPointerUp);
+        viewer.container.removeEventListener("wheel", handleDesktopWheelIntent);
         viewer.camera.moveStart.removeEventListener(handleDesktopMoveStart);
         viewer.camera.moveEnd.removeEventListener(handleDesktopMoveEnd);
       }
