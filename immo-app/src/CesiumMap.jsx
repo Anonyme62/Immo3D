@@ -324,7 +324,6 @@ const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
 const FPS_BENCHMARK_VERSION = 6;
 const FPS_BENCHMARK_ROUTE_VERSION = 8;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
-const FPS_BENCHMARK_COLD_START_QUALITY_LOCK_MS = 420;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
 const FPS_BENCHMARK_MAX_DISTANCE_METERS = 980;
 const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.92;
@@ -5292,7 +5291,6 @@ function findPickedInteractiveData(
     const handleDesktopMoveStart = () => {
       if (useTouchNavigation) return;
       if (fpsBenchmarkQualityLockRef.current) {
-        adaptiveQualityStateRef.current.isMoving = true;
         return;
       }
       if (selectedDesktopQualityProfileId === "auto") {
@@ -5314,7 +5312,6 @@ function findPickedInteractiveData(
     const handleDesktopMoveEnd = () => {
       if (useTouchNavigation) return;
       if (fpsBenchmarkQualityLockRef.current) {
-        adaptiveQualityStateRef.current.isMoving = true;
         return;
       }
       adaptiveQualityStateRef.current.isMoving = false;
@@ -5331,7 +5328,6 @@ function findPickedInteractiveData(
     const handleMobileMoveStart = () => {
       if (!useTouchNavigation) return;
       if (fpsBenchmarkQualityLockRef.current) {
-        adaptiveQualityStateRef.current.isMoving = true;
         return;
       }
       adaptiveQualityStateRef.current.isMoving = true;
@@ -5344,7 +5340,6 @@ function findPickedInteractiveData(
     const handleMobileMoveEnd = () => {
       if (!useTouchNavigation) return;
       if (fpsBenchmarkQualityLockRef.current) {
-        adaptiveQualityStateRef.current.isMoving = true;
         return;
       }
       adaptiveQualityStateRef.current.isMoving = false;
@@ -6866,13 +6861,7 @@ function findPickedInteractiveData(
     if (initialSegmentMeta?.key) {
       fpsBenchmarkLastSegmentKeyRef.current = initialSegmentMeta.key;
     }
-    if (isColdStart) {
-      applyFpsBenchmarkMovingQualityRef.current?.(
-        FPS_BENCHMARK_COLD_START_QUALITY_LOCK_MS
-      );
-    } else {
-      applyFpsBenchmarkSegmentQualityRef.current?.(initialSegmentMeta);
-    }
+    applyFpsBenchmarkMovingQualityRef.current?.();
     restoreSerializableCameraState(viewer, startCamera);
     viewer.scene.requestRender();
 
@@ -6890,6 +6879,8 @@ function findPickedInteractiveData(
         finishFpsBenchmarkRun(viewer);
         return;
       }
+
+      applyFpsBenchmarkSegmentQualityRef.current?.(initialSegmentMeta);
 
       const telemetryStartedAtMs = Date.now();
       const anchor = Cesium.Cartesian3.fromDegrees(
