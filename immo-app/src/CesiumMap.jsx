@@ -330,6 +330,7 @@ const FPS_BENCHMARK_VERSION = 6;
 const FPS_BENCHMARK_ROUTE_VERSION = 10;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
 const FPS_BENCHMARK_INTERRUPT_FRAME_GAP_MS = 2000;
+const FPS_BENCHMARK_COLD_STABILIZE_WINDOW_MS = 1000;
 const FPS_BENCHMARK_RECORDING_DURATION_MS = 26000;
 const FPS_BENCHMARK_RECORDING_MIN_DURATION_MS = 12000;
 const FPS_BENCHMARK_RECORDING_MIN_SAMPLE_COUNT = 120;
@@ -1334,6 +1335,19 @@ function sanitizeBenchmarkHistoryEntry(entry) {
     String(entry.runKind || "").toLowerCase() === "cold" || Boolean(entry.coldStart)
       ? "cold"
       : "warm";
+  const stabilizedStats =
+    entry?.stabilizedStats &&
+    Number.isFinite(Number(entry.stabilizedStats.avgFps))
+      ? {
+          sampleCount: Math.max(0, Number(entry.stabilizedStats.sampleCount || 0)),
+          durationMs: Math.max(0, Number(entry.stabilizedStats.durationMs || 0)),
+          avgFps: roundBenchmarkValue(Number(entry.stabilizedStats.avgFps)),
+          minFps: roundBenchmarkValue(Number(entry.stabilizedStats.minFps)),
+          avgFrameMs: roundBenchmarkValue(Number(entry.stabilizedStats.avgFrameMs)),
+          p95FrameMs: roundBenchmarkValue(Number(entry.stabilizedStats.p95FrameMs)),
+          maxFrameMs: roundBenchmarkValue(Number(entry.stabilizedStats.maxFrameMs)),
+        }
+      : null;
   return {
     ranAt: String(entry.ranAt || ""),
     avgFps: roundBenchmarkValue(Number(entry.avgFps)),
@@ -1348,6 +1362,11 @@ function sanitizeBenchmarkHistoryEntry(entry) {
     coldStart: Boolean(entry.coldStart),
     distanceMeters: Math.max(0, Number(entry.distanceMeters || 0)),
     routeKind: String(entry.routeKind || ""),
+    stabilizedWindowMs: Math.max(
+      0,
+      Number(entry.stabilizedWindowMs || FPS_BENCHMARK_COLD_STABILIZE_WINDOW_MS)
+    ),
+    stabilizedStats,
   };
 }
 
@@ -1620,6 +1639,20 @@ function buildFpsBenchmarkResult(
       tilesetSse: roundBenchmarkValue(Number(sample.tilesetSse), 2),
     }));
 
+  const stabilizedFrameSamples = safeFrameSamples.filter(
+    (sample) =>
+      Number.isFinite(Number(sample?.elapsedMs)) &&
+      Number(sample.elapsedMs) >= FPS_BENCHMARK_COLD_STABILIZE_WINDOW_MS
+  );
+  const shouldIncludeStabilizedStats =
+    String(extra?.runKind || "").toLowerCase() === "cold";
+  const stabilizedFrameStats =
+    shouldIncludeStabilizedStats && stabilizedFrameSamples.length > 0
+      ? buildBenchmarkFrameStats(
+          stabilizedFrameSamples.map((sample) => Number(sample.frameMs))
+        )
+      : null;
+
   return {
     ranAt: new Date().toISOString(),
     ...frameStats,
@@ -1645,6 +1678,8 @@ function buildFpsBenchmarkResult(
       labelField: "phaseLabel",
       orderField: "phaseOrder",
     }),
+    stabilizedWindowMs: FPS_BENCHMARK_COLD_STABILIZE_WINDOW_MS,
+    stabilizedStats: stabilizedFrameStats,
     ...extra,
   };
 }
@@ -1663,6 +1698,21 @@ function formatFpsBenchmarkSummary(result) {
   return parts.join(" · ");
 }
 
+function formatFpsBenchmarkStabilizedSummary(result) {
+  const stabilizedStats = result?.stabilizedStats;
+  if (!stabilizedStats || !Number.isFinite(stabilizedStats.avgFps)) return "";
+  const parts = [
+    `stable avg ${stabilizedStats.avgFps} fps`,
+    Number.isFinite(stabilizedStats.p95FrameMs)
+      ? `stable p95 ${stabilizedStats.p95FrameMs} ms`
+      : null,
+    Number.isFinite(stabilizedStats.maxFrameMs)
+      ? `stable max ${stabilizedStats.maxFrameMs} ms`
+      : null,
+  ].filter(Boolean);
+  return parts.join(" | ");
+}
+
 function formatFpsBenchmarkSummaryDisplay(result) {
   const baseSummary = formatFpsBenchmarkSummary(result);
   if (!baseSummary) return "";
@@ -1671,7 +1721,11 @@ function formatFpsBenchmarkSummaryDisplay(result) {
     .join(" | ")
     .split(" · ")
     .join(" | ");
-  return `${result.runKind === "cold" ? "cold" : "warm"} | ${normalizedSummary}`;
+  const stabilizedSummary =
+    result?.runKind === "cold" ? formatFpsBenchmarkStabilizedSummary(result) : "";
+  return `${
+    result.runKind === "cold" ? "cold" : "warm"
+  } | ${normalizedSummary}${stabilizedSummary ? ` | ${stabilizedSummary}` : ""}`;
 }
 
 function buildFpsBenchmarkLogPayload(result, history = []) {
