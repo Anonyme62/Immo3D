@@ -4610,7 +4610,6 @@ function findPickedInteractiveData(
 
     const applyBenchmarkSegmentQuality = (segmentMeta) => {
       if (!segmentMeta) return;
-      if (fpsBenchmarkQualityLockRef.current) return;
 
       const shouldMove =
         typeof segmentMeta.benchmarkMoving === "boolean"
