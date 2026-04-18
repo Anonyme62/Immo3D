@@ -2451,6 +2451,11 @@ export default function CesiumMap({
   const placementGhostEntityRef = useRef(null);
   const entitiesRef = useRef([]);
   const markerDataByIdRef = useRef(new Map());
+  const markerRenderContextRef = useRef({
+    biensAvecCoordonnees: [],
+    customMarkers: [],
+    addressAnchorAssignments: new Map(),
+  });
   const modeRef = useRef(null);
   const modeTransitionTimeoutRef = useRef(null);
   const modeTransitionVisualTimeoutRef = useRef(null);
@@ -2509,6 +2514,11 @@ export default function CesiumMap({
     movingStateApplied: false,
   });
   const markerLodSettleTimeoutRef = useRef(null);
+  const markerRefineRuntimeRef = useRef({
+    timeoutId: null,
+    requestId: 0,
+    lastAppliedSignature: "",
+  });
   const fpsBenchmarkRafRef = useRef(null);
   const fpsBenchmarkStartTimeoutRef = useRef(null);
   const fpsBenchmarkRecordingRafRef = useRef(null);
@@ -6099,6 +6109,11 @@ function findPickedInteractiveData(
         biensAvecCoordonnees.length > 0
           ? buildAddressAnchorAssignments(biensAvecCoordonnees, currentSelectedBienId)
           : new Map();
+      markerRenderContextRef.current = {
+        biensAvecCoordonnees,
+        customMarkers: [...customMarkers],
+        addressAnchorAssignments,
+      };
       const stackGroupsByAnchorId = new Map();
 
       biensAvecCoordonnees.forEach((bien) => {
@@ -6166,33 +6181,6 @@ function findPickedInteractiveData(
         );
       }
 
-      const shouldUseMeshClampForMarkers =
-        !isOsmMode &&
-        tilesetRef.current?.tilesLoaded &&
-        (SATELLITE_USE_MESH_CLAMP_FOR_MARKERS ||
-          (isMobile && SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE));
-      const selectClosestPositionIndexes = (positions, limit) => {
-        if (!Array.isArray(positions) || positions.length === 0) return [];
-        const safeLimit = Math.max(0, Math.min(limit, positions.length));
-        if (safeLimit === 0) return [];
-        if (safeLimit >= positions.length) {
-          return positions.map((_, index) => index);
-        }
-
-        const cameraPosition = viewer.camera?.positionWC;
-        if (!cameraPosition) {
-          return positions.slice(0, safeLimit).map((_, index) => index);
-        }
-
-        return positions
-          .map((position, index) => ({
-            index,
-            distanceSquared: Cesium.Cartesian3.distanceSquared(cameraPosition, position),
-          }))
-          .sort((left, right) => left.distanceSquared - right.distanceSquared)
-          .slice(0, safeLimit)
-          .map((entry) => entry.index);
-      };
       const buildBienPositionById = (positions) => {
         const bienPositionById = new Map();
         biensAvecCoordonnees.forEach((bien, index) => {
@@ -6357,100 +6345,6 @@ function findPickedInteractiveData(
         customEntitiesByIndex[markerIndex] = entity;
       });
 
-      const refineMarkerHeightsWithClamp = async () => {
-        const refineStartedAt = performance.now();
-        const clampedBienPositions = [...finalBienPositions];
-        const clampedCustomPositions = [...finalCustomPositions];
-        const totalClampCandidateCount = rawBienPositions.length + rawCustomPositions.length;
-        try {
-          const maxClampPositions = isMobile
-            ? SATELLITE_CLAMP_MAX_POSITIONS_MOBILE
-            : SATELLITE_CLAMP_MAX_POSITIONS;
-
-          if (rawBienPositions.length > 0) {
-            const bienIndexesToClamp = selectClosestPositionIndexes(
-              rawBienPositions,
-              maxClampPositions
-            );
-            const sampleBienPositions = bienIndexesToClamp.map(
-              (index) => rawBienPositions[index]
-            );
-            const clampedBiens = await withPromiseTimeout(
-              viewer.scene.clampToHeightMostDetailed(sampleBienPositions),
-              SATELLITE_CLAMP_TIMEOUT_MS,
-              "CLAMP_TIMEOUT_BIENS",
-              "CLAMP_TIMEOUT_BIENS"
-            );
-            if (!cancelled && Array.isArray(clampedBiens)) {
-              clampedBiens.forEach((position, sampledIndex) => {
-                const index = bienIndexesToClamp[sampledIndex];
-                const elevated = elevateCartesianPosition(position);
-                if (elevated) {
-                  clampedBienPositions[index] = elevated;
-                  return;
-                }
-                const bien = biensAvecCoordonnees[index];
-                clampedBienPositions[index] = buildFallbackSatellitePosition(
-                  bien.lon,
-                  bien.lat
-                );
-              });
-            }
-          }
-
-          if (rawCustomPositions.length > 0) {
-            const customIndexesToClamp = selectClosestPositionIndexes(
-              rawCustomPositions,
-              maxClampPositions
-            );
-            const sampleCustomPositions = customIndexesToClamp.map(
-              (index) => rawCustomPositions[index]
-            );
-            const clampedCustomMarkers = await withPromiseTimeout(
-              viewer.scene.clampToHeightMostDetailed(sampleCustomPositions),
-              SATELLITE_CLAMP_TIMEOUT_MS,
-              "CLAMP_TIMEOUT_CUSTOM",
-              "CLAMP_TIMEOUT_CUSTOM"
-            );
-            if (!cancelled && Array.isArray(clampedCustomMarkers)) {
-              clampedCustomMarkers.forEach((position, sampledIndex) => {
-                const index = customIndexesToClamp[sampledIndex];
-                const elevated = elevateCartesianPosition(position);
-                if (elevated) {
-                  clampedCustomPositions[index] = elevated;
-                  return;
-                }
-                const marker = customMarkers[index];
-                clampedCustomPositions[index] = buildFallbackSatellitePosition(
-                  marker.lon,
-                  marker.lat
-                );
-              });
-            }
-          }
-        } catch (error) {
-          if (
-            error?.code !== "CLAMP_TIMEOUT_BIENS" &&
-            error?.code !== "CLAMP_TIMEOUT_CUSTOM"
-          ) {
-            console.error("Erreur clamp reperes satellite :", error);
-          }
-        }
-
-        if (cancelled) return;
-        applyBienEntityPositions(clampedBienPositions);
-        applyCustomEntityPositions(clampedCustomPositions);
-        recordMapPerfEvent("marker_refine_complete", {
-          durationMs: performance.now() - refineStartedAt,
-          count: totalClampCandidateCount,
-        });
-        viewer.scene.requestRender();
-      };
-
-      if (shouldUseMeshClampForMarkers) {
-        void refineMarkerHeightsWithClamp();
-      }
-
       if (!hasInitialFlyRef.current) {
         const initialBien = getReferenceBien();
         if (initialBien) {
@@ -6467,7 +6361,375 @@ function findPickedInteractiveData(
     return () => {
       cancelled = true;
     };
-  }, [markerRenderKey, customMarkers, tilesReadyVersion]);
+  }, [markerRenderKey, customMarkers, mapMode, canUseGoogle3D]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    let cancelled = false;
+    const runtime = markerRefineRuntimeRef.current;
+
+    const clearScheduledMarkerRefine = () => {
+      if (runtime.timeoutId) {
+        window.clearTimeout(runtime.timeoutId);
+        runtime.timeoutId = null;
+      }
+    };
+
+    clearScheduledMarkerRefine();
+
+    const isSatelliteMode = canUseGoogle3D && mapMode === "google3d";
+    const shouldUseMeshClampForMarkers =
+      isSatelliteMode &&
+      tilesetRef.current?.tilesLoaded &&
+      (SATELLITE_USE_MESH_CLAMP_FOR_MARKERS ||
+        (isMobile && SATELLITE_USE_MESH_CLAMP_FOR_MARKERS_MOBILE));
+
+    if (!shouldUseMeshClampForMarkers) {
+      runtime.lastAppliedSignature = "";
+      return () => {
+        cancelled = true;
+        clearScheduledMarkerRefine();
+        runtime.requestId += 1;
+      };
+    }
+
+    const renderContext = markerRenderContextRef.current || {};
+    const initialBienCount = Array.isArray(renderContext.biensAvecCoordonnees)
+      ? renderContext.biensAvecCoordonnees.length
+      : 0;
+    const initialCustomCount = Array.isArray(renderContext.customMarkers)
+      ? renderContext.customMarkers.length
+      : 0;
+
+    if (initialBienCount === 0 && initialCustomCount === 0) {
+      return () => {
+        cancelled = true;
+        clearScheduledMarkerRefine();
+        runtime.requestId += 1;
+      };
+    }
+
+    const refineSignature = [
+      isSatelliteMode ? "sat" : "osm",
+      Number(tilesReadyVersion) || 0,
+      markerRenderKey,
+      initialCustomCount,
+      isMobile ? 1 : 0,
+    ].join("|");
+
+    const scheduleMarkerRefine = (
+      delayMs = SATELLITE_MARKER_LOD_SETTLE_DELAY_MS
+    ) => {
+      if (cancelled) return;
+      clearScheduledMarkerRefine();
+      runtime.timeoutId = window.setTimeout(() => {
+        runtime.timeoutId = null;
+        void runMarkerRefine();
+      }, Math.max(0, Number(delayMs) || 0));
+    };
+
+    const runMarkerRefine = async () => {
+      if (cancelled || !viewer || viewer.isDestroyed()) return;
+      if (runtime.lastAppliedSignature === refineSignature) return;
+
+      if (
+        adaptiveQualityStateRef.current.isMoving ||
+        fpsBenchmarkActiveRef.current
+      ) {
+        scheduleMarkerRefine();
+        return;
+      }
+
+      const currentContext = markerRenderContextRef.current || {};
+      const biensAvecCoordonnees = Array.isArray(
+        currentContext.biensAvecCoordonnees
+      )
+        ? currentContext.biensAvecCoordonnees
+        : [];
+      const customMarkersForRefine = Array.isArray(currentContext.customMarkers)
+        ? currentContext.customMarkers
+        : [];
+      const addressAnchorAssignments =
+        currentContext.addressAnchorAssignments instanceof Map
+          ? currentContext.addressAnchorAssignments
+          : new Map();
+
+      if (
+        biensAvecCoordonnees.length === 0 &&
+        customMarkersForRefine.length === 0
+      ) {
+        runtime.lastAppliedSignature = refineSignature;
+        return;
+      }
+
+      const bienEntitiesByIndex = entitiesRef.current;
+      const customEntitiesByIndex = customMarkerEntitiesRef.current;
+      if (
+        bienEntitiesByIndex.length < biensAvecCoordonnees.length ||
+        customEntitiesByIndex.length < customMarkersForRefine.length
+      ) {
+        scheduleMarkerRefine(120);
+        return;
+      }
+
+      const buildFallbackSatellitePosition = (lon, lat) => {
+        const cartographic = Cesium.Cartographic.fromDegrees(lon, lat);
+        const surfaceHeight = getSurfaceHeight(viewer.scene, cartographic);
+        const markerHeight = Number.isFinite(surfaceHeight)
+          ? surfaceHeight + SATELLITE_MARKER_HEIGHT_OFFSET_METERS
+          : SATELLITE_MARKER_FALLBACK_HEIGHT_METERS;
+        return Cesium.Cartesian3.fromRadians(
+          cartographic.longitude,
+          cartographic.latitude,
+          markerHeight
+        );
+      };
+
+      const elevateCartesianPosition = (position) => {
+        if (!position) return null;
+        const cartographic = Cesium.Cartographic.fromCartesian(position);
+        if (!cartographic) return null;
+        return Cesium.Cartesian3.fromRadians(
+          cartographic.longitude,
+          cartographic.latitude,
+          (cartographic.height || 0) + SATELLITE_MARKER_HEIGHT_OFFSET_METERS
+        );
+      };
+
+      const rawBienPositions = biensAvecCoordonnees.map((bien) =>
+        Cesium.Cartesian3.fromDegrees(bien.lon, bien.lat, 0)
+      );
+      const rawCustomPositions = customMarkersForRefine.map((marker) =>
+        Cesium.Cartesian3.fromDegrees(marker.lon, marker.lat, 0)
+      );
+
+      const selectClosestPositionIndexes = (positions, limit) => {
+        if (!Array.isArray(positions) || positions.length === 0) return [];
+        const safeLimit = Math.max(0, Math.min(limit, positions.length));
+        if (safeLimit === 0) return [];
+        if (safeLimit >= positions.length) {
+          return positions.map((_, index) => index);
+        }
+
+        const cameraPosition = viewer.camera?.positionWC;
+        if (!cameraPosition) {
+          return positions.slice(0, safeLimit).map((_, index) => index);
+        }
+
+        return positions
+          .map((position, index) => ({
+            index,
+            distanceSquared: Cesium.Cartesian3.distanceSquared(
+              cameraPosition,
+              position
+            ),
+          }))
+          .sort((left, right) => left.distanceSquared - right.distanceSquared)
+          .slice(0, safeLimit)
+          .map((entry) => entry.index);
+      };
+
+      const buildBienPositionById = (positions) => {
+        const bienPositionById = new Map();
+        biensAvecCoordonnees.forEach((bien, index) => {
+          bienPositionById.set(bien.id, positions[index] || rawBienPositions[index]);
+        });
+        return bienPositionById;
+      };
+
+      const resolveBienPointPosition = (
+        bien,
+        index,
+        positions,
+        bienPositionById = buildBienPositionById(positions)
+      ) => {
+        const basePosition =
+          bienPositionById.get(bien.id) || positions[index] || rawBienPositions[index];
+        const anchorBienId = addressAnchorAssignments.get(bien.id);
+        return anchorBienId
+          ? bienPositionById.get(anchorBienId) || basePosition
+          : basePosition;
+      };
+
+      const applyBienEntityPositions = (positions) => {
+        const bienPositionById = buildBienPositionById(positions);
+        biensAvecCoordonnees.forEach((bien, index) => {
+          const entity = bienEntitiesByIndex[index];
+          if (!entity) return;
+          const resolvedPosition = resolveBienPointPosition(
+            bien,
+            index,
+            positions,
+            bienPositionById
+          );
+          entity.position = resolvedPosition;
+          entity.markerPositionCartesian = resolvedPosition;
+        });
+      };
+
+      const applyCustomEntityPositions = (positions) => {
+        customMarkersForRefine.forEach((marker, markerIndex) => {
+          const entity = customEntitiesByIndex[markerIndex];
+          if (!entity) return;
+          const resolvedPosition =
+            positions[markerIndex] || rawCustomPositions[markerIndex];
+          entity.position = resolvedPosition;
+          entity.markerPositionCartesian = resolvedPosition;
+        });
+      };
+
+      const requestId = runtime.requestId + 1;
+      runtime.requestId = requestId;
+      const refineStartedAt = performance.now();
+      const clampedBienPositions = biensAvecCoordonnees.map((bien, index) => {
+        const existingPosition = bienEntitiesByIndex[index]?.markerPositionCartesian;
+        return existingPosition || buildFallbackSatellitePosition(bien.lon, bien.lat);
+      });
+      const clampedCustomPositions = customMarkersForRefine.map(
+        (marker, markerIndex) => {
+          const existingPosition =
+            customEntitiesByIndex[markerIndex]?.markerPositionCartesian;
+          return (
+            existingPosition ||
+            buildFallbackSatellitePosition(marker.lon, marker.lat)
+          );
+        }
+      );
+      const totalClampCandidateCount =
+        rawBienPositions.length + rawCustomPositions.length;
+
+      try {
+        const maxClampPositions = isMobile
+          ? SATELLITE_CLAMP_MAX_POSITIONS_MOBILE
+          : SATELLITE_CLAMP_MAX_POSITIONS;
+
+        if (rawBienPositions.length > 0) {
+          const bienIndexesToClamp = selectClosestPositionIndexes(
+            rawBienPositions,
+            maxClampPositions
+          );
+          const sampleBienPositions = bienIndexesToClamp.map(
+            (index) => rawBienPositions[index]
+          );
+          const clampedBiens = await withPromiseTimeout(
+            viewer.scene.clampToHeightMostDetailed(sampleBienPositions),
+            SATELLITE_CLAMP_TIMEOUT_MS,
+            "CLAMP_TIMEOUT_BIENS",
+            "CLAMP_TIMEOUT_BIENS"
+          );
+          if (
+            cancelled ||
+            viewer.isDestroyed() ||
+            runtime.requestId !== requestId
+          ) {
+            return;
+          }
+          if (Array.isArray(clampedBiens)) {
+            clampedBiens.forEach((position, sampledIndex) => {
+              const index = bienIndexesToClamp[sampledIndex];
+              const elevated = elevateCartesianPosition(position);
+              if (elevated) {
+                clampedBienPositions[index] = elevated;
+                return;
+              }
+              const bien = biensAvecCoordonnees[index];
+              clampedBienPositions[index] = buildFallbackSatellitePosition(
+                bien.lon,
+                bien.lat
+              );
+            });
+          }
+        }
+
+        if (rawCustomPositions.length > 0) {
+          const customIndexesToClamp = selectClosestPositionIndexes(
+            rawCustomPositions,
+            maxClampPositions
+          );
+          const sampleCustomPositions = customIndexesToClamp.map(
+            (index) => rawCustomPositions[index]
+          );
+          const clampedCustomMarkers = await withPromiseTimeout(
+            viewer.scene.clampToHeightMostDetailed(sampleCustomPositions),
+            SATELLITE_CLAMP_TIMEOUT_MS,
+            "CLAMP_TIMEOUT_CUSTOM",
+            "CLAMP_TIMEOUT_CUSTOM"
+          );
+          if (
+            cancelled ||
+            viewer.isDestroyed() ||
+            runtime.requestId !== requestId
+          ) {
+            return;
+          }
+          if (Array.isArray(clampedCustomMarkers)) {
+            clampedCustomMarkers.forEach((position, sampledIndex) => {
+              const index = customIndexesToClamp[sampledIndex];
+              const elevated = elevateCartesianPosition(position);
+              if (elevated) {
+                clampedCustomPositions[index] = elevated;
+                return;
+              }
+              const marker = customMarkersForRefine[index];
+              clampedCustomPositions[index] = buildFallbackSatellitePosition(
+                marker.lon,
+                marker.lat
+              );
+            });
+          }
+        }
+      } catch (error) {
+        if (
+          error?.code !== "CLAMP_TIMEOUT_BIENS" &&
+          error?.code !== "CLAMP_TIMEOUT_CUSTOM"
+        ) {
+          console.error("Erreur clamp reperes satellite :", error);
+        }
+      }
+
+      if (
+        cancelled ||
+        viewer.isDestroyed() ||
+        runtime.requestId !== requestId
+      ) {
+        return;
+      }
+
+      if (
+        adaptiveQualityStateRef.current.isMoving ||
+        fpsBenchmarkActiveRef.current
+      ) {
+        scheduleMarkerRefine();
+        return;
+      }
+
+      applyBienEntityPositions(clampedBienPositions);
+      applyCustomEntityPositions(clampedCustomPositions);
+      runtime.lastAppliedSignature = refineSignature;
+      recordMapPerfEvent("marker_refine_complete", {
+        durationMs: performance.now() - refineStartedAt,
+        count: totalClampCandidateCount,
+      });
+      viewer.scene.requestRender();
+    };
+
+    scheduleMarkerRefine(0);
+
+    return () => {
+      cancelled = true;
+      clearScheduledMarkerRefine();
+      runtime.requestId += 1;
+    };
+  }, [
+    canUseGoogle3D,
+    isMobile,
+    mapMode,
+    markerRenderKey,
+    customMarkers,
+    tilesReadyVersion,
+  ]);
 
   useEffect(() => {
     const nextData = new Map();
