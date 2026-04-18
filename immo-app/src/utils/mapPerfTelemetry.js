@@ -1,5 +1,11 @@
 const MAP_PERF_STORAGE_KEY = "immo3d_map_perf_telemetry_v1";
 const MAX_RECENT_EVENTS = 24;
+const TELEMETRY_WRITE_DEBOUNCE_MS = 1200;
+
+let telemetryCache = null;
+let telemetryLoaded = false;
+let telemetryWriteTimeoutId = null;
+let telemetryFlushListenerAttached = false;
 
 function nowIso() {
   return new Date().toISOString();
@@ -105,20 +111,59 @@ function parseTelemetry(value) {
   }
 }
 
-function readTelemetry() {
+function flushTelemetryToStorage() {
   const storage = safeReadStorage();
-  if (!storage) return createDefaultTelemetry();
-  return parseTelemetry(storage.getItem(MAP_PERF_STORAGE_KEY));
-}
-
-function writeTelemetry(nextTelemetry) {
-  const storage = safeReadStorage();
-  if (!storage) return;
+  if (!storage || !telemetryLoaded || !telemetryCache) return;
   try {
-    storage.setItem(MAP_PERF_STORAGE_KEY, JSON.stringify(nextTelemetry));
+    storage.setItem(MAP_PERF_STORAGE_KEY, JSON.stringify(telemetryCache));
   } catch {
     // Non-blocking: telemetry must never break UX.
   }
+}
+
+function ensureFlushOnPageHide() {
+  if (typeof window === "undefined" || telemetryFlushListenerAttached) return;
+  window.addEventListener(
+    "pagehide",
+    () => {
+      if (telemetryWriteTimeoutId) {
+        window.clearTimeout(telemetryWriteTimeoutId);
+        telemetryWriteTimeoutId = null;
+      }
+      flushTelemetryToStorage();
+    },
+    { capture: true }
+  );
+  telemetryFlushListenerAttached = true;
+}
+
+function scheduleTelemetryWrite() {
+  if (typeof window === "undefined") return;
+  ensureFlushOnPageHide();
+  if (telemetryWriteTimeoutId) return;
+  telemetryWriteTimeoutId = window.setTimeout(() => {
+    telemetryWriteTimeoutId = null;
+    flushTelemetryToStorage();
+  }, TELEMETRY_WRITE_DEBOUNCE_MS);
+}
+
+function readTelemetry() {
+  if (telemetryLoaded && telemetryCache) {
+    return telemetryCache;
+  }
+  const storage = safeReadStorage();
+  telemetryCache = storage
+    ? parseTelemetry(storage.getItem(MAP_PERF_STORAGE_KEY))
+    : createDefaultTelemetry();
+  telemetryLoaded = true;
+  ensureFlushOnPageHide();
+  return telemetryCache;
+}
+
+function writeTelemetry(nextTelemetry) {
+  telemetryCache = nextTelemetry || createDefaultTelemetry();
+  telemetryLoaded = true;
+  scheduleTelemetryWrite();
 }
 
 function updateAverage(previousAverage, nextValue, previousCount) {
@@ -251,6 +296,17 @@ export function recordMapPerfEvent(type, payload = {}) {
         peakRemainingTiles,
         moving: Boolean(payload.moving),
         mode: String(payload.mode || ""),
+        qualityPreset: String(payload.qualityPreset || ""),
+        qualityMoving:
+          typeof payload.qualityMoving === "boolean"
+            ? Boolean(payload.qualityMoving)
+            : null,
+        resolutionScale: roundMs(Number(payload.resolutionScale) * 100) / 100,
+        msaaSamples: Number.isFinite(Number(payload.msaaSamples))
+          ? Number(payload.msaaSamples)
+          : null,
+        globeSse: roundMs(Number(payload.globeSse) * 100) / 100,
+        tilesetSse: roundMs(Number(payload.tilesetSse) * 100) / 100,
       });
       break;
     }
@@ -275,6 +331,17 @@ export function recordMapPerfEvent(type, payload = {}) {
         moving: Boolean(payload.moving),
         remainingTiles,
         mode: String(payload.mode || ""),
+        qualityPreset: String(payload.qualityPreset || ""),
+        qualityMoving:
+          typeof payload.qualityMoving === "boolean"
+            ? Boolean(payload.qualityMoving)
+            : null,
+        resolutionScale: roundMs(Number(payload.resolutionScale) * 100) / 100,
+        msaaSamples: Number.isFinite(Number(payload.msaaSamples))
+          ? Number(payload.msaaSamples)
+          : null,
+        globeSse: roundMs(Number(payload.globeSse) * 100) / 100,
+        tilesetSse: roundMs(Number(payload.tilesetSse) * 100) / 100,
       });
       break;
     }

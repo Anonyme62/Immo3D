@@ -99,7 +99,7 @@ const MOBILE_QUALITY_PROFILE_DEFAULT = "auto";
 const MOBILE_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
 const DESKTOP_QUALITY_PROFILE_DEFAULT = "auto";
 const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
-  const DESKTOP_QUALITY_PROFILE_CONFIG = {
+const DESKTOP_QUALITY_PROFILE_CONFIG = {
   auto: {
     // Auto should feel like Google Earth Web while moving: prioritize fluidity,
     // then restore sharper quality once the camera settles.
@@ -107,6 +107,10 @@ const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
     movingGlobeSse: 2.05,
     movingTilesetSse: 22,
     movingMsaa: 1,
+    settleResolutionScale: 0.94,
+    settleGlobeSse: 1.62,
+    settleTilesetSse: 13.6,
+    settleMsaa: 1,
     idleResolutionScale: 1.06,
     idleGlobeSse: 1.28,
     idleTilesetSse: 9.2,
@@ -119,6 +123,7 @@ const DESKTOP_QUALITY_PROFILE_VALUES = ["auto", "high", "ultra", "perf"];
     premiumTilesetSse: 8.4,
     adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
     idleRestoreDelayMs: 720,
+    settleHoldMs: 900,
     ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
   },
   high: {
@@ -843,11 +848,24 @@ function getMobileQualityProfile(value, allowUltraFromDevice) {
 
 function getDesktopQualityProfile(value) {
   const normalized = normalizeDesktopQualityProfile(value);
+  const baseProfile =
+    DESKTOP_QUALITY_PROFILE_CONFIG[normalized] ||
+    DESKTOP_QUALITY_PROFILE_CONFIG[DESKTOP_QUALITY_PROFILE_DEFAULT];
   return {
-    ...(
-      DESKTOP_QUALITY_PROFILE_CONFIG[normalized] ||
-      DESKTOP_QUALITY_PROFILE_CONFIG[DESKTOP_QUALITY_PROFILE_DEFAULT]
-    ),
+    ...baseProfile,
+    settleResolutionScale: Number.isFinite(Number(baseProfile.settleResolutionScale))
+      ? Number(baseProfile.settleResolutionScale)
+      : Number(baseProfile.idleResolutionScale),
+    settleGlobeSse: Number.isFinite(Number(baseProfile.settleGlobeSse))
+      ? Number(baseProfile.settleGlobeSse)
+      : Number(baseProfile.idleGlobeSse),
+    settleTilesetSse: Number.isFinite(Number(baseProfile.settleTilesetSse))
+      ? Number(baseProfile.settleTilesetSse)
+      : Number(baseProfile.idleTilesetSse),
+    settleMsaa: Number.isFinite(Number(baseProfile.settleMsaa))
+      ? Number(baseProfile.settleMsaa)
+      : Number(baseProfile.idleMsaa),
+    settleHoldMs: Math.max(0, Number(baseProfile.settleHoldMs) || 0),
     enableUltra: normalized === "ultra",
   };
 }
@@ -2388,6 +2406,7 @@ export default function CesiumMap({
   const googleQualityTimeoutRef = useRef(null);
   const googleUltraQualityTimeoutRef = useRef(null);
   const desktopQualityRestoreTimeoutRef = useRef(null);
+  const desktopIdleFinalizeTimeoutRef = useRef(null);
   const desktopUltraRestoreTimeoutRef = useRef(null);
   const mobileQualityRestoreTimeoutRef = useRef(null);
   const mobileUltraRestoreTimeoutRef = useRef(null);
@@ -2758,6 +2777,9 @@ export default function CesiumMap({
       }
       if (desktopQualityRestoreTimeoutRef.current) {
         window.clearTimeout(desktopQualityRestoreTimeoutRef.current);
+      }
+      if (desktopIdleFinalizeTimeoutRef.current) {
+        window.clearTimeout(desktopIdleFinalizeTimeoutRef.current);
       }
       if (desktopUltraRestoreTimeoutRef.current) {
         window.clearTimeout(desktopUltraRestoreTimeoutRef.current);
@@ -4592,6 +4614,7 @@ function findPickedInteractiveData(
 
     const scheduleDesktopIdleRestore = (attemptId, delayMs) => {
       desktopQualityRestoreTimeoutRef.current = window.setTimeout(() => {
+        desktopQualityRestoreTimeoutRef.current = null;
         if (cancelled) return;
         if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
         if (adaptiveQualityStateRef.current.isMoving) return;
@@ -4621,6 +4644,49 @@ function findPickedInteractiveData(
             );
             return;
           }
+        }
+
+        const shouldUseDesktopSettleStage =
+          selectedDesktopQualityProfileId === "auto" &&
+          selectedDesktopQualityProfile.settleHoldMs > 0;
+        if (shouldUseDesktopSettleStage) {
+          applyDesktopSettleQuality();
+          desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+          desktopIdleFinalizeTimeoutRef.current = window.setTimeout(() => {
+            desktopIdleFinalizeTimeoutRef.current = null;
+            if (cancelled) return;
+            if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
+            if (adaptiveQualityStateRef.current.isMoving) return;
+
+            const currentSnapshot = captureQualityCameraSnapshot(viewer);
+            const previousSnapshot =
+              desktopSettleSnapshotRef.current || currentSnapshot;
+            if (!isQualityCameraSnapshotStable(previousSnapshot, currentSnapshot)) {
+              desktopSettleSnapshotRef.current = currentSnapshot;
+              scheduleDesktopIdleRestore(
+                attemptId,
+                DESKTOP_AUTO_SETTLE_RECHECK_DELAY_MS
+              );
+              return;
+            }
+
+            applyDesktopIdleQuality();
+            desktopSettleSnapshotRef.current = null;
+
+            if (
+              !selectedDesktopQualityProfile.enableUltra ||
+              modeRef.current !== "google3d"
+            ) {
+              return;
+            }
+            desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+              if (cancelled) return;
+              if (attemptId !== desktopIdleRestoreAttemptRef.current) return;
+              if (adaptiveQualityStateRef.current.isMoving) return;
+              applyDesktopUltraQuality();
+            }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
+          }, selectedDesktopQualityProfile.settleHoldMs);
+          return;
         }
 
         applyDesktopIdleQuality();
@@ -4683,6 +4749,10 @@ function findPickedInteractiveData(
       if (desktopQualityRestoreTimeoutRef.current) {
         window.clearTimeout(desktopQualityRestoreTimeoutRef.current);
         desktopQualityRestoreTimeoutRef.current = null;
+      }
+      if (desktopIdleFinalizeTimeoutRef.current) {
+        window.clearTimeout(desktopIdleFinalizeTimeoutRef.current);
+        desktopIdleFinalizeTimeoutRef.current = null;
       }
       if (desktopUltraRestoreTimeoutRef.current) {
         window.clearTimeout(desktopUltraRestoreTimeoutRef.current);
@@ -4774,6 +4844,48 @@ function findPickedInteractiveData(
         tilesetSse:
           tileset && modeRef.current === "google3d"
             ? selectedDesktopQualityProfile.movingTilesetSse
+            : null,
+      });
+
+      viewer.scene.requestRender();
+    };
+
+    const applyDesktopSettleQuality = (tileset = tilesetRef.current) => {
+      if (isMobile) return;
+
+      adaptiveQualityStateRef.current.isUltraActive = false;
+      viewer.scene.msaaSamples = selectedDesktopQualityProfile.settleMsaa;
+      viewer.resolutionScale = getDesktopProfileResolutionScale(
+        selectedDesktopQualityProfile.settleResolutionScale,
+        selectedDesktopQualityProfile.movingResolutionScale
+      );
+      viewer.scene.globe.maximumScreenSpaceError =
+        selectedDesktopQualityProfile.settleGlobeSse;
+
+      if (tileset && modeRef.current === "google3d") {
+        tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.settleTilesetSse;
+        tileset.dynamicScreenSpaceError = true;
+        tileset.foveatedScreenSpaceError = true;
+        tileset.cullRequestsWhileMoving = false;
+        tileset.foveatedTimeDelay = GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
+        tileset.progressiveResolutionHeightFraction =
+          GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
+        tileset.preferLeaves = true;
+      }
+
+      if (osmImageryLayerRef.current && modeRef.current === "google3d") {
+        osmImageryLayerRef.current.alpha = DESKTOP_GOOGLE_OSM_ALPHA;
+      }
+
+      setCurrentQualityTelemetry({
+        preset: "desktop_settle",
+        moving: false,
+        resolutionScale: viewer.resolutionScale,
+        msaaSamples: viewer.scene.msaaSamples,
+        globeSse: selectedDesktopQualityProfile.settleGlobeSse,
+        tilesetSse:
+          tileset && modeRef.current === "google3d"
+            ? selectedDesktopQualityProfile.settleTilesetSse
             : null,
       });
 
