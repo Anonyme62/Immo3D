@@ -2474,6 +2474,7 @@ export default function CesiumMap({
   const applyFpsBenchmarkInitialPauseQualityRef = useRef(() => {});
   const releaseFpsBenchmarkMovingQualityRef = useRef(() => {});
   const applyFpsBenchmarkSegmentQualityRef = useRef(() => {});
+  const prepareFpsBenchmarkQualityRef = useRef(() => {});
   const currentQualityTelemetryRef = useRef({
     preset: "",
     moving: null,
@@ -5252,6 +5253,16 @@ function findPickedInteractiveData(
     };
     releaseFpsBenchmarkMovingQualityRef.current = releaseBenchmarkMovingQualityLock;
     applyFpsBenchmarkSegmentQualityRef.current = applyBenchmarkSegmentQuality;
+    prepareFpsBenchmarkQualityRef.current = () => {
+      clearQualityRecoverySafetyTimeout();
+      clearGoogleQualityTimeout();
+      clearDesktopQualityRestoreTimeouts();
+      clearMobileQualityRestoreTimeout();
+      clearMobileUltraRestoreTimeout();
+      resetAdaptiveQualityStats();
+      desktopMovingVisibleUntilRef.current = 0;
+      desktopSettleSnapshotRef.current = null;
+    };
 
     const applyFastThenPremiumGoogleQuality = (tileset) => {
       if (!tileset) return;
@@ -5958,6 +5969,7 @@ function findPickedInteractiveData(
       applyFpsBenchmarkInitialPauseQualityRef.current = () => {};
       releaseFpsBenchmarkMovingQualityRef.current = () => {};
       applyFpsBenchmarkSegmentQualityRef.current = () => {};
+      prepareFpsBenchmarkQualityRef.current = () => {};
       resetAdaptiveQualityStats();
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(handleAdaptiveFrameQuality);
@@ -7434,14 +7446,7 @@ function findPickedInteractiveData(
     finishFpsBenchmarkRecording();
     finishFpsBenchmarkRun(viewer);
     fpsBenchmarkActiveRef.current = true;
-    clearQualityRecoverySafetyTimeout();
-    clearGoogleQualityTimeout();
-    clearDesktopQualityRestoreTimeouts();
-    clearMobileQualityRestoreTimeout();
-    clearMobileUltraRestoreTimeout();
-    resetAdaptiveQualityStats();
-    desktopMovingVisibleUntilRef.current = 0;
-    desktopSettleSnapshotRef.current = null;
+    prepareFpsBenchmarkQualityRef.current?.();
 
     const recording = sanitizeBenchmarkRecording(safeScenario.recording);
     const benchmarkSegmentTimeline =
