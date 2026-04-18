@@ -5983,6 +5983,39 @@ function findPickedInteractiveData(
         return;
       }
 
+      if (isMoving && !isMobile) {
+        const signature = `sat-moving-hold|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
+        if (markerLodRuntimeRef.current.lastSignature === signature) return;
+        markerLodRuntimeRef.current.lastSignature = signature;
+
+        bienEntities.forEach((entity) => {
+          const bienId = entity.bienData?.id;
+          const isSelected = bienId != null && bienId === selectedId;
+          const shouldShowPoint = entity.showPointByPriority !== false;
+          if (entity.point?.show !== shouldShowPoint) {
+            entity.point.show = shouldShowPoint;
+            changed = true;
+          }
+          if (isSelected && entity.label?.show !== true) {
+            entity.label.show = true;
+            changed = true;
+          }
+        });
+
+        customEntities.forEach((entity) => {
+          if (entity.point?.show !== true) {
+            entity.point.show = true;
+            changed = true;
+          }
+        });
+
+        markerLodRuntimeRef.current.movingStateApplied = true;
+        if (changed) {
+          viewer.scene.requestRender();
+        }
+        return;
+      }
+
       const cameraPosition = viewer.camera?.positionWC;
       if (!cameraPosition) return;
       const cameraHeight = getCameraHeight(viewer);
