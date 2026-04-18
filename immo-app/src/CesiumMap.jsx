@@ -322,9 +322,13 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
 const FPS_BENCHMARK_VERSION = 6;
-const FPS_BENCHMARK_ROUTE_VERSION = 9;
+const FPS_BENCHMARK_ROUTE_VERSION = 10;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
 const FPS_BENCHMARK_INTERRUPT_FRAME_GAP_MS = 2000;
+const FPS_BENCHMARK_RECORDING_DURATION_MS = 26000;
+const FPS_BENCHMARK_RECORDING_MIN_DURATION_MS = 12000;
+const FPS_BENCHMARK_RECORDING_MIN_SAMPLE_COUNT = 120;
+const FPS_BENCHMARK_RECORDING_MIN_SEGMENT_MS = 320;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
 const FPS_BENCHMARK_MAX_DISTANCE_METERS = 980;
 const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.92;
@@ -503,24 +507,44 @@ const FPS_BENCHMARK_SEGMENTS = [
     toHeightScale: 0.50,
   },
 ];
-const FPS_BENCHMARK_SEGMENT_TIMELINE = FPS_BENCHMARK_SEGMENTS.reduce(
-  (timeline, segment, index) => {
+
+function buildBenchmarkSegmentTimeline(segments = []) {
+  return (Array.isArray(segments) ? segments : []).reduce((timeline, segment, index) => {
+    const durationMs = Math.max(1, Math.round(Number(segment?.durationMs) || 0));
     const previousEndMs =
       timeline.length > 0 ? timeline[timeline.length - 1].endMs : 0;
-    const durationMs = Math.max(0, Number(segment.durationMs) || 0);
     timeline.push({
       ...segment,
+      key: String(segment?.key || `segment_${index + 1}`),
+      label: String(segment?.label || `segment ${index + 1}`),
+      phaseKey: String(
+        segment?.phaseKey || (segment?.benchmarkMoving ? "move" : "settle")
+      ),
+      phaseLabel: String(
+        segment?.phaseLabel || (segment?.benchmarkMoving ? "mouvement" : "pause")
+      ),
+      benchmarkMoving:
+        typeof segment?.benchmarkMoving === "boolean"
+          ? Boolean(segment.benchmarkMoving)
+          : true,
+      durationMs,
       index,
       startMs: previousEndMs,
       endMs: previousEndMs + durationMs,
     });
     return timeline;
-  },
-  []
+  }, []);
+}
+
+function getBenchmarkTimelineDuration(segmentTimeline = []) {
+  return segmentTimeline[segmentTimeline.length - 1]?.endMs || 0;
+}
+
+const FPS_BENCHMARK_SEGMENT_TIMELINE =
+  buildBenchmarkSegmentTimeline(FPS_BENCHMARK_SEGMENTS);
+const FPS_BENCHMARK_TOTAL_DURATION_MS = getBenchmarkTimelineDuration(
+  FPS_BENCHMARK_SEGMENT_TIMELINE
 );
-const FPS_BENCHMARK_TOTAL_DURATION_MS =
-  FPS_BENCHMARK_SEGMENT_TIMELINE[FPS_BENCHMARK_SEGMENT_TIMELINE.length - 1]
-    ?.endMs || 0;
 
 function captureCamera(viewer) {
   return {
@@ -593,6 +617,114 @@ function isQualityCameraSnapshotStable(previousSnapshot, nextSnapshot) {
     return false;
   }
   return true;
+}
+
+function sanitizeSerializableCameraState(cameraState) {
+  if (!isSerializableCameraStateValid(cameraState)) return null;
+  return {
+    longitude: roundBenchmarkValue(Number(cameraState.longitude), 6),
+    latitude: roundBenchmarkValue(Number(cameraState.latitude), 6),
+    height: roundBenchmarkValue(Number(cameraState.height), 1),
+    heading: roundBenchmarkValue(Number(cameraState.heading) || 0, 5) ?? 0,
+    pitch:
+      roundBenchmarkValue(
+        Number(cameraState.pitch) || Cesium.Math.toRadians(-90),
+        5
+      ) ?? Cesium.Math.toRadians(-90),
+    roll: roundBenchmarkValue(Number(cameraState.roll) || 0, 5) ?? 0,
+  };
+}
+
+function getSerializableCameraStatePosition(cameraState) {
+  if (!isSerializableCameraStateValid(cameraState)) return null;
+  return Cesium.Cartesian3.fromDegrees(
+    Number(cameraState.longitude),
+    Number(cameraState.latitude),
+    Number(cameraState.height)
+  );
+}
+
+function isSerializableCameraStateStable(previousCameraState, nextCameraState) {
+  const previousPosition = getSerializableCameraStatePosition(previousCameraState);
+  const nextPosition = getSerializableCameraStatePosition(nextCameraState);
+  if (!previousPosition || !nextPosition) return false;
+
+  const positionDeltaMeters = Cesium.Cartesian3.distance(
+    previousPosition,
+    nextPosition
+  );
+  if (positionDeltaMeters > DESKTOP_AUTO_SETTLE_POSITION_EPSILON_METERS) {
+    return false;
+  }
+  if (
+    getAngleDeltaRadians(previousCameraState?.heading, nextCameraState?.heading) >
+    DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
+  ) {
+    return false;
+  }
+  if (
+    getAngleDeltaRadians(previousCameraState?.pitch, nextCameraState?.pitch) >
+    DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
+  ) {
+    return false;
+  }
+  if (
+    getAngleDeltaRadians(previousCameraState?.roll, nextCameraState?.roll) >
+    DESKTOP_AUTO_SETTLE_ANGLE_EPSILON_RAD
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function interpolateAngleRadians(startAngle, endAngle, progress) {
+  const safeStart = Number(startAngle) || 0;
+  const safeEnd = Number(endAngle) || 0;
+  const safeProgress = Cesium.Math.clamp(Number(progress) || 0, 0, 1);
+  return safeStart + Cesium.Math.negativePiToPi(safeEnd - safeStart) * safeProgress;
+}
+
+function interpolateSerializableCameraState(fromCameraState, toCameraState, progress) {
+  if (!isSerializableCameraStateValid(fromCameraState)) {
+    return sanitizeSerializableCameraState(toCameraState);
+  }
+  if (!isSerializableCameraStateValid(toCameraState)) {
+    return sanitizeSerializableCameraState(fromCameraState);
+  }
+
+  const safeProgress = Cesium.Math.clamp(Number(progress) || 0, 0, 1);
+  return {
+    longitude: Cesium.Math.lerp(
+      Number(fromCameraState.longitude),
+      Number(toCameraState.longitude),
+      safeProgress
+    ),
+    latitude: Cesium.Math.lerp(
+      Number(fromCameraState.latitude),
+      Number(toCameraState.latitude),
+      safeProgress
+    ),
+    height: Cesium.Math.lerp(
+      Number(fromCameraState.height),
+      Number(toCameraState.height),
+      safeProgress
+    ),
+    heading: interpolateAngleRadians(
+      fromCameraState.heading,
+      toCameraState.heading,
+      safeProgress
+    ),
+    pitch: interpolateAngleRadians(
+      fromCameraState.pitch,
+      toCameraState.pitch,
+      safeProgress
+    ),
+    roll: interpolateAngleRadians(
+      fromCameraState.roll,
+      toCameraState.roll,
+      safeProgress
+    ),
+  };
 }
 
 function resolveMode(mapMode) {
@@ -886,17 +1018,18 @@ function getFpsBenchmarkOffsetAt(elapsedMs, distanceMeters) {
   };
 }
 
-function getFpsBenchmarkSegmentMetaAt(elapsedMs) {
-  if (FPS_BENCHMARK_SEGMENT_TIMELINE.length === 0) return null;
+function getFpsBenchmarkSegmentMetaAt(
+  elapsedMs,
+  segmentTimeline = FPS_BENCHMARK_SEGMENT_TIMELINE
+) {
+  if (!Array.isArray(segmentTimeline) || segmentTimeline.length === 0) return null;
+  const totalDurationMs = getBenchmarkTimelineDuration(segmentTimeline);
   const clampedElapsedMs = Number.isFinite(elapsedMs)
-    ? Cesium.Math.clamp(elapsedMs, 0, FPS_BENCHMARK_TOTAL_DURATION_MS)
+    ? Cesium.Math.clamp(elapsedMs, 0, totalDurationMs)
     : 0;
-  const lastSegment =
-    FPS_BENCHMARK_SEGMENT_TIMELINE[FPS_BENCHMARK_SEGMENT_TIMELINE.length - 1];
+  const lastSegment = segmentTimeline[segmentTimeline.length - 1];
   const matchingSegment =
-    FPS_BENCHMARK_SEGMENT_TIMELINE.find(
-      (segment) => clampedElapsedMs <= segment.endMs
-    ) || lastSegment;
+    segmentTimeline.find((segment) => clampedElapsedMs <= segment.endMs) || lastSegment;
   const segmentDurationMs = Math.max(
     1,
     Number(matchingSegment?.durationMs) || 0
@@ -951,6 +1084,232 @@ function roundBenchmarkValue(value, digits = 1) {
   return Math.round(value * factor) / factor;
 }
 
+function sanitizeBenchmarkRecordingSample(sample) {
+  const cameraState = sanitizeSerializableCameraState(sample);
+  if (!cameraState) return null;
+  const elapsedMs = Math.max(0, Math.round(Number(sample?.elapsedMs) || 0));
+  return {
+    elapsedMs,
+    ...cameraState,
+    benchmarkMoving:
+      typeof sample?.benchmarkMoving === "boolean"
+        ? Boolean(sample.benchmarkMoving)
+        : null,
+  };
+}
+
+function mergeShortBenchmarkTimeRanges(ranges = [], minimumDurationMs = 0) {
+  let mergedRanges = (Array.isArray(ranges) ? ranges : [])
+    .map((range) => ({
+      startMs: Math.max(0, Number(range?.startMs) || 0),
+      endMs: Math.max(0, Number(range?.endMs) || 0),
+      benchmarkMoving: Boolean(range?.benchmarkMoving),
+    }))
+    .filter((range) => range.endMs > range.startMs)
+    .sort((left, right) => left.startMs - right.startMs);
+
+  if (mergedRanges.length <= 1) return mergedRanges;
+
+  const minDurationMs = Math.max(0, Number(minimumDurationMs) || 0);
+  let changed = true;
+
+  while (changed && mergedRanges.length > 1) {
+    changed = false;
+    for (let index = 0; index < mergedRanges.length; index += 1) {
+      const currentRange = mergedRanges[index];
+      const durationMs = currentRange.endMs - currentRange.startMs;
+      if (durationMs >= minDurationMs) continue;
+
+      if (
+        index > 0 &&
+        index < mergedRanges.length - 1 &&
+        mergedRanges[index - 1].benchmarkMoving ===
+          mergedRanges[index + 1].benchmarkMoving
+      ) {
+        mergedRanges = [
+          ...mergedRanges.slice(0, index - 1),
+          {
+            startMs: mergedRanges[index - 1].startMs,
+            endMs: mergedRanges[index + 1].endMs,
+            benchmarkMoving: mergedRanges[index - 1].benchmarkMoving,
+          },
+          ...mergedRanges.slice(index + 2),
+        ];
+      } else if (index > 0) {
+        mergedRanges = [
+          ...mergedRanges.slice(0, index - 1),
+          {
+            startMs: mergedRanges[index - 1].startMs,
+            endMs: currentRange.endMs,
+            benchmarkMoving: mergedRanges[index - 1].benchmarkMoving,
+          },
+          ...mergedRanges.slice(index + 1),
+        ];
+      } else {
+        mergedRanges = [
+          {
+            startMs: currentRange.startMs,
+            endMs: mergedRanges[1].endMs,
+            benchmarkMoving: mergedRanges[1].benchmarkMoving,
+          },
+          ...mergedRanges.slice(2),
+        ];
+      }
+      changed = true;
+      break;
+    }
+  }
+
+  return mergedRanges;
+}
+
+function buildRecordedBenchmarkSegmentTimeline(samples = [], durationMs = 0) {
+  const safeSamples = (Array.isArray(samples) ? samples : [])
+    .map(sanitizeBenchmarkRecordingSample)
+    .filter(Boolean)
+    .sort((left, right) => left.elapsedMs - right.elapsedMs);
+  if (safeSamples.length < 2) return [];
+
+  const totalDurationMs = Math.max(
+    1,
+    Math.round(
+      Number(durationMs) || Number(safeSamples[safeSamples.length - 1]?.elapsedMs) || 0
+    )
+  );
+  let currentMoving =
+    typeof safeSamples[1]?.benchmarkMoving === "boolean"
+      ? Boolean(safeSamples[1].benchmarkMoving)
+      : Boolean(safeSamples[0]?.benchmarkMoving);
+  let currentStartMs = 0;
+  const rawRanges = [];
+
+  for (let index = 1; index < safeSamples.length; index += 1) {
+    const sample = safeSamples[index];
+    const sampleMoving =
+      typeof sample?.benchmarkMoving === "boolean"
+        ? Boolean(sample.benchmarkMoving)
+        : currentMoving;
+    if (sampleMoving === currentMoving) continue;
+    rawRanges.push({
+      startMs: currentStartMs,
+      endMs: Math.max(currentStartMs + 1, sample.elapsedMs),
+      benchmarkMoving: currentMoving,
+    });
+    currentStartMs = sample.elapsedMs;
+    currentMoving = sampleMoving;
+  }
+
+  rawRanges.push({
+    startMs: currentStartMs,
+    endMs: Math.max(currentStartMs + 1, totalDurationMs),
+    benchmarkMoving: currentMoving,
+  });
+
+  const mergedRanges = mergeShortBenchmarkTimeRanges(
+    rawRanges,
+    FPS_BENCHMARK_RECORDING_MIN_SEGMENT_MS
+  );
+  let moveIndex = 0;
+  let settleIndex = 0;
+  return buildBenchmarkSegmentTimeline(
+    mergedRanges.map((range) => {
+      const durationMsForRange = Math.max(
+        1,
+        Math.round(Number(range?.endMs || 0) - Number(range?.startMs || 0))
+      );
+      if (range.benchmarkMoving) {
+        moveIndex += 1;
+        return {
+          key: `move_${moveIndex}`,
+          label: `mouvement ${moveIndex}`,
+          phaseKey: "move",
+          phaseLabel: "mouvement",
+          benchmarkMoving: true,
+          durationMs: durationMsForRange,
+        };
+      }
+      settleIndex += 1;
+      return {
+        key: `settle_${settleIndex}`,
+        label: `pause ${settleIndex}`,
+        phaseKey: "settle",
+        phaseLabel: "pause",
+        benchmarkMoving: false,
+        durationMs: durationMsForRange,
+      };
+    })
+  );
+}
+
+function sanitizeBenchmarkRecording(recording) {
+  const safeSamples = (Array.isArray(recording?.samples) ? recording.samples : [])
+    .map(sanitizeBenchmarkRecordingSample)
+    .filter(Boolean)
+    .sort((left, right) => left.elapsedMs - right.elapsedMs);
+  const safeDurationMs = Math.max(
+    0,
+    Math.round(
+      Number(recording?.durationMs) || Number(safeSamples[safeSamples.length - 1]?.elapsedMs) || 0
+    )
+  );
+  if (
+    safeSamples.length < FPS_BENCHMARK_RECORDING_MIN_SAMPLE_COUNT ||
+    safeDurationMs < FPS_BENCHMARK_RECORDING_MIN_DURATION_MS
+  ) {
+    return null;
+  }
+
+  const segmentTimeline =
+    Array.isArray(recording?.segmentTimeline) && recording.segmentTimeline.length > 0
+      ? buildBenchmarkSegmentTimeline(recording.segmentTimeline)
+      : buildRecordedBenchmarkSegmentTimeline(safeSamples, safeDurationMs);
+  if (segmentTimeline.length === 0) return null;
+
+  return {
+    createdAt: Number(recording?.createdAt) || Date.now(),
+    durationMs: safeDurationMs,
+    sampleCount: safeSamples.length,
+    samples: safeSamples,
+    segmentTimeline,
+  };
+}
+
+function sanitizeBenchmarkMarkerCluster(markerCluster) {
+  if (
+    !markerCluster ||
+    !Number.isFinite(Number(markerCluster.longitude)) ||
+    !Number.isFinite(Number(markerCluster.latitude))
+  ) {
+    return null;
+  }
+  return {
+    longitude: roundBenchmarkValue(Number(markerCluster.longitude), 6),
+    latitude: roundBenchmarkValue(Number(markerCluster.latitude), 6),
+    markerCount: Math.max(0, Math.round(Number(markerCluster.markerCount) || 0)),
+  };
+}
+
+function sanitizeFpsBenchmarkScenario(scenario) {
+  const recording = sanitizeBenchmarkRecording(scenario?.recording);
+  const startCamera =
+    sanitizeSerializableCameraState(scenario?.startCamera) ||
+    sanitizeSerializableCameraState(recording?.samples?.[0]);
+  if (!startCamera) return null;
+
+  return {
+    createdAt: Number(scenario?.createdAt) || Date.now(),
+    routeVersion: Math.max(
+      FPS_BENCHMARK_ROUTE_VERSION,
+      Number(scenario?.routeVersion) || 0
+    ),
+    baseCamera:
+      sanitizeSerializableCameraState(scenario?.baseCamera) || startCamera,
+    startCamera,
+    markerCluster: sanitizeBenchmarkMarkerCluster(scenario?.markerCluster),
+    recording,
+  };
+}
+
 function sanitizeBenchmarkHistoryEntry(entry) {
   if (!entry || !Number.isFinite(Number(entry.avgFps))) return null;
   const runKind =
@@ -970,6 +1329,7 @@ function sanitizeBenchmarkHistoryEntry(entry) {
     runKind,
     coldStart: Boolean(entry.coldStart),
     distanceMeters: Math.max(0, Number(entry.distanceMeters || 0)),
+    routeKind: String(entry.routeKind || ""),
   };
 }
 
@@ -1142,7 +1502,11 @@ function buildBenchmarkFrameGroupStats(
     .filter(Boolean);
 }
 
-function buildBenchmarkPerfEventSamples(events = [], benchmarkStartedAtMs) {
+function buildBenchmarkPerfEventSamples(
+  events = [],
+  benchmarkStartedAtMs,
+  segmentTimeline = FPS_BENCHMARK_SEGMENT_TIMELINE
+) {
   if (!Array.isArray(events) || !Number.isFinite(benchmarkStartedAtMs)) return [];
   return events
     .map((event) => {
@@ -1152,7 +1516,7 @@ function buildBenchmarkPerfEventSamples(events = [], benchmarkStartedAtMs) {
         : null;
       const segmentMeta =
         Number.isFinite(elapsedMs) && elapsedMs !== null
-          ? getFpsBenchmarkSegmentMetaAt(elapsedMs)
+          ? getFpsBenchmarkSegmentMetaAt(elapsedMs, segmentTimeline)
           : null;
       const durationMs = roundBenchmarkValue(Number(event?.durationMs) || 0);
       if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
@@ -1191,12 +1555,20 @@ function buildBenchmarkPerfEventSamples(events = [], benchmarkStartedAtMs) {
     .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
 }
 
-function buildFpsBenchmarkResult(frameSamples, extra = {}) {
+function buildFpsBenchmarkResult(
+  frameSamples,
+  extra = {},
+  segmentTimeline = FPS_BENCHMARK_SEGMENT_TIMELINE
+) {
   if (!Array.isArray(frameSamples) || frameSamples.length === 0) return null;
   const safeFrameSamples = frameSamples.filter(
     (sample) => Number.isFinite(Number(sample?.frameMs)) && Number(sample.frameMs) > 0
   );
   if (safeFrameSamples.length === 0) return null;
+  const safeSegmentTimeline =
+    Array.isArray(segmentTimeline) && segmentTimeline.length > 0
+      ? segmentTimeline
+      : FPS_BENCHMARK_SEGMENT_TIMELINE;
 
   const frameStats = buildBenchmarkFrameStats(
     safeFrameSamples.map((sample) => Number(sample.frameMs))
@@ -1235,7 +1607,7 @@ function buildFpsBenchmarkResult(frameSamples, extra = {}) {
     ...frameStats,
     topFrameSpikesMs: topFrameSpikeEvents.map((sample) => sample.frameMs),
     topFrameSpikeEvents,
-    segmentTimeline: FPS_BENCHMARK_SEGMENT_TIMELINE.map((segment) => ({
+    segmentTimeline: safeSegmentTimeline.map((segment) => ({
       index: segment.index + 1,
       key: segment.key,
       label: segment.label,
@@ -2066,6 +2438,7 @@ export default function CesiumMap({
   const markerLodSettleTimeoutRef = useRef(null);
   const fpsBenchmarkRafRef = useRef(null);
   const fpsBenchmarkStartTimeoutRef = useRef(null);
+  const fpsBenchmarkRecordingRafRef = useRef(null);
   const fpsBenchmarkCameraInputsRef = useRef(null);
   const fpsBenchmarkRunCountRef = useRef(0);
   const fpsBenchmarkQualityLockTimeoutRef = useRef(null);
@@ -2148,11 +2521,11 @@ export default function CesiumMap({
   });
   const [fpsBenchmarkState, setFpsBenchmarkState] = useState(() => {
     const store = readFpsBenchmarkStore();
+    const scenario = sanitizeFpsBenchmarkScenario(store?.scenario);
     return {
       running: false,
-      scenario: isSerializableCameraStateValid(store?.scenario?.startCamera)
-        ? store.scenario
-        : null,
+      recording: false,
+      scenario,
       lastResult:
         store?.lastResult && Number.isFinite(Number(store.lastResult.avgFps))
           ? store.lastResult
@@ -5431,6 +5804,10 @@ function findPickedInteractiveData(
       clearMobileUltraRestoreTimeout();
       clearQualityRecoverySafetyTimeout();
       clearSatelliteLoadWatchdogTimeout();
+      if (fpsBenchmarkRecordingRafRef.current) {
+        window.cancelAnimationFrame(fpsBenchmarkRecordingRafRef.current);
+        fpsBenchmarkRecordingRafRef.current = null;
+      }
       if (fpsBenchmarkQualityLockTimeoutRef.current) {
         window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
         fpsBenchmarkQualityLockTimeoutRef.current = null;
@@ -6672,7 +7049,8 @@ function findPickedInteractiveData(
   const canTiltCurrentView = currentResolvedMode === "google3d";
   const isTiltToggleDisabled = isMapModeTransitioning || isTiltTransitioning;
   const desktopBenchmarkBottom = canTiltCurrentView ? 148 : 84;
-  const desktopPlusBottom = canTiltCurrentView ? 212 : 148;
+  const desktopBenchmarkRecordBottom = canTiltCurrentView ? 212 : 148;
+  const desktopPlusBottom = canTiltCurrentView ? 276 : 212;
   const modeTransitionLabel =
     modeTransition.target === "google3d"
       ? "Passage a la vue satellite..."
@@ -6689,17 +7067,38 @@ function findPickedInteractiveData(
     !hasVisibleSatelliteIssue &&
     (isSatelliteTogglePending || isSatelliteSwitchingTo3D);
   const isMapModeToggleDisabled = !canUseGoogle3D;
+  const fpsRecordedScenario = sanitizeBenchmarkRecording(
+    fpsBenchmarkState.scenario?.recording
+  );
+  const hasRecordedFpsScenario = Boolean(fpsRecordedScenario);
+  const isFpsBenchmarkRecordingDisabled =
+    fpsBenchmarkState.running ||
+    fpsBenchmarkState.recording ||
+    isMapModeTransitioning ||
+    currentResolvedMode !== "google3d";
   const isFpsBenchmarkButtonDisabled =
     fpsBenchmarkState.running ||
+    fpsBenchmarkState.recording ||
     isMapModeTransitioning ||
     currentResolvedMode !== "google3d";
   const isFpsBenchmarkLogButtonDisabled =
-    fpsBenchmarkState.running || !fpsBenchmarkState.lastLogText;
+    fpsBenchmarkState.running ||
+    fpsBenchmarkState.recording ||
+    !fpsBenchmarkState.lastLogText;
   const fpsBenchmarkButtonLabel = fpsBenchmarkState.running
     ? "Test..."
-    : fpsBenchmarkState.scenario?.startCamera
-      ? "Test FPS"
-      : "Init FPS";
+    : fpsBenchmarkState.recording
+      ? "Rec..."
+      : hasRecordedFpsScenario
+        ? "Test FPS reel"
+        : fpsBenchmarkState.scenario?.startCamera
+          ? "Test FPS script"
+          : "Init FPS";
+  const fpsBenchmarkRecordButtonLabel = fpsBenchmarkState.recording
+    ? "Rec..."
+    : hasRecordedFpsScenario
+      ? "Refaire trajet"
+      : "Rec trajet";
   const fpsBenchmarkButtonTitle = fpsBenchmarkState.running
     ? "Benchmark FPS en cours..."
     : fpsBenchmarkState.scenario?.startCamera
@@ -6708,6 +7107,20 @@ function findPickedInteractiveData(
   const fpsBenchmarkLogButtonTitle = fpsBenchmarkState.lastLogText
     ? "Copie le dernier benchmark FPS en JSON, avec ms, pics de lag et historique recent."
     : "Lance d'abord un benchmark FPS pour generer des logs.";
+  const fpsBenchmarkPrimaryButtonTitle = fpsBenchmarkState.running
+    ? "Benchmark FPS en cours..."
+    : fpsBenchmarkState.recording
+      ? "Enregistrement du trajet reel en cours..."
+      : hasRecordedFpsScenario
+        ? "Relance exactement la trace humaine enregistree pour mesurer un benchmark proche d'un usage reel."
+        : fpsBenchmarkState.scenario?.startCamera
+          ? "Lance le benchmark scriptable memorise sur cette zone."
+          : "Memorise une zone benchmark orientee reperes, puis lance un test FPS reproductible.";
+  const fpsBenchmarkRecordButtonTitle = fpsBenchmarkState.recording
+    ? "Enregistrement du trajet reel en cours..."
+    : hasRecordedFpsScenario
+      ? "Enregistre une nouvelle trace humaine de 26 secondes pour remplacer l'ancienne."
+      : "Enregistre pendant 26 secondes un vrai trajet humain qui servira ensuite de benchmark.";
   const fpsBenchmarkSummary = fpsBenchmarkState.message || "";
   const mapModeButtonLabel =
     currentResolvedMode === "google3d"
@@ -6749,7 +7162,7 @@ function findPickedInteractiveData(
       const nextState =
         typeof updater === "function" ? updater(previousState) : previousState;
       writeFpsBenchmarkStore({
-        scenario: nextState?.scenario || null,
+        scenario: sanitizeFpsBenchmarkScenario(nextState?.scenario),
         lastResult: nextState?.lastResult || null,
         history: normalizeBenchmarkHistory(nextState?.history),
         lastLogText: String(nextState?.lastLogText || ""),
@@ -6834,19 +7247,63 @@ function findPickedInteractiveData(
     }
   }
 
+  function finishFpsBenchmarkRecording() {
+    if (fpsBenchmarkRecordingRafRef.current) {
+      window.cancelAnimationFrame(fpsBenchmarkRecordingRafRef.current);
+      fpsBenchmarkRecordingRafRef.current = null;
+    }
+  }
+
+  function buildScriptedFpsBenchmarkScenario(viewer) {
+    const baseCamera = captureSerializableCameraState(viewer);
+    if (!isSerializableCameraStateValid(baseCamera)) {
+      return { scenario: null, message: "Impossible de memoriser ce point de depart." };
+    }
+    const { startCamera, markerCluster } = getPreferredFpsBenchmarkStartCamera(
+      viewer,
+      baseCamera
+    );
+    return {
+      scenario: sanitizeFpsBenchmarkScenario({
+        createdAt: Date.now(),
+        routeVersion: FPS_BENCHMARK_ROUTE_VERSION,
+        baseCamera,
+        startCamera,
+        markerCluster,
+      }),
+      message: markerCluster
+        ? `Point de depart FPS memorise dans une zone avec ${markerCluster.markerCount} reperes.`
+        : "Point de depart FPS memorise.",
+    };
+  }
+
   function runFpsBenchmark(viewer, scenario) {
+    const safeScenario = sanitizeFpsBenchmarkScenario(scenario);
     if (
       !viewer ||
       viewer.isDestroyed() ||
-      !scenario ||
-      !isSerializableCameraStateValid(scenario.startCamera)
+      !safeScenario ||
+      !isSerializableCameraStateValid(safeScenario.startCamera)
     ) {
       return;
     }
 
+    finishFpsBenchmarkRecording();
     finishFpsBenchmarkRun(viewer);
 
-    const startCamera = scenario.startCamera;
+    const recording = sanitizeBenchmarkRecording(safeScenario.recording);
+    const benchmarkSegmentTimeline =
+      recording?.segmentTimeline?.length > 0
+        ? recording.segmentTimeline
+        : FPS_BENCHMARK_SEGMENT_TIMELINE;
+    const benchmarkTotalDurationMs =
+      recording?.durationMs || FPS_BENCHMARK_TOTAL_DURATION_MS;
+    const startCamera =
+      recording?.samples?.[0] && isSerializableCameraStateValid(recording.samples[0])
+        ? recording.samples[0]
+        : safeScenario.startCamera;
+    const routeKind = recording ? "recorded" : "synthetic";
+    const routeLabel = recording ? "trace reelle" : "script";
     const runMode =
       modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
         ? "google3d"
@@ -6861,7 +7318,10 @@ function findPickedInteractiveData(
     fpsBenchmarkCameraInputsRef.current =
       viewer.scene.screenSpaceCameraController.enableInputs;
     viewer.scene.screenSpaceCameraController.enableInputs = false;
-    const initialSegmentMeta = getFpsBenchmarkSegmentMetaAt(0);
+    const initialSegmentMeta = getFpsBenchmarkSegmentMetaAt(
+      0,
+      benchmarkSegmentTimeline
+    );
     if (initialSegmentMeta?.key) {
       fpsBenchmarkLastSegmentKeyRef.current = initialSegmentMeta.key;
     }
@@ -6872,9 +7332,10 @@ function findPickedInteractiveData(
     persistFpsBenchmarkState((previousState) => ({
       ...previousState,
       running: true,
-      message: `Test FPS ${runKind} en cours (${Math.round(
+      recording: false,
+      message: `Test FPS ${runKind} (${routeLabel}, ${Math.round(
         benchmarkDistanceMeters
-      )} m)...`,
+      )} m) en cours...`,
     }));
 
     fpsBenchmarkStartTimeoutRef.current = window.setTimeout(() => {
@@ -6887,29 +7348,34 @@ function findPickedInteractiveData(
       applyFpsBenchmarkSegmentQualityRef.current?.(initialSegmentMeta);
 
       const telemetryStartedAtMs = Date.now();
-      const anchor = Cesium.Cartesian3.fromDegrees(
-        startCamera.longitude,
-        startCamera.latitude,
-        0
-      );
-      const benchmarkFrame = Cesium.Transforms.eastNorthUpToFixedFrame(anchor);
-      const benchmarkFrameInverse = Cesium.Matrix4.inverseTransformation(
-        benchmarkFrame,
-        new Cesium.Matrix4()
-      );
-      const startDestination = Cesium.Cartesian3.fromDegrees(
-        startCamera.longitude,
-        startCamera.latitude,
-        startCamera.height
-      );
-      const startLocalPosition = Cesium.Matrix4.multiplyByPoint(
-        benchmarkFrameInverse,
-        startDestination,
-        new Cesium.Cartesian3()
-      );
+      const anchor = recording
+        ? null
+        : Cesium.Cartesian3.fromDegrees(startCamera.longitude, startCamera.latitude, 0);
+      const benchmarkFrame = anchor
+        ? Cesium.Transforms.eastNorthUpToFixedFrame(anchor)
+        : null;
+      const benchmarkFrameInverse = benchmarkFrame
+        ? Cesium.Matrix4.inverseTransformation(benchmarkFrame, new Cesium.Matrix4())
+        : null;
+      const startDestination = benchmarkFrameInverse
+        ? Cesium.Cartesian3.fromDegrees(
+            startCamera.longitude,
+            startCamera.latitude,
+            startCamera.height
+          )
+        : null;
+      const startLocalPosition =
+        benchmarkFrameInverse && startDestination
+          ? Cesium.Matrix4.multiplyByPoint(
+              benchmarkFrameInverse,
+              startDestination,
+              new Cesium.Cartesian3()
+            )
+          : null;
       const frameSamples = [];
       let benchmarkStartedAt = null;
       let lastFrameAt = null;
+      let recordingSampleIndex = 0;
 
       const stepBenchmark = (timestamp) => {
         if (viewer.isDestroyed()) {
@@ -6937,9 +7403,12 @@ function findPickedInteractiveData(
 
         const elapsedMs = Math.min(
           timestamp - benchmarkStartedAt,
-          FPS_BENCHMARK_TOTAL_DURATION_MS
+          benchmarkTotalDurationMs
         );
-        const segmentMeta = getFpsBenchmarkSegmentMetaAt(elapsedMs);
+        const segmentMeta = getFpsBenchmarkSegmentMetaAt(
+          elapsedMs,
+          benchmarkSegmentTimeline
+        );
         if (
           segmentMeta?.key &&
           fpsBenchmarkLastSegmentKeyRef.current !== segmentMeta.key
@@ -6947,37 +7416,62 @@ function findPickedInteractiveData(
           fpsBenchmarkLastSegmentKeyRef.current = segmentMeta.key;
           applyFpsBenchmarkSegmentQualityRef.current?.(segmentMeta);
         }
-        const offset = getFpsBenchmarkOffsetAt(
-          elapsedMs,
-          benchmarkDistanceMeters
-        );
-        const rotatedOffset = rotateBenchmarkOffsetByHeading(
-          offset.x,
-          offset.y,
-          startCamera.heading
-        );
-        const worldPosition = Cesium.Matrix4.multiplyByPoint(
-          benchmarkFrame,
-          new Cesium.Cartesian3(
-            rotatedOffset.east,
-            rotatedOffset.north,
-            startLocalPosition.z *
-              (Number.isFinite(Number(offset.heightScale))
-                ? Number(offset.heightScale)
-                : 1)
-          ),
-          new Cesium.Cartesian3()
-        );
+        if (recording?.samples?.length > 1) {
+          while (
+            recordingSampleIndex < recording.samples.length - 2 &&
+            elapsedMs >= Number(recording.samples[recordingSampleIndex + 1]?.elapsedMs || 0)
+          ) {
+            recordingSampleIndex += 1;
+          }
+          const fromSample =
+            recording.samples[recordingSampleIndex] || recording.samples[0];
+          const toSample =
+            recording.samples[
+              Math.min(recordingSampleIndex + 1, recording.samples.length - 1)
+            ] || fromSample;
+          const sampleDurationMs = Math.max(
+            1,
+            Number(toSample?.elapsedMs || 0) - Number(fromSample?.elapsedMs || 0)
+          );
+          const sampleProgress =
+            toSample === fromSample
+              ? 0
+              : (elapsedMs - Number(fromSample?.elapsedMs || 0)) / sampleDurationMs;
+          const nextCameraState = interpolateSerializableCameraState(
+            fromSample,
+            toSample,
+            sampleProgress
+          );
+          restoreSerializableCameraState(viewer, nextCameraState);
+        } else {
+          const offset = getFpsBenchmarkOffsetAt(elapsedMs, benchmarkDistanceMeters);
+          const rotatedOffset = rotateBenchmarkOffsetByHeading(
+            offset.x,
+            offset.y,
+            startCamera.heading
+          );
+          const worldPosition = Cesium.Matrix4.multiplyByPoint(
+            benchmarkFrame,
+            new Cesium.Cartesian3(
+              rotatedOffset.east,
+              rotatedOffset.north,
+              startLocalPosition.z *
+                (Number.isFinite(Number(offset.heightScale))
+                  ? Number(offset.heightScale)
+                  : 1)
+            ),
+            new Cesium.Cartesian3()
+          );
 
-        viewer.camera.setView({
-          destination: worldPosition,
-          orientation: {
-            heading: Number(startCamera.heading) || 0,
-            pitch:
-              Number(startCamera.pitch) || Cesium.Math.toRadians(-90),
-            roll: Number(startCamera.roll) || 0,
-          },
-        });
+          viewer.camera.setView({
+            destination: worldPosition,
+            orientation: {
+              heading: Number(startCamera.heading) || 0,
+              pitch: Number(startCamera.pitch) || Cesium.Math.toRadians(-90),
+              roll: Number(startCamera.roll) || 0,
+            },
+          });
+        }
         viewer.scene.requestRender();
 
         if (lastFrameAt !== null && timestamp > lastFrameAt) {
@@ -7004,16 +7498,14 @@ function findPickedInteractiveData(
             globeSse: qualitySnapshot.globeSse,
             tilesetSse: qualitySnapshot.tilesetSse,
             phaseOrder:
-              String(segmentMeta?.phaseKey || "") === "finish"
-                ? 5
-                : String(segmentMeta?.phaseKey || "") === "settle"
-                  ? 6
+              String(segmentMeta?.phaseKey || "") === "settle"
+                ? 1000 + Number(segmentMeta?.index || 0)
                 : Number(segmentMeta?.index || 0),
           });
         }
         lastFrameAt = timestamp;
 
-        if (elapsedMs < FPS_BENCHMARK_TOTAL_DURATION_MS) {
+        if (elapsedMs < benchmarkTotalDurationMs) {
           fpsBenchmarkRafRef.current =
             window.requestAnimationFrame(stepBenchmark);
           return;
@@ -7034,11 +7526,13 @@ function findPickedInteractiveData(
         );
         const longTaskEvents = buildBenchmarkPerfEventSamples(
           benchmarkLongTasks,
-          telemetryStartedAtMs
+          telemetryStartedAtMs,
+          benchmarkSegmentTimeline
         );
         const tileBurstEvents = buildBenchmarkPerfEventSamples(
           benchmarkTileBursts,
-          telemetryStartedAtMs
+          telemetryStartedAtMs,
+          benchmarkSegmentTimeline
         );
         const sortedLongTaskDurationsMs = benchmarkLongTasks
           .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
@@ -7050,33 +7544,42 @@ function findPickedInteractiveData(
           .filter((value) => Number.isFinite(value) && value > 0)
           .sort((left, right) => right - left)
           .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
-        const result = buildFpsBenchmarkResult(frameSamples, {
-          routeVersion: FPS_BENCHMARK_ROUTE_VERSION,
-          coldStart: isColdStart,
-          runKind,
-          runIndexSinceReload: fpsBenchmarkRunCountRef.current + 1,
-          distanceMeters: Math.round(benchmarkDistanceMeters),
-          mode: runMode,
-          qualityProfile,
-          markerCluster: scenario.markerCluster || null,
-          longTaskCount: benchmarkLongTasks.length,
-          maxLongTaskMs: roundBenchmarkValue(
-            benchmarkLongTasks.reduce(
-              (maxDuration, event) =>
-                Math.max(maxDuration, Number(event?.durationMs) || 0),
-              0
-            )
-          ),
-          longTaskDurationsMs: sortedLongTaskDurationsMs,
-          longTaskEvents,
-          tileBurstCount: benchmarkTileBursts.length,
-          tileBurstDurationsMs: sortedTileBurstDurationsMs,
-          tileBurstEvents,
-        });
+        const result = buildFpsBenchmarkResult(
+          frameSamples,
+          {
+            routeVersion:
+              Number(safeScenario.routeVersion) || FPS_BENCHMARK_ROUTE_VERSION,
+            routeKind,
+            coldStart: isColdStart,
+            runKind,
+            runIndexSinceReload: fpsBenchmarkRunCountRef.current + 1,
+            distanceMeters: Math.round(benchmarkDistanceMeters),
+            mode: runMode,
+            qualityProfile,
+            markerCluster: safeScenario.markerCluster || null,
+            recordingDurationMs: recording?.durationMs || null,
+            recordingSampleCount: recording?.sampleCount || null,
+            longTaskCount: benchmarkLongTasks.length,
+            maxLongTaskMs: roundBenchmarkValue(
+              benchmarkLongTasks.reduce(
+                (maxDuration, event) =>
+                  Math.max(maxDuration, Number(event?.durationMs) || 0),
+                0
+              )
+            ),
+            longTaskDurationsMs: sortedLongTaskDurationsMs,
+            longTaskEvents,
+            tileBurstCount: benchmarkTileBursts.length,
+            tileBurstDurationsMs: sortedTileBurstDurationsMs,
+            tileBurstEvents,
+          },
+          benchmarkSegmentTimeline
+        );
         if (!result) {
           persistFpsBenchmarkState((previousState) => ({
             ...previousState,
             running: false,
+            recording: false,
             message: "Test FPS impossible a mesurer.",
           }));
           return;
@@ -7106,10 +7609,11 @@ function findPickedInteractiveData(
         persistFpsBenchmarkState((previousState) => ({
           ...previousState,
           running: false,
+          recording: false,
           lastResult: result,
           history: nextHistory,
           lastLogText: logText,
-          message: formatFpsBenchmarkSummaryDisplay(result),
+          message: `${routeLabel} | ${formatFpsBenchmarkSummaryDisplay(result)}`,
         }));
       };
 
@@ -7117,9 +7621,16 @@ function findPickedInteractiveData(
     }, FPS_BENCHMARK_PREPARE_DELAY_MS);
   }
 
-  function handleStartFpsBenchmark(event) {
+  function handleRecordFpsBenchmark() {
     const viewer = viewerRef.current;
-    if (!viewer || viewer.isDestroyed() || fpsBenchmarkState.running) return;
+    if (
+      !viewer ||
+      viewer.isDestroyed() ||
+      fpsBenchmarkState.running ||
+      fpsBenchmarkState.recording
+    ) {
+      return;
+    }
 
     const liveMode =
       modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
@@ -7133,38 +7644,168 @@ function findPickedInteractiveData(
       return;
     }
 
-    const shouldRedefineScenario =
-      Boolean(event?.shiftKey) || !fpsBenchmarkState.scenario?.startCamera;
-    let nextScenario = fpsBenchmarkState.scenario;
+    const baseCamera = captureSerializableCameraState(viewer);
+    if (!isSerializableCameraStateValid(baseCamera)) {
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        message: "Impossible de demarrer l'enregistrement depuis cette vue.",
+      }));
+      return;
+    }
+    const { markerCluster } = getPreferredFpsBenchmarkStartCamera(viewer, baseCamera);
+    const recordingSamples = [];
+    const recordingCreatedAt = Date.now();
+    let recordingStartedAt = null;
+    let previousCameraSample = null;
 
-    if (shouldRedefineScenario) {
-      const baseCamera = captureSerializableCameraState(viewer);
-      if (!isSerializableCameraStateValid(baseCamera)) {
+    finishFpsBenchmarkRun(viewer);
+    finishFpsBenchmarkRecording();
+
+    persistFpsBenchmarkState((previousState) => ({
+      ...previousState,
+      running: false,
+      recording: true,
+      message:
+        "Enregistrement du trajet reel pendant 26s... Deplace-toi naturellement dans l'app.",
+    }));
+
+    const stepRecording = (timestamp) => {
+      if (viewer.isDestroyed()) {
+        finishFpsBenchmarkRecording();
         persistFpsBenchmarkState((previousState) => ({
           ...previousState,
-          message: "Impossible de memoriser ce point de depart.",
+          recording: false,
+          message: "Enregistrement annule.",
         }));
         return;
       }
-      const { startCamera, markerCluster } = getPreferredFpsBenchmarkStartCamera(
-        viewer,
-        baseCamera
+
+      if (recordingStartedAt === null) {
+        recordingStartedAt = timestamp;
+      }
+
+      const elapsedMs = Math.min(
+        timestamp - recordingStartedAt,
+        FPS_BENCHMARK_RECORDING_DURATION_MS
       );
-      nextScenario = {
-        createdAt: Date.now(),
+      const currentCameraSample = captureSerializableCameraState(viewer);
+      if (isSerializableCameraStateValid(currentCameraSample)) {
+        if (
+          previousCameraSample &&
+          elapsedMs - Number(previousCameraSample.elapsedMs || 0) >=
+            FPS_BENCHMARK_INTERRUPT_FRAME_GAP_MS
+        ) {
+          finishFpsBenchmarkRecording();
+          persistFpsBenchmarkState((previousState) => ({
+            ...previousState,
+            recording: false,
+            message:
+              "Enregistrement interrompu (gros gel externe ou onglet mis en pause). Recommence sans changer d'onglet.",
+          }));
+          return;
+        }
+
+        recordingSamples.push({
+          elapsedMs,
+          ...currentCameraSample,
+          benchmarkMoving: previousCameraSample
+            ? !isSerializableCameraStateStable(previousCameraSample, currentCameraSample)
+            : false,
+        });
+        previousCameraSample = {
+          elapsedMs,
+          ...currentCameraSample,
+        };
+      }
+
+      if (elapsedMs < FPS_BENCHMARK_RECORDING_DURATION_MS) {
+        fpsBenchmarkRecordingRafRef.current =
+          window.requestAnimationFrame(stepRecording);
+        return;
+      }
+
+      finishFpsBenchmarkRecording();
+      const recording = sanitizeBenchmarkRecording({
+        createdAt: recordingCreatedAt,
+        durationMs: FPS_BENCHMARK_RECORDING_DURATION_MS,
+        samples: recordingSamples,
+      });
+      if (
+        !recording ||
+        !recording.segmentTimeline.some((segment) => segment.benchmarkMoving)
+      ) {
+        persistFpsBenchmarkState((previousState) => ({
+          ...previousState,
+          recording: false,
+          message:
+            "Trajet reel insuffisant. Recommence en bougeant franchement la carte pendant 20 a 30 secondes.",
+        }));
+        return;
+      }
+
+      const nextScenario = sanitizeFpsBenchmarkScenario({
+        createdAt: recordingCreatedAt,
         routeVersion: FPS_BENCHMARK_ROUTE_VERSION,
         baseCamera,
-        startCamera,
+        startCamera: recording.samples[0],
         markerCluster,
-      };
+        recording,
+      });
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        running: false,
+        recording: false,
+        scenario: nextScenario,
+        message: `Trajet reel enregistre (${Math.round(
+          recording.durationMs / 1000
+        )}s, ${recording.sampleCount} points, ${
+          recording.segmentTimeline.length
+        } phases). Lance maintenant le test FPS.`,
+      }));
+    };
+
+    fpsBenchmarkRecordingRafRef.current =
+      window.requestAnimationFrame(stepRecording);
+  }
+
+  function handleStartFpsBenchmark() {
+    const viewer = viewerRef.current;
+    if (
+      !viewer ||
+      viewer.isDestroyed() ||
+      fpsBenchmarkState.running ||
+      fpsBenchmarkState.recording
+    ) {
+      return;
+    }
+
+    const liveMode =
+      modeRef.current === "google3d" || Boolean(tilesetRef.current?.show)
+        ? "google3d"
+        : "osm";
+    if (liveMode !== "google3d") {
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        message: "Passe d'abord en vue satellite pour comparer les FPS.",
+      }));
+      return;
+    }
+
+    let nextScenario = sanitizeFpsBenchmarkScenario(fpsBenchmarkState.scenario);
+    if (!nextScenario?.startCamera) {
+      const scriptedScenario = buildScriptedFpsBenchmarkScenario(viewer);
+      if (!scriptedScenario.scenario) {
+        persistFpsBenchmarkState((previousState) => ({
+          ...previousState,
+          message: scriptedScenario.message,
+        }));
+        return;
+      }
+      nextScenario = scriptedScenario.scenario;
       persistFpsBenchmarkState((previousState) => ({
         ...previousState,
         scenario: nextScenario,
-        message: shouldRedefineScenario
-          ? markerCluster
-            ? `Point de depart FPS memorise dans une zone avec ${markerCluster.markerCount} reperes.`
-            : "Point de depart FPS memorise."
-          : previousState.message,
+        message: scriptedScenario.message,
       }));
     }
 
@@ -7277,6 +7918,20 @@ function findPickedInteractiveData(
           }}
         >
           <div>Test FPS: {fpsBenchmarkSummary}</div>
+          {fpsRecordedScenario ? (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--text-secondary)",
+              }}
+            >
+              Trace humaine: {Math.round(fpsRecordedScenario.durationMs / 1000)}s |{" "}
+              {fpsRecordedScenario.sampleCount} points |{" "}
+              {fpsRecordedScenario.segmentTimeline.length} phases
+            </div>
+          ) : null}
           {fpsBenchmarkState.lastLogText ? (
             <button
               onClick={handleCopyFpsBenchmarkLogs}
@@ -7497,13 +8152,27 @@ function findPickedInteractiveData(
             +
           </button>
           <button
+            onClick={handleRecordFpsBenchmark}
+            disabled={isFpsBenchmarkRecordingDisabled}
+            style={desktopMapButtonStyle(
+              desktopBenchmarkRecordBottom,
+              !isFpsBenchmarkRecordingDisabled
+            )}
+            title={fpsBenchmarkRecordButtonTitle}
+          >
+            <span style={mapModeButtonContentStyle()}>
+              {fpsBenchmarkState.recording ? <LoadingSpinner size={14} /> : null}
+              <span>{fpsBenchmarkRecordButtonLabel}</span>
+            </span>
+          </button>
+          <button
             onClick={handleStartFpsBenchmark}
             disabled={isFpsBenchmarkButtonDisabled}
             style={desktopMapButtonStyle(
               desktopBenchmarkBottom,
               !isFpsBenchmarkButtonDisabled
             )}
-            title={fpsBenchmarkButtonTitle}
+            title={fpsBenchmarkPrimaryButtonTitle}
           >
             <span style={mapModeButtonContentStyle()}>
               {fpsBenchmarkState.running ? <LoadingSpinner size={14} /> : null}
