@@ -322,8 +322,9 @@ const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
 const FPS_BENCHMARK_VERSION = 6;
-const FPS_BENCHMARK_ROUTE_VERSION = 8;
+const FPS_BENCHMARK_ROUTE_VERSION = 9;
 const FPS_BENCHMARK_PREPARE_DELAY_MS = 420;
+const FPS_BENCHMARK_INTERRUPT_FRAME_GAP_MS = 2000;
 const FPS_BENCHMARK_MIN_DISTANCE_METERS = 420;
 const FPS_BENCHMARK_MAX_DISTANCE_METERS = 980;
 const FPS_BENCHMARK_DISTANCE_HEIGHT_RATIO = 0.92;
@@ -4646,26 +4647,30 @@ function findPickedInteractiveData(
       if (isMobile) {
         clearMobileQualityRestoreTimeout();
         clearMobileUltraRestoreTimeout();
-        applyMobileIdleQuality();
-        if (!selectedMobileQualityProfile.enableUltra) return;
-        mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+        mobileQualityRestoreTimeoutRef.current = window.setTimeout(() => {
           if (cancelled) return;
           if (adaptiveQualityStateRef.current.isMoving) return;
-          if (modeRef.current !== "google3d") return;
-          applyMobileUltraQuality();
-        }, selectedMobileQualityProfile.ultraRestoreDelayMs);
+          applyMobileIdleQuality();
+          if (!selectedMobileQualityProfile.enableUltra || modeRef.current !== "google3d") {
+            return;
+          }
+          mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+            if (cancelled) return;
+            if (adaptiveQualityStateRef.current.isMoving) return;
+            if (modeRef.current !== "google3d") return;
+            applyMobileUltraQuality();
+          }, selectedMobileQualityProfile.ultraRestoreDelayMs);
+        }, selectedMobileQualityProfile.idleRestoreDelayMs);
         return;
       }
 
       clearDesktopQualityRestoreTimeouts();
-      applyDesktopIdleQuality();
-      if (!selectedDesktopQualityProfile.enableUltra) return;
-      desktopUltraRestoreTimeoutRef.current = window.setTimeout(() => {
-        if (cancelled) return;
-        if (adaptiveQualityStateRef.current.isMoving) return;
-        if (modeRef.current !== "google3d") return;
-        applyDesktopUltraQuality();
-      }, selectedDesktopQualityProfile.ultraRestoreDelayMs);
+      const restoreAttemptId = desktopIdleRestoreAttemptRef.current;
+      desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+      scheduleDesktopIdleRestore(
+        restoreAttemptId,
+        selectedDesktopQualityProfile.idleRestoreDelayMs
+      );
     };
 
     const applyBenchmarkMovingQualityLock = (durationMs = null) => {
@@ -6915,6 +6920,19 @@ function findPickedInteractiveData(
         if (benchmarkStartedAt === null) {
           benchmarkStartedAt = timestamp;
           lastFrameAt = timestamp;
+        }
+
+        const frameGapMs =
+          lastFrameAt !== null ? Number(timestamp - lastFrameAt) || 0 : 0;
+        if (lastFrameAt !== null && frameGapMs >= FPS_BENCHMARK_INTERRUPT_FRAME_GAP_MS) {
+          finishFpsBenchmarkRun(viewer);
+          persistFpsBenchmarkState((previousState) => ({
+            ...previousState,
+            running: false,
+            message:
+              "Test FPS interrompu (gros gel externe ou onglet mis en pause). Relance-le sans changer d'onglet.",
+          }));
+          return;
         }
 
         const elapsedMs = Math.min(
