@@ -125,44 +125,47 @@ const DESKTOP_QUALITY_PROFILE_CONFIG = {
     idleRestoreDelayMs: 720,
     settleHoldMs: 900,
     ultraRestoreDelayMs: DESKTOP_QUALITY_ULTRA_DELAY_MS,
+    enableUltra: false,
   },
   high: {
-    movingResolutionScale: 1.08,
-    movingGlobeSse: 1.22,
-    movingTilesetSse: 8.6,
-    movingMsaa: 4,
-    idleResolutionScale: 1.34,
-    idleGlobeSse: 0.92,
-    idleTilesetSse: 4.6,
-    idleMsaa: 6,
-    ultraResolutionScaleCap: 1.56,
-    ultraGlobeSse: 0.74,
-    ultraTilesetSse: 3.0,
+    movingResolutionScale: 1.42,
+    movingGlobeSse: 0.76,
+    movingTilesetSse: 3.2,
+    movingMsaa: 8,
+    idleResolutionScale: 1.82,
+    idleGlobeSse: 0.42,
+    idleTilesetSse: 1.45,
+    idleMsaa: 8,
+    ultraResolutionScaleCap: 2.0,
+    ultraGlobeSse: 0.28,
+    ultraTilesetSse: 0.95,
     ultraMsaa: 8,
-    fastTilesetSse: 7.2,
-    premiumTilesetSse: 4.2,
-    adaptiveRaiseFps: 50,
-    idleRestoreDelayMs: 100,
-    ultraRestoreDelayMs: 520,
+    fastTilesetSse: 2.1,
+    premiumTilesetSse: 1.15,
+    adaptiveRaiseFps: 18,
+    idleRestoreDelayMs: 50,
+    ultraRestoreDelayMs: 90,
+    enableUltra: true,
   },
   ultra: {
-    movingResolutionScale: 1.16,
-    movingGlobeSse: 0.96,
-    movingTilesetSse: 6.2,
-    movingMsaa: 6,
-    idleResolutionScale: 1.52,
-    idleGlobeSse: 0.7,
-    idleTilesetSse: 3.0,
+    movingResolutionScale: 1.54,
+    movingGlobeSse: 0.62,
+    movingTilesetSse: 2.4,
+    movingMsaa: 8,
+    idleResolutionScale: 1.96,
+    idleGlobeSse: 0.34,
+    idleTilesetSse: 1.08,
     idleMsaa: 8,
-    ultraResolutionScaleCap: 1.78,
-    ultraGlobeSse: 0.56,
-    ultraTilesetSse: 2.2,
+    ultraResolutionScaleCap: 2.15,
+    ultraGlobeSse: 0.22,
+    ultraTilesetSse: 0.72,
     ultraMsaa: 8,
-    fastTilesetSse: 5.4,
-    premiumTilesetSse: 3.2,
-    adaptiveRaiseFps: 42,
-    idleRestoreDelayMs: 80,
-    ultraRestoreDelayMs: 380,
+    fastTilesetSse: 1.7,
+    premiumTilesetSse: 0.95,
+    adaptiveRaiseFps: 14,
+    idleRestoreDelayMs: 40,
+    ultraRestoreDelayMs: 70,
+    enableUltra: true,
   },
   perf: {
     movingResolutionScale: 0.86,
@@ -182,6 +185,7 @@ const DESKTOP_QUALITY_PROFILE_CONFIG = {
     adaptiveRaiseFps: Number.POSITIVE_INFINITY,
     idleRestoreDelayMs: 120,
     ultraRestoreDelayMs: 1200,
+    enableUltra: false,
   },
 };
 const MOBILE_QUALITY_PROFILE_CONFIG = {
@@ -260,6 +264,18 @@ const GOOGLE_TILESET_MOBILE_CACHE_BYTES = 603_979_776; // 576 MB
 const GOOGLE_TILESET_MOBILE_CACHE_OVERFLOW_BYTES = 268_435_456; // +256 MB
 const GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION = 0.55;
 const GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY = false;
+const DEFAULT_SCENE_BACKGROUND_COLOR = Cesium.Color.fromCssColorString("#dbeafe");
+const CINEMATIC_SCENE_BACKGROUND_COLOR = Cesium.Color.BLACK;
+const DEFAULT_SCENE_BLOOM_CONTRAST = 128;
+const CINEMATIC_SCENE_BLOOM_CONTRAST = 210;
+const DEFAULT_SCENE_BLOOM_BRIGHTNESS = -0.3;
+const CINEMATIC_SCENE_BLOOM_BRIGHTNESS = -0.12;
+const DEFAULT_SCENE_EXPOSURE = 1.0;
+const CINEMATIC_SCENE_EXPOSURE = 1.1;
+const DEFAULT_SCENE_SHADOW_MAP_SIZE = 2048;
+const CINEMATIC_SCENE_SHADOW_MAP_SIZE = 4096;
+const DEFAULT_SCENE_SHADOW_DISTANCE = 5000;
+const CINEMATIC_SCENE_SHADOW_DISTANCE = 12000;
 const OSM_IMAGERY_MAX_LEVEL = 20;
 const GLOBE_TILE_CACHE_SIZE_DESKTOP = 2600;
 const GLOBE_TILE_CACHE_SIZE_MOBILE = 1400;
@@ -867,7 +883,7 @@ function getDesktopQualityProfile(value) {
       ? Number(baseProfile.settleMsaa)
       : Number(baseProfile.idleMsaa),
     settleHoldMs: Math.max(0, Number(baseProfile.settleHoldMs) || 0),
-    enableUltra: normalized === "ultra",
+    enableUltra: Boolean(baseProfile.enableUltra),
   };
 }
 
@@ -893,12 +909,18 @@ function getUltraResolutionScale(isIOSDevice = false) {
   );
 }
 
-function getDesktopProfileResolutionScale(targetScale, fallbackScale = DESKTOP_RESOLUTION_SCALE) {
+function getDesktopProfileResolutionScale(
+  targetScale,
+  fallbackScale = DESKTOP_RESOLUTION_SCALE,
+  allowOverdrive = false
+) {
   const safeTarget = Number(targetScale);
   if (!Number.isFinite(safeTarget) || safeTarget <= 0) return fallbackScale;
   if (typeof window === "undefined") return safeTarget;
   const devicePixelRatio = Number(window.devicePixelRatio) || 1;
-  const hardCap = Math.max(1, devicePixelRatio * 1.25);
+  const hardCap = allowOverdrive
+    ? Math.max(1.6, devicePixelRatio * 2)
+    : Math.max(1, devicePixelRatio * 1.25);
   return Math.max(0.72, Math.min(safeTarget, hardCap));
 }
 
@@ -3613,16 +3635,42 @@ function findPickedInteractiveData(
       : isMobile
         ? GLOBE_LOADING_DESCENDANT_LIMIT_MOBILE
         : GLOBE_LOADING_DESCENDANT_LIMIT_DESKTOP;
+    viewer.scene.globe.enableLighting = false;
+    viewer.scene.globe.dynamicAtmosphereLighting = false;
+    viewer.scene.globe.dynamicAtmosphereLightingFromSun = false;
     viewer.scene.globe.showGroundAtmosphere = false;
+    viewer.scene.globe.showWaterEffect = false;
+    viewer.scene.globe.shadows = Cesium.ShadowMode.DISABLED;
     viewer.scene.skyAtmosphere.show = !isIOSDevice;
     viewer.scene.skyBox.show = false;
     viewer.scene.fog.enabled = false;
     viewer.scene.highDynamicRange = !isIOSDevice;
-    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
+    viewer.scene.sunBloom = false;
+    viewer.scene.backgroundColor = DEFAULT_SCENE_BACKGROUND_COLOR;
     viewer.scene.fxaa = false;
     if (viewer.scene.postProcessStages?.fxaa) {
       viewer.scene.postProcessStages.fxaa.enabled = false;
     }
+    if (viewer.scene.postProcessStages?.bloom) {
+      viewer.scene.postProcessStages.bloom.enabled = false;
+      viewer.scene.postProcessStages.bloom.uniforms.contrast =
+        DEFAULT_SCENE_BLOOM_CONTRAST;
+      viewer.scene.postProcessStages.bloom.uniforms.brightness =
+        DEFAULT_SCENE_BLOOM_BRIGHTNESS;
+      viewer.scene.postProcessStages.bloom.uniforms.glowOnly = false;
+    }
+    if (viewer.scene.postProcessStages) {
+      viewer.scene.postProcessStages.tonemapper = Cesium.Tonemapper.PBR_NEUTRAL;
+      viewer.scene.postProcessStages.exposure = DEFAULT_SCENE_EXPOSURE;
+    }
+    viewer.shadows = false;
+    viewer.terrainShadows = Cesium.ShadowMode.RECEIVE_ONLY;
+    viewer.shadowMap.enabled = false;
+    viewer.shadowMap.softShadows = false;
+    viewer.shadowMap.normalOffset = true;
+    viewer.shadowMap.fadingEnabled = true;
+    viewer.shadowMap.size = DEFAULT_SCENE_SHADOW_MAP_SIZE;
+    viewer.shadowMap.maximumDistance = DEFAULT_SCENE_SHADOW_DISTANCE;
     viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
     viewer.useBrowserRecommendedResolution = isIOSDevice;
     viewer.resolutionScale = getPreferredResolutionScale(isMobile, isIOSDevice);
@@ -4840,6 +4888,86 @@ function findPickedInteractiveData(
     const selectedDesktopQualityProfile = getDesktopQualityProfile(
       desktopQualityProfileRef.current
     );
+    const preferMaximumDesktopDetail =
+      !isMobile &&
+      (selectedDesktopQualityProfileId === "high" ||
+        selectedDesktopQualityProfileId === "ultra");
+    const applyScenePresentationQuality = (
+      activeMode = modeRef.current,
+      tileset = tilesetRef.current
+    ) => {
+      const useCinematicDesktopScene =
+        !isMobile &&
+        !isIOSDevice &&
+        activeMode === "google3d" &&
+        preferMaximumDesktopDetail;
+
+      viewer.scene.globe.enableLighting = useCinematicDesktopScene;
+      viewer.scene.globe.dynamicAtmosphereLighting = useCinematicDesktopScene;
+      viewer.scene.globe.dynamicAtmosphereLightingFromSun = useCinematicDesktopScene;
+      viewer.scene.globe.showGroundAtmosphere = useCinematicDesktopScene;
+      viewer.scene.globe.showWaterEffect = useCinematicDesktopScene;
+      viewer.scene.globe.shadows = useCinematicDesktopScene
+        ? Cesium.ShadowMode.ENABLED
+        : Cesium.ShadowMode.DISABLED;
+      viewer.scene.skyAtmosphere.show = !isIOSDevice;
+      viewer.scene.skyBox.show = useCinematicDesktopScene;
+      viewer.scene.fog.enabled = useCinematicDesktopScene;
+      viewer.scene.highDynamicRange = !isIOSDevice;
+      viewer.scene.sunBloom = useCinematicDesktopScene;
+      viewer.scene.fxaa = useCinematicDesktopScene;
+
+      if (viewer.scene.postProcessStages?.fxaa) {
+        viewer.scene.postProcessStages.fxaa.enabled = useCinematicDesktopScene;
+      }
+
+      if (viewer.scene.postProcessStages?.bloom) {
+        viewer.scene.postProcessStages.bloom.enabled = useCinematicDesktopScene;
+        viewer.scene.postProcessStages.bloom.uniforms.contrast =
+          useCinematicDesktopScene
+            ? CINEMATIC_SCENE_BLOOM_CONTRAST
+            : DEFAULT_SCENE_BLOOM_CONTRAST;
+        viewer.scene.postProcessStages.bloom.uniforms.brightness =
+          useCinematicDesktopScene
+            ? CINEMATIC_SCENE_BLOOM_BRIGHTNESS
+            : DEFAULT_SCENE_BLOOM_BRIGHTNESS;
+        viewer.scene.postProcessStages.bloom.uniforms.glowOnly = false;
+      }
+
+      if (viewer.scene.postProcessStages) {
+        viewer.scene.postProcessStages.tonemapper = useCinematicDesktopScene
+          ? Cesium.Tonemapper.ACES
+          : Cesium.Tonemapper.PBR_NEUTRAL;
+        viewer.scene.postProcessStages.exposure = useCinematicDesktopScene
+          ? CINEMATIC_SCENE_EXPOSURE
+          : DEFAULT_SCENE_EXPOSURE;
+      }
+
+      viewer.shadows = useCinematicDesktopScene;
+      viewer.terrainShadows = useCinematicDesktopScene
+        ? Cesium.ShadowMode.ENABLED
+        : Cesium.ShadowMode.RECEIVE_ONLY;
+      viewer.shadowMap.enabled = useCinematicDesktopScene;
+      viewer.shadowMap.softShadows = useCinematicDesktopScene;
+      viewer.shadowMap.normalOffset = true;
+      viewer.shadowMap.fadingEnabled = true;
+      viewer.shadowMap.size = useCinematicDesktopScene
+        ? CINEMATIC_SCENE_SHADOW_MAP_SIZE
+        : DEFAULT_SCENE_SHADOW_MAP_SIZE;
+      viewer.shadowMap.maximumDistance = useCinematicDesktopScene
+        ? CINEMATIC_SCENE_SHADOW_DISTANCE
+        : DEFAULT_SCENE_SHADOW_DISTANCE;
+
+      if (tileset) {
+        tileset.shadows = useCinematicDesktopScene
+          ? Cesium.ShadowMode.ENABLED
+          : Cesium.ShadowMode.DISABLED;
+      }
+
+      viewer.scene.backgroundColor = useCinematicDesktopScene
+        ? CINEMATIC_SCENE_BACKGROUND_COLOR
+        : DEFAULT_SCENE_BACKGROUND_COLOR;
+    };
 
     const setCurrentQualityTelemetry = ({
       preset,
@@ -4868,11 +4996,13 @@ function findPickedInteractiveData(
     const applyDesktopMovingQuality = (tileset = tilesetRef.current) => {
       if (isMobile) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = selectedDesktopQualityProfile.movingMsaa;
       viewer.resolutionScale = getDesktopProfileResolutionScale(
         selectedDesktopQualityProfile.movingResolutionScale,
-        DESKTOP_MOVING_RESOLUTION_SCALE
+        DESKTOP_MOVING_RESOLUTION_SCALE,
+        preferMaximumDesktopDetail
       );
       viewer.scene.globe.maximumScreenSpaceError =
         selectedDesktopQualityProfile.movingGlobeSse;
@@ -4884,15 +5014,20 @@ function findPickedInteractiveData(
         // refinement during zoom-out and long pans. Keep movement more fluid by
         // allowing Cesium to bias visible detail toward the center while culling
         // transient requests until the camera settles.
-        tileset.dynamicScreenSpaceError = true;
-        tileset.foveatedScreenSpaceError = true;
+        tileset.dynamicScreenSpaceError = !preferMaximumDesktopDetail;
+        tileset.foveatedScreenSpaceError = !preferMaximumDesktopDetail;
         tileset.cullRequestsWhileMoving = useAutoMovingCull;
+        tileset.immediatelyLoadDesiredLevelOfDetail = preferMaximumDesktopDetail;
         tileset.foveatedTimeDelay =
-          useAutoMovingCull
+          preferMaximumDesktopDetail
+            ? GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS
+            : useAutoMovingCull
             ? GOOGLE_TILESET_FOVEATED_TIME_DELAY_MOVING_SECONDS
             : GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
         tileset.progressiveResolutionHeightFraction =
-          useAutoMovingCull
+          preferMaximumDesktopDetail
+            ? GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION
+            : useAutoMovingCull
             ? GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION_MOVING
             : GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
         tileset.preferLeaves = true;
@@ -4920,20 +5055,23 @@ function findPickedInteractiveData(
     const applyDesktopSettleQuality = (tileset = tilesetRef.current) => {
       if (isMobile) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = selectedDesktopQualityProfile.settleMsaa;
       viewer.resolutionScale = getDesktopProfileResolutionScale(
         selectedDesktopQualityProfile.settleResolutionScale,
-        selectedDesktopQualityProfile.movingResolutionScale
+        selectedDesktopQualityProfile.movingResolutionScale,
+        preferMaximumDesktopDetail
       );
       viewer.scene.globe.maximumScreenSpaceError =
         selectedDesktopQualityProfile.settleGlobeSse;
 
       if (tileset && modeRef.current === "google3d") {
         tileset.maximumScreenSpaceError = selectedDesktopQualityProfile.settleTilesetSse;
-        tileset.dynamicScreenSpaceError = true;
-        tileset.foveatedScreenSpaceError = true;
+        tileset.dynamicScreenSpaceError = !preferMaximumDesktopDetail;
+        tileset.foveatedScreenSpaceError = !preferMaximumDesktopDetail;
         tileset.cullRequestsWhileMoving = false;
+        tileset.immediatelyLoadDesiredLevelOfDetail = preferMaximumDesktopDetail;
         tileset.foveatedTimeDelay = GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
         tileset.progressiveResolutionHeightFraction =
           GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
@@ -4962,11 +5100,13 @@ function findPickedInteractiveData(
     const applyDesktopIdleQuality = (tileset = tilesetRef.current) => {
       if (isMobile) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = selectedDesktopQualityProfile.idleMsaa;
       viewer.resolutionScale = getDesktopProfileResolutionScale(
         selectedDesktopQualityProfile.idleResolutionScale,
-        getPreferredResolutionScale(false, isIOSDevice)
+        getPreferredResolutionScale(false, isIOSDevice),
+        preferMaximumDesktopDetail
       );
       viewer.scene.globe.maximumScreenSpaceError =
         selectedDesktopQualityProfile.idleGlobeSse;
@@ -4976,6 +5116,7 @@ function findPickedInteractiveData(
         tileset.dynamicScreenSpaceError = false;
         tileset.foveatedScreenSpaceError = false;
         tileset.cullRequestsWhileMoving = false;
+        tileset.immediatelyLoadDesiredLevelOfDetail = preferMaximumDesktopDetail;
         tileset.foveatedTimeDelay = GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
         tileset.progressiveResolutionHeightFraction =
           GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
@@ -5004,6 +5145,7 @@ function findPickedInteractiveData(
     const applyDesktopUltraQuality = (tileset = tilesetRef.current) => {
       if (isMobile) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = true;
       viewer.scene.globe.maximumScreenSpaceError =
         selectedDesktopQualityProfile.ultraGlobeSse;
@@ -5012,6 +5154,7 @@ function findPickedInteractiveData(
         tileset.dynamicScreenSpaceError = false;
         tileset.foveatedScreenSpaceError = false;
         tileset.cullRequestsWhileMoving = false;
+        tileset.immediatelyLoadDesiredLevelOfDetail = preferMaximumDesktopDetail;
         tileset.foveatedTimeDelay = GOOGLE_TILESET_FOVEATED_TIME_DELAY_IDLE_SECONDS;
         tileset.progressiveResolutionHeightFraction =
           GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
@@ -5035,6 +5178,7 @@ function findPickedInteractiveData(
     const applyMobileMovingQuality = (tileset = tilesetRef.current) => {
       if (!isMobile) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = MOBILE_MOVING_MSAA_SAMPLES;
       viewer.resolutionScale = selectedMobileQualityProfile.movingResolutionScale;
@@ -5069,6 +5213,7 @@ function findPickedInteractiveData(
     const applyMobileIdleQuality = (tileset = tilesetRef.current) => {
       if (!isMobile) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = false;
       viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
       viewer.resolutionScale = selectedMobileQualityProfile.idleResolutionScale;
@@ -5103,6 +5248,7 @@ function findPickedInteractiveData(
     const applyMobileUltraQuality = (tileset = tilesetRef.current) => {
       if (!isMobile || !selectedMobileQualityProfile.enableUltra) return;
 
+      applyScenePresentationQuality(modeRef.current, tileset);
       adaptiveQualityStateRef.current.isUltraActive = true;
       viewer.scene.msaaSamples = MOBILE_MSAA_SAMPLES;
       if (typeof window === "undefined") {
@@ -5158,7 +5304,8 @@ function findPickedInteractiveData(
       viewer.scene.msaaSamples = selectedDesktopQualityProfile.ultraMsaa;
       viewer.resolutionScale = getDesktopProfileResolutionScale(
         selectedDesktopQualityProfile.ultraResolutionScaleCap,
-        getUltraResolutionScale(isIOSDevice)
+        getUltraResolutionScale(isIOSDevice),
+        preferMaximumDesktopDetail
       );
       viewer.scene.requestRender();
     };
@@ -5480,6 +5627,9 @@ function findPickedInteractiveData(
             preloadWhenHidden: true,
             preloadFlightDestinations: true,
             skipLevelOfDetail: false,
+            shadows: preferMaximumDesktopDetail
+              ? Cesium.ShadowMode.ENABLED
+              : Cesium.ShadowMode.DISABLED,
             dynamicScreenSpaceError: isMobile && !isIOSDevice,
             cullRequestsWhileMoving: false,
             cullWithChildrenBounds: true,
@@ -5489,7 +5639,9 @@ function findPickedInteractiveData(
             progressiveResolutionHeightFraction:
               GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION,
             immediatelyLoadDesiredLevelOfDetail:
-              GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY,
+              preferMaximumDesktopDetail
+                ? true
+                : GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY,
             cacheBytes: isMobile
               ? GOOGLE_TILESET_MOBILE_CACHE_BYTES
               : GOOGLE_TILESET_DESKTOP_CACHE_BYTES,
@@ -5505,6 +5657,9 @@ function findPickedInteractiveData(
             tileset.preloadWhenHidden = true;
             tileset.preloadFlightDestinations = true;
             tileset.skipLevelOfDetail = false;
+            tileset.shadows = preferMaximumDesktopDetail
+              ? Cesium.ShadowMode.ENABLED
+              : Cesium.ShadowMode.DISABLED;
             tileset.dynamicScreenSpaceError = isMobile && !isIOSDevice;
             tileset.cullRequestsWhileMoving = false;
             tileset.preferLeaves = true;
@@ -5514,7 +5669,9 @@ function findPickedInteractiveData(
             tileset.progressiveResolutionHeightFraction =
               GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION;
             tileset.immediatelyLoadDesiredLevelOfDetail =
-              GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY;
+              preferMaximumDesktopDetail
+                ? true
+                : GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY;
             tileset.cacheBytes = isMobile
               ? GOOGLE_TILESET_MOBILE_CACHE_BYTES
               : GOOGLE_TILESET_DESKTOP_CACHE_BYTES;
@@ -5626,8 +5783,7 @@ function findPickedInteractiveData(
       setSceneGoogleTilesetsVisibility(viewer, false);
 
       viewer.scene.globe.show = true;
-      viewer.scene.skyBox.show = false;
-      viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
+      applyScenePresentationQuality("osm");
 
       if (osmImageryLayerRef.current) {
         osmImageryLayerRef.current.show = true;
@@ -5650,8 +5806,7 @@ function findPickedInteractiveData(
       if (cancelled) return;
 
       viewer.scene.globe.show = true;
-      viewer.scene.skyBox.show = false;
-      viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#dbeafe");
+      applyScenePresentationQuality("google3d", tileset);
 
       if (osmImageryLayerRef.current) {
         osmImageryLayerRef.current.show = true;
