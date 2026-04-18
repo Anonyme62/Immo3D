@@ -2470,6 +2470,7 @@ export default function CesiumMap({
   const desktopSettleSnapshotRef = useRef(null);
   const desktopMovingVisibleUntilRef = useRef(0);
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
+  const applyFpsBenchmarkInitialPauseQualityRef = useRef(() => {});
   const releaseFpsBenchmarkMovingQualityRef = useRef(() => {});
   const applyFpsBenchmarkSegmentQualityRef = useRef(() => {});
   const currentQualityTelemetryRef = useRef({
@@ -5236,6 +5237,17 @@ function findPickedInteractiveData(
     };
 
     applyFpsBenchmarkMovingQualityRef.current = applyBenchmarkMovingQualityLock;
+    applyFpsBenchmarkInitialPauseQualityRef.current = () => {
+      if (isMobile) {
+        applyMobileIdleQuality();
+        return;
+      }
+      if (selectedDesktopQualityProfileId === "auto") {
+        applyDesktopSettleQuality();
+        return;
+      }
+      applyDesktopIdleQuality();
+    };
     releaseFpsBenchmarkMovingQualityRef.current = releaseBenchmarkMovingQualityLock;
     applyFpsBenchmarkSegmentQualityRef.current = applyBenchmarkSegmentQuality;
 
@@ -5928,6 +5940,7 @@ function findPickedInteractiveData(
       fpsBenchmarkQualityLockRef.current = false;
       fpsBenchmarkLastSegmentKeyRef.current = "";
       applyFpsBenchmarkMovingQualityRef.current = () => {};
+      applyFpsBenchmarkInitialPauseQualityRef.current = () => {};
       releaseFpsBenchmarkMovingQualityRef.current = () => {};
       applyFpsBenchmarkSegmentQualityRef.current = () => {};
       resetAdaptiveQualityStats();
@@ -7447,12 +7460,8 @@ function findPickedInteractiveData(
       applyFpsBenchmarkMovingQualityRef.current?.(
         Number(initialSegmentMeta?.durationMs) || null
       );
-    } else if (isMobile) {
-      applyMobileIdleQuality();
-    } else if (selectedDesktopQualityProfileId === "auto") {
-      applyDesktopSettleQuality();
     } else {
-      applyDesktopIdleQuality();
+      applyFpsBenchmarkInitialPauseQualityRef.current?.();
     }
     restoreSerializableCameraState(viewer, startCamera);
     viewer.scene.requestRender();
@@ -7950,7 +7959,16 @@ function findPickedInteractiveData(
       }));
     }
 
-    runFpsBenchmark(viewer, nextScenario);
+    try {
+      runFpsBenchmark(viewer, nextScenario);
+    } catch (error) {
+      console.error("Erreur lancement benchmark FPS :", error);
+      persistFpsBenchmarkState((previousState) => ({
+        ...previousState,
+        running: false,
+        message: "Le test FPS n'a pas pu demarrer. Recharge la page puis reessaie.",
+      }));
+    }
   }
 
   function forcePlanModeImmediate(options = {}) {
