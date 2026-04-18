@@ -3614,7 +3614,6 @@ function findPickedInteractiveData(
       viewer.scene.postProcessStages.fxaa.enabled = false;
     }
     viewer.terrainProvider = ellipsoidTerrainProviderRef.current;
-    viewer.targetFrameRate = isIOSDevice ? 30 : 60;
     viewer.useBrowserRecommendedResolution = isIOSDevice;
     viewer.resolutionScale = getPreferredResolutionScale(isMobile, isIOSDevice);
     viewer.scene.msaaSamples =
