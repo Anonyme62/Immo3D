@@ -6086,6 +6086,7 @@ function findPickedInteractiveData(
       const customPointVisibleSet = new Set(
         customRanked.slice(0, lodBudget.customPointBudget).map((entry) => entry.entity)
       );
+      const shouldShowDesktopLabelsForVisiblePoints = !isMobile && !isMoving;
 
       bienEntities.forEach((entity) => {
         const bienId = entity.bienData?.id;
@@ -6093,7 +6094,11 @@ function findPickedInteractiveData(
         const shouldShowPointBase = entity.showPointByPriority !== false;
         const shouldShowPoint =
           isSelected || (shouldShowPointBase && bienPointVisibleSet.has(entity));
-        const shouldShowLabel = isSelected || bienLabelVisibleSet.has(entity);
+        const shouldShowLabel =
+          isSelected ||
+          (shouldShowDesktopLabelsForVisiblePoints
+            ? shouldShowPoint
+            : bienLabelVisibleSet.has(entity));
         if (entity.point?.show !== shouldShowPoint) {
           entity.point.show = shouldShowPoint;
           changed = true;
@@ -6106,7 +6111,9 @@ function findPickedInteractiveData(
 
       customEntities.forEach((entity) => {
         const shouldShowPoint = customPointVisibleSet.has(entity);
-        const shouldShowLabel = customLabelVisibleSet.has(entity);
+        const shouldShowLabel = shouldShowDesktopLabelsForVisiblePoints
+          ? shouldShowPoint
+          : customLabelVisibleSet.has(entity);
         if (entity.point?.show !== shouldShowPoint) {
           entity.point.show = shouldShowPoint;
           changed = true;
