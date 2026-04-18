@@ -2439,6 +2439,8 @@ export default function CesiumMap({
   const fpsBenchmarkRafRef = useRef(null);
   const fpsBenchmarkStartTimeoutRef = useRef(null);
   const fpsBenchmarkRecordingRafRef = useRef(null);
+  const fpsBenchmarkRecordingDetachRef = useRef(() => {});
+  const fpsBenchmarkRecordingMoveActiveRef = useRef(false);
   const fpsBenchmarkCameraInputsRef = useRef(null);
   const fpsBenchmarkRunCountRef = useRef(0);
   const fpsBenchmarkQualityLockTimeoutRef = useRef(null);
@@ -5804,10 +5806,7 @@ function findPickedInteractiveData(
       clearMobileUltraRestoreTimeout();
       clearQualityRecoverySafetyTimeout();
       clearSatelliteLoadWatchdogTimeout();
-      if (fpsBenchmarkRecordingRafRef.current) {
-        window.cancelAnimationFrame(fpsBenchmarkRecordingRafRef.current);
-        fpsBenchmarkRecordingRafRef.current = null;
-      }
+      finishFpsBenchmarkRecording();
       if (fpsBenchmarkQualityLockTimeoutRef.current) {
         window.clearTimeout(fpsBenchmarkQualityLockTimeoutRef.current);
         fpsBenchmarkQualityLockTimeoutRef.current = null;
@@ -7252,6 +7251,9 @@ function findPickedInteractiveData(
       window.cancelAnimationFrame(fpsBenchmarkRecordingRafRef.current);
       fpsBenchmarkRecordingRafRef.current = null;
     }
+    fpsBenchmarkRecordingDetachRef.current?.();
+    fpsBenchmarkRecordingDetachRef.current = () => {};
+    fpsBenchmarkRecordingMoveActiveRef.current = false;
   }
 
   function buildScriptedFpsBenchmarkScenario(viewer) {
@@ -7656,10 +7658,28 @@ function findPickedInteractiveData(
     const recordingSamples = [];
     const recordingCreatedAt = Date.now();
     let recordingStartedAt = null;
-    let previousCameraSample = null;
+    let previousSampleElapsedMs = null;
 
     finishFpsBenchmarkRun(viewer);
     finishFpsBenchmarkRecording();
+    fpsBenchmarkRecordingMoveActiveRef.current = false;
+
+    const handleRecordingMoveStart = () => {
+      fpsBenchmarkRecordingMoveActiveRef.current = true;
+    };
+    const handleRecordingMoveEnd = () => {
+      fpsBenchmarkRecordingMoveActiveRef.current = false;
+    };
+    viewer.camera.moveStart.addEventListener(handleRecordingMoveStart);
+    viewer.camera.moveEnd.addEventListener(handleRecordingMoveEnd);
+    fpsBenchmarkRecordingDetachRef.current = () => {
+      try {
+        viewer.camera.moveStart.removeEventListener(handleRecordingMoveStart);
+        viewer.camera.moveEnd.removeEventListener(handleRecordingMoveEnd);
+      } catch {
+        // Ignore teardown issues if the viewer is already gone.
+      }
+    };
 
     persistFpsBenchmarkState((previousState) => ({
       ...previousState,
@@ -7691,8 +7711,8 @@ function findPickedInteractiveData(
       const currentCameraSample = captureSerializableCameraState(viewer);
       if (isSerializableCameraStateValid(currentCameraSample)) {
         if (
-          previousCameraSample &&
-          elapsedMs - Number(previousCameraSample.elapsedMs || 0) >=
+          Number.isFinite(previousSampleElapsedMs) &&
+          elapsedMs - Number(previousSampleElapsedMs || 0) >=
             FPS_BENCHMARK_INTERRUPT_FRAME_GAP_MS
         ) {
           finishFpsBenchmarkRecording();
@@ -7708,14 +7728,9 @@ function findPickedInteractiveData(
         recordingSamples.push({
           elapsedMs,
           ...currentCameraSample,
-          benchmarkMoving: previousCameraSample
-            ? !isSerializableCameraStateStable(previousCameraSample, currentCameraSample)
-            : false,
+          benchmarkMoving: fpsBenchmarkRecordingMoveActiveRef.current,
         });
-        previousCameraSample = {
-          elapsedMs,
-          ...currentCameraSample,
-        };
+        previousSampleElapsedMs = elapsedMs;
       }
 
       if (elapsedMs < FPS_BENCHMARK_RECORDING_DURATION_MS) {
