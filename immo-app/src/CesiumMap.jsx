@@ -7436,10 +7436,24 @@ function findPickedInteractiveData(
       0,
       benchmarkSegmentTimeline
     );
+    const initialSegmentShouldMove =
+      typeof initialSegmentMeta?.benchmarkMoving === "boolean"
+        ? Boolean(initialSegmentMeta.benchmarkMoving)
+        : true;
     if (initialSegmentMeta?.key) {
       fpsBenchmarkLastSegmentKeyRef.current = initialSegmentMeta.key;
     }
-    applyFpsBenchmarkMovingQualityRef.current?.();
+    if (initialSegmentShouldMove) {
+      applyFpsBenchmarkMovingQualityRef.current?.(
+        Number(initialSegmentMeta?.durationMs) || null
+      );
+    } else if (isMobile) {
+      applyMobileIdleQuality();
+    } else if (selectedDesktopQualityProfileId === "auto") {
+      applyDesktopSettleQuality();
+    } else {
+      applyDesktopIdleQuality();
+    }
     restoreSerializableCameraState(viewer, startCamera);
     viewer.scene.requestRender();
 
