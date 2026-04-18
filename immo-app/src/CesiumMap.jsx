@@ -6749,6 +6749,51 @@ function findPickedInteractiveData(
 
     let cancelled = false;
     const runtime = markerRefineRuntimeRef.current;
+    const getMarkerRefineRecoveryDelayMs = () => {
+      const currentDesktopProfile = normalizeDesktopQualityProfile(
+        desktopQualityProfileRef.current
+      );
+      if (isMobile || currentDesktopProfile !== "auto") return 0;
+
+      const now = Date.now();
+      const adaptiveState = adaptiveQualityStateRef.current;
+      let delayMs = Math.max(0, adaptiveState.stabilityHoldUntil - now);
+
+      if (adaptiveState.lastLongTaskAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_LONG_TASK_RECOVERY_MS -
+              (now - adaptiveState.lastLongTaskAt)
+          )
+        );
+      }
+
+      if (adaptiveState.lastOverloadAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS -
+              (now - adaptiveState.lastOverloadAt)
+          )
+        );
+      }
+
+      if (adaptiveState.lastTileActivityAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_TILE_RECOVERY_MS -
+              (now - adaptiveState.lastTileActivityAt)
+          )
+        );
+      }
+
+      return delayMs;
+    };
 
     const clearScheduledMarkerRefine = () => {
       if (runtime.timeoutId) {
@@ -6819,6 +6864,14 @@ function findPickedInteractiveData(
         fpsBenchmarkActiveRef.current
       ) {
         scheduleMarkerRefine();
+        return;
+      }
+
+      const refineRecoveryDelayMs = getMarkerRefineRecoveryDelayMs();
+      if (refineRecoveryDelayMs > 0) {
+        scheduleMarkerRefine(
+          Math.max(SATELLITE_MARKER_LOD_SETTLE_DELAY_MS, refineRecoveryDelayMs)
+        );
         return;
       }
 
@@ -7141,6 +7194,86 @@ function findPickedInteractiveData(
     if (!viewer) return;
 
     let cancelled = false;
+    const getMarkerCpuRecoveryDelayMs = () => {
+      const currentDesktopProfile = normalizeDesktopQualityProfile(
+        desktopQualityProfileRef.current
+      );
+      if (isMobile || currentDesktopProfile !== "auto") return 0;
+
+      const now = Date.now();
+      const adaptiveState = adaptiveQualityStateRef.current;
+      let delayMs = Math.max(0, adaptiveState.stabilityHoldUntil - now);
+
+      if (adaptiveState.lastLongTaskAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_LONG_TASK_RECOVERY_MS -
+              (now - adaptiveState.lastLongTaskAt)
+          )
+        );
+      }
+
+      if (adaptiveState.lastOverloadAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS -
+              (now - adaptiveState.lastOverloadAt)
+          )
+        );
+      }
+
+      if (adaptiveState.lastTileActivityAt > 0) {
+        delayMs = Math.max(
+          delayMs,
+          Math.max(
+            0,
+            ADAPTIVE_QUALITY_AUTO_TILE_RECOVERY_MS -
+              (now - adaptiveState.lastTileActivityAt)
+          )
+        );
+      }
+
+      return delayMs;
+    };
+    const applyLightweightSatelliteMarkerState = (
+      bienEntities,
+      customEntities,
+      selectedId
+    ) => {
+      let changed = false;
+
+      bienEntities.forEach((entity) => {
+        const bienId = entity.bienData?.id;
+        const isSelected = bienId != null && bienId === selectedId;
+        const shouldShowPoint = entity.showPointByPriority !== false;
+        if (entity.point?.show !== shouldShowPoint) {
+          entity.point.show = shouldShowPoint;
+          changed = true;
+        }
+        const shouldShowLabel = Boolean(isSelected);
+        if (entity.label?.show !== shouldShowLabel) {
+          entity.label.show = shouldShowLabel;
+          changed = true;
+        }
+      });
+
+      customEntities.forEach((entity) => {
+        if (entity.point?.show !== true) {
+          entity.point.show = true;
+          changed = true;
+        }
+        if (entity.label?.show !== false) {
+          entity.label.show = false;
+          changed = true;
+        }
+      });
+
+      return changed;
+    };
 
     const clearMarkerLodSettleTimeout = () => {
       if (markerLodSettleTimeoutRef.current) {
@@ -7164,6 +7297,8 @@ function findPickedInteractiveData(
       if (isMoving && markerLodRuntimeRef.current.movingStateApplied) {
         return;
       }
+      const markerCpuRecoveryDelayMs =
+        isSatelliteMode && !isMoving ? getMarkerCpuRecoveryDelayMs() : 0;
 
       const now = performance.now();
       if (!isMoving && now < markerLodRuntimeRef.current.nextUpdateAt) return;
@@ -7233,6 +7368,23 @@ function findPickedInteractiveData(
 
         markerLodRuntimeRef.current.movingStateApplied = true;
         if (changed) {
+          viewer.scene.requestRender();
+        }
+        return;
+      }
+
+      if (markerCpuRecoveryDelayMs > 0) {
+        const signature = `sat-cpu-cooldown|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
+        if (markerLodRuntimeRef.current.lastSignature === signature) return;
+        markerLodRuntimeRef.current.lastSignature = signature;
+        markerLodRuntimeRef.current.movingStateApplied = true;
+        if (
+          applyLightweightSatelliteMarkerState(
+            bienEntities,
+            customEntities,
+            selectedId
+          )
+        ) {
           viewer.scene.requestRender();
         }
         return;
@@ -7363,17 +7515,24 @@ function findPickedInteractiveData(
 
     const settleMarkerLodAfterMotion = () => {
       clearMarkerLodSettleTimeout();
+      const recoveryDelayMs = getMarkerCpuRecoveryDelayMs();
       markerLodRuntimeRef.current.nextUpdateAt =
-        performance.now() + SATELLITE_MARKER_LOD_SETTLE_DELAY_MS;
+        performance.now() +
+        Math.max(SATELLITE_MARKER_LOD_SETTLE_DELAY_MS, recoveryDelayMs);
       markerLodRuntimeRef.current.lastSignature = "";
       markerLodRuntimeRef.current.movingStateApplied = false;
       markerLodSettleTimeoutRef.current = window.setTimeout(() => {
         markerLodSettleTimeoutRef.current = null;
         if (cancelled || viewer.isDestroyed()) return;
         if (adaptiveQualityStateRef.current.isMoving) return;
+        const nextRecoveryDelayMs = getMarkerCpuRecoveryDelayMs();
+        if (nextRecoveryDelayMs > 0) {
+          settleMarkerLodAfterMotion();
+          return;
+        }
         markerLodRuntimeRef.current.nextUpdateAt = 0;
         applyMarkerLod();
-      }, SATELLITE_MARKER_LOD_SETTLE_DELAY_MS);
+      }, Math.max(SATELLITE_MARKER_LOD_SETTLE_DELAY_MS, recoveryDelayMs));
     };
 
     viewer.scene.postRender.addEventListener(applyMarkerLod);
