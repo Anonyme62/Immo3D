@@ -100,6 +100,22 @@ const MODE_TRANSITION_VISUAL_FADE_OUT_MS = 260;
 const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
 const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
 const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
+const COUNTRY_CONTEXT_GEOJSON_URL =
+  "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
+const COUNTRY_CONTEXT_MIN_HEIGHT_METERS = 380000;
+const COUNTRY_CONTEXT_MAX_HEIGHT_METERS = 24000000;
+const COUNTRY_CONTEXT_LABEL_MIN_RADIUS_METERS = 80000;
+const COUNTRY_CONTEXT_LABEL_FONT = "600 18px Arial, sans-serif";
+const COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
+  800000,
+  1,
+  22000000,
+  0.44
+);
+const COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET = new Cesium.Cartesian2(0, -6);
+const COUNTRY_CONTEXT_BORDER_COLOR = Cesium.Color.fromCssColorString("#f8fafc");
+const COUNTRY_CONTEXT_LABEL_FILL_COLOR = Cesium.Color.fromCssColorString("#f8fafc");
+const COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR = Cesium.Color.fromCssColorString("#0f172a");
 const MOBILE_QUALITY_ULTRA_DELAY_MS = 980;
 const MOBILE_ULTRA_RESOLUTION_SCALE = 1.08;
 const MOBILE_GOOGLE_TILESET_ULTRA_SSE = 6.9;
@@ -131,24 +147,24 @@ const DESKTOP_QUALITY_PROFILE_CONFIG = {
   auto: {
     // Auto should feel like Google Earth Web while moving: prioritize fluidity,
     // then restore sharper quality once the camera settles.
-    movingResolutionScale: 0.86,
-    movingGlobeSse: 2.05,
-    movingTilesetSse: 22,
+    movingResolutionScale: 0.9,
+    movingGlobeSse: 1.92,
+    movingTilesetSse: 19.5,
     movingMsaa: 1,
-    settleResolutionScale: 0.94,
-    settleGlobeSse: 1.62,
-    settleTilesetSse: 13.6,
-    settleMsaa: 1,
-    idleResolutionScale: 1.06,
-    idleGlobeSse: 1.28,
-    idleTilesetSse: 9.2,
+    settleResolutionScale: 1.0,
+    settleGlobeSse: 1.48,
+    settleTilesetSse: 11.8,
+    settleMsaa: 2,
+    idleResolutionScale: 1.14,
+    idleGlobeSse: 1.12,
+    idleTilesetSse: 8.0,
     idleMsaa: 2,
     ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
     ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
     ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
     ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
-    fastTilesetSse: 16,
-    premiumTilesetSse: 8.4,
+    fastTilesetSse: 14.5,
+    premiumTilesetSse: 7.2,
     adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
     idleRestoreDelayMs: 720,
     settleHoldMs: 900,
@@ -294,6 +310,8 @@ const GOOGLE_TILESET_PROGRESSIVE_HEIGHT_FRACTION = 0.55;
 const GOOGLE_TILESET_LOAD_DESIRED_LOD_IMMEDIATELY = false;
 const DEFAULT_SCENE_BACKGROUND_COLOR = Cesium.Color.fromCssColorString("#dbeafe");
 const CINEMATIC_SCENE_BACKGROUND_COLOR = Cesium.Color.BLACK;
+const DISTANT_GLOBE_SCENE_BACKGROUND_COLOR =
+  Cesium.Color.fromCssColorString("#020617");
 const DEFAULT_SCENE_BLOOM_CONTRAST = 128;
 const CINEMATIC_SCENE_BLOOM_CONTRAST = 210;
 const DEFAULT_SCENE_BLOOM_BRIGHTNESS = -0.3;
@@ -321,6 +339,16 @@ const MOBILE_SURFACE_DRAG_SMOOTHING = 0.86;
 const MOBILE_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO = 0.045;
 const MOBILE_SURFACE_DRAG_MIN_STEP_METERS = 1.2;
 const MOBILE_SURFACE_DRAG_MAX_STEP_METERS = 220;
+const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_SMOOTHING = 0.92;
+const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO = 0.06;
+const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MIN_STEP_METERS = 1.0;
+const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MAX_STEP_METERS = 880;
+const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_START_SPEED_METERS_PER_MS = 0.032;
+const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_STOP_SPEED_METERS_PER_MS = 0.0045;
+const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_DAMPING_PER_FRAME = 0.94;
+const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MAX_DURATION_MS = 1050;
+const DESKTOP_GOOGLE_EARTH_WHEEL_DELTA_BASE = 200;
+const DESKTOP_GOOGLE_EARTH_DISTANT_SCENE_MIN_HEIGHT = 220000;
 // Preserve the "dezoomed" feel while strongly damping pan close to the ground.
 const MOBILE_NEAR_ZOOM_PAN_BRAKE_START_MULTIPLIER = 6;
 const MOBILE_NEAR_ZOOM_PAN_BRAKE_MIN_FACTOR = 0.28;
@@ -1043,10 +1071,10 @@ function tuneImageryLayer(imageryLayer, mode = "satellite") {
   if (!imageryLayer) return;
 
   if (mode === "satellite") {
-    imageryLayer.brightness = 1.04;
-    imageryLayer.contrast = 1.1;
-    imageryLayer.gamma = 1.02;
-    imageryLayer.saturation = 1.08;
+    imageryLayer.brightness = 1.03;
+    imageryLayer.contrast = 1.14;
+    imageryLayer.gamma = 0.99;
+    imageryLayer.saturation = 1.1;
     return;
   }
 
@@ -1054,6 +1082,65 @@ function tuneImageryLayer(imageryLayer, mode = "satellite") {
   imageryLayer.contrast = 1;
   imageryLayer.gamma = 1;
   imageryLayer.saturation = 1;
+}
+
+function getCountryContextLabelText(name) {
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName) return "";
+
+  const countryNameTranslations = {
+    Algeria: "Algerie",
+    Belgium: "Belgique",
+    France: "France",
+    Germany: "Allemagne",
+    Greece: "Grece",
+    Ireland: "Irlande",
+    Italy: "Italie",
+    Luxembourg: "Luxembourg",
+    Morocco: "Maroc",
+    Netherlands: "Pays-Bas",
+    Poland: "Pologne",
+    Portugal: "Portugal",
+    Romania: "Roumanie",
+    Spain: "Espagne",
+    Switzerland: "Suisse",
+    Tunisia: "Tunisie",
+    "United Kingdom": "Royaume-Uni",
+    Ukraine: "Ukraine",
+  };
+
+  return countryNameTranslations[normalizedName] || normalizedName;
+}
+
+function getCountryContextEntityName(entity) {
+  if (!entity) return "";
+  const sampleTime = Cesium.JulianDate.now();
+  const propertyName = entity.properties?.name?.getValue?.(sampleTime);
+  return String(propertyName || entity.name || "").trim();
+}
+
+function getCountryContextAnchor(entity) {
+  if (!entity) return null;
+
+  const sampleTime = Cesium.JulianDate.now();
+  let positions = null;
+
+  if (entity.polygon?.hierarchy) {
+    const hierarchy = entity.polygon.hierarchy.getValue?.(sampleTime) ?? entity.polygon.hierarchy;
+    positions = hierarchy?.positions ?? null;
+  } else if (entity.polyline?.positions) {
+    positions = entity.polyline.positions.getValue?.(sampleTime) ?? entity.polyline.positions;
+  }
+
+  if (!Array.isArray(positions) || positions.length < 3) return null;
+
+  const boundingSphere = Cesium.BoundingSphere.fromPoints(positions);
+  if (!boundingSphere?.center || !Number.isFinite(boundingSphere.radius)) return null;
+
+  return {
+    position: boundingSphere.center,
+    radius: boundingSphere.radius,
+  };
 }
 
 function buildZoneCacheKey(searchZone) {
@@ -2228,35 +2315,47 @@ function optimizeDesktopNavigation(
   const controller = viewer.scene.screenSpaceCameraController;
   const resolvedMode = resolveMode(mapMode);
   const satelliteMinimumZoomDistance = getSatelliteMinimumZoomDistance(tuning);
+  const desktopGoogleEarthProfile =
+    resolvedMode === "google3d"
+      ? getDesktopGoogleEarthNavigationProfile(viewer)
+      : null;
 
   controller.enableInputs = true;
-  controller.inertiaSpin = tuning.controller.inertiaSpin;
-  controller.inertiaTranslate = tuning.controller.inertiaTranslate;
+  controller.inertiaSpin =
+    desktopGoogleEarthProfile?.controller.inertiaSpin ?? tuning.controller.inertiaSpin;
+  controller.inertiaTranslate =
+    desktopGoogleEarthProfile?.controller.inertiaTranslate ??
+    tuning.controller.inertiaTranslate;
   controller.inertiaZoom =
     resolvedMode === "google3d" ? 0 : tuning.controller.inertiaZoom;
-  controller.maximumMovementRatio = tuning.controller.maximumMovementRatio;
+  controller.maximumMovementRatio =
+    desktopGoogleEarthProfile?.controller.maximumMovementRatio ??
+    tuning.controller.maximumMovementRatio;
   controller.bounceAnimationTime =
     resolvedMode === "google3d" ? 0 : tuning.controller.bounceAnimationTime;
   controller.enableCollisionDetection = resolvedMode !== "google3d";
-  controller.zoomFactor = tuning.controller.zoomFactor;
+  controller.zoomFactor =
+    desktopGoogleEarthProfile?.controller.zoomFactor ?? tuning.controller.zoomFactor;
   controller.minimumZoomDistance =
     resolvedMode === "google3d"
       ? satelliteMinimumZoomDistance
       : tuning.zoomLimits.planMinHeight;
   controller.maximumZoomDistance = Number.POSITIVE_INFINITY;
   controller.enableLook = false;
-  controller.enableTilt = false;
-  controller.enableRotate = true;
-  controller.enableTranslate = true;
-  controller.enableZoom = true;
+  controller.enableTilt = resolvedMode !== "google3d";
+  controller.enableRotate = resolvedMode !== "google3d";
+  controller.enableTranslate = resolvedMode !== "google3d";
+  controller.enableZoom = resolvedMode !== "google3d";
   controller.lookEventTypes = [];
   controller.tiltEventTypes = [];
-  controller.rotateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
-  controller.zoomEventTypes = [
-    Cesium.CameraEventType.WHEEL,
-    Cesium.CameraEventType.PINCH,
-  ];
-  controller.translateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
+  controller.rotateEventTypes =
+    resolvedMode === "google3d" ? [] : Cesium.CameraEventType.LEFT_DRAG;
+  controller.zoomEventTypes =
+    resolvedMode === "google3d"
+      ? []
+      : [Cesium.CameraEventType.WHEEL, Cesium.CameraEventType.PINCH];
+  controller.translateEventTypes =
+    resolvedMode === "google3d" ? [] : Cesium.CameraEventType.LEFT_DRAG;
   controller.maximumTiltAngle = undefined;
 }
 
@@ -2342,6 +2441,155 @@ function getCameraHeight(viewer) {
   if (!cartographic || !Number.isFinite(cartographic.height)) return null;
   return cartographic.height;
 }
+
+function interpolateHeightStops(value, stops = []) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || !Array.isArray(stops) || stops.length === 0) {
+    return null;
+  }
+
+  const sortedStops = [...stops]
+    .map(([height, stopValue]) => [Number(height), Number(stopValue)])
+    .filter(([height, stopValue]) => Number.isFinite(height) && Number.isFinite(stopValue))
+    .sort((left, right) => left[0] - right[0]);
+
+  if (sortedStops.length === 0) return null;
+  if (numericValue <= sortedStops[0][0]) return sortedStops[0][1];
+  if (numericValue >= sortedStops[sortedStops.length - 1][0]) {
+    return sortedStops[sortedStops.length - 1][1];
+  }
+
+  for (let index = 1; index < sortedStops.length; index += 1) {
+    const [nextHeight, nextValue] = sortedStops[index];
+    const [previousHeight, previousValue] = sortedStops[index - 1];
+    if (numericValue > nextHeight) continue;
+    const progress = Cesium.Math.clamp(
+      (numericValue - previousHeight) / Math.max(0.0001, nextHeight - previousHeight),
+      0,
+      1
+    );
+    return Cesium.Math.lerp(previousValue, nextValue, progress);
+  }
+
+  return sortedStops[sortedStops.length - 1][1];
+}
+
+function getCameraGroundClearance(viewer) {
+  const cartographic = viewer?.camera?.positionCartographic;
+  if (!cartographic || !Number.isFinite(cartographic.height)) return null;
+  const surfaceHeight = getSurfaceHeight(viewer.scene, cartographic);
+  if (Number.isFinite(surfaceHeight)) {
+    return Math.max(0, cartographic.height - surfaceHeight);
+  }
+  return Math.max(0, cartographic.height);
+}
+
+function getDesktopGoogleEarthNavigationProfile(viewer) {
+  const groundClearance = Math.max(
+    0,
+    getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 1200
+  );
+  const maxPitchDegrees =
+    interpolateHeightStops(groundClearance, [
+      [40, -34],
+      [120, -33],
+      [420, -30],
+      [1200, -26],
+      [6000, -22],
+      [24000, -18],
+    ]) ?? -26;
+
+  return {
+    groundClearance,
+    surfaceDragSmoothing:
+      interpolateHeightStops(groundClearance, [
+          [40, 0.86],
+          [220, 0.89],
+          [1000, 0.92],
+          [6000, 0.945],
+          [24000, 0.965],
+        ]) ?? DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_SMOOTHING,
+    surfaceDragMaxStep:
+      interpolateHeightStops(groundClearance, [
+          [40, 5],
+          [160, 10],
+          [600, 28],
+          [2400, 108],
+          [8000, 340],
+          [26000, 760],
+        ]) ?? 120,
+    panFallbackMoveScale:
+      interpolateHeightStops(groundClearance, [
+          [40, 0.62],
+          [160, 1.25],
+          [600, 3.1],
+          [2400, 8.8],
+          [8000, 23],
+          [26000, 52],
+        ]) ?? 4.5,
+    wheelStepMeters:
+      interpolateHeightStops(groundClearance, [
+          [40, 8],
+          [120, 16],
+          [420, 46],
+          [1200, 112],
+          [6000, 540],
+          [26000, 2400],
+        ]) ?? 120,
+      headingGain:
+        interpolateHeightStops(groundClearance, [
+          [40, 0.0034],
+          [220, 0.0039],
+          [1200, 0.0047],
+          [6000, 0.0056],
+          [26000, 0.0062],
+        ]) ?? 0.0048,
+      pitchGain:
+        interpolateHeightStops(groundClearance, [
+          [40, 0.002],
+          [220, 0.0025],
+          [1200, 0.0031],
+          [6000, 0.0038],
+          [26000, 0.0044],
+        ]) ?? 0.0034,
+    minPitch: Cesium.Math.toRadians(-89),
+    maxPitch: Cesium.Math.toRadians(maxPitchDegrees),
+      controller: {
+        inertiaSpin:
+          interpolateHeightStops(groundClearance, [
+            [40, 0.68],
+            [220, 0.73],
+            [1200, 0.79],
+            [6000, 0.85],
+            [26000, 0.89],
+          ]) ?? 0.8,
+        inertiaTranslate:
+          interpolateHeightStops(groundClearance, [
+            [40, 0.8],
+            [220, 0.84],
+            [1200, 0.88],
+            [6000, 0.915],
+            [26000, 0.945],
+          ]) ?? 0.86,
+        maximumMovementRatio:
+          interpolateHeightStops(groundClearance, [
+            [40, 0.075],
+            [220, 0.095],
+            [1200, 0.115],
+            [6000, 0.145],
+            [26000, 0.17],
+          ]) ?? 0.12,
+        zoomFactor:
+          interpolateHeightStops(groundClearance, [
+            [40, 1.0],
+            [220, 1.45],
+            [1200, 2.35],
+            [6000, 5.1],
+            [26000, 11.6],
+          ]) ?? 3.2,
+      },
+    };
+  }
 
 function getModePanConfig(tuning) {
   // Keep the same navigation feel in satellite as in plan.
@@ -2571,6 +2819,8 @@ export default function CesiumMap({
     new Cesium.EllipsoidTerrainProvider()
   );
   const osmImageryLayerRef = useRef(null);
+  const countryContextDataSourceRef = useRef(null);
+  const countryContextLoadPromiseRef = useRef(null);
   const boundaryDataSourceRef = useRef(null);
   const placementGhostDataSourceRef = useRef(null);
   const placementGhostEntityRef = useRef(null);
@@ -2663,6 +2913,30 @@ export default function CesiumMap({
   const fpsBenchmarkLastSegmentKeyRef = useRef("");
   const desktopIdleRestoreAttemptRef = useRef(0);
   const desktopPointerNavigationActiveRef = useRef(false);
+  const desktopSurfacePanRef = useRef({
+    active: false,
+    lastX: 0,
+    lastY: 0,
+    lastTimestamp: 0,
+    lastSurface: null,
+    moved: false,
+  });
+  const desktopOrbitNavigationRef = useRef({
+    active: false,
+    lastX: 0,
+    lastY: 0,
+    pivot: null,
+    moved: false,
+    suppressContextClickUntil: 0,
+  });
+  const desktopPanInertiaRef = useRef({
+    rafId: null,
+    worldVelocity: 0,
+    worldDirection: new Cesium.Cartesian3(),
+    startedAt: 0,
+    lastFrameAt: 0,
+  });
+  const desktopGoogleEarthProfileSignatureRef = useRef("");
   const desktopSettleSnapshotRef = useRef(null);
   const desktopMovingVisibleUntilRef = useRef(0);
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
@@ -4071,6 +4345,9 @@ function findPickedInteractiveData(
     handler.setInputAction((click) => {
       if (isMobile || !click?.position) return;
       if (placingBienIdRef.current) return;
+      if (Date.now() < (desktopOrbitNavigationRef.current.suppressContextClickUntil || 0)) {
+        return;
+      }
 
       const cartesian = getClickPosition(viewer.scene, click.position);
       if (!cartesian) return;
@@ -4140,7 +4417,44 @@ function findPickedInteractiveData(
       touchPanInertiaRef.current.worldDirection = new Cesium.Cartesian3();
     };
 
-    const moveCameraForSurfaceDrag = (fromSurface, toSurface) => {
+    const stopDesktopPanInertia = () => {
+      const state = desktopPanInertiaRef.current;
+      if (state.rafId !== null) {
+        window.cancelAnimationFrame(state.rafId);
+        state.rafId = null;
+      }
+    };
+
+    const resetDesktopPanInertia = () => {
+      stopDesktopPanInertia();
+      desktopPanInertiaRef.current.worldVelocity = 0;
+      desktopPanInertiaRef.current.worldDirection = new Cesium.Cartesian3();
+      desktopPanInertiaRef.current.startedAt = 0;
+      desktopPanInertiaRef.current.lastFrameAt = 0;
+    };
+
+    const updateDesktopGoogleEarthControllerProfile = () => {
+      if (useTouchNavigation) return;
+      if (resolveMode(mapModeRef.current) !== "google3d") {
+          desktopGoogleEarthProfileSignatureRef.current = "";
+          return;
+      }
+
+      const profile = getDesktopGoogleEarthNavigationProfile(viewer);
+      const signature = [
+        Math.round(profile.groundClearance),
+        profile.controller.inertiaSpin.toFixed(3),
+        profile.controller.inertiaTranslate.toFixed(3),
+        profile.controller.maximumMovementRatio.toFixed(3),
+        profile.controller.zoomFactor.toFixed(2),
+      ].join("|");
+      if (signature === desktopGoogleEarthProfileSignatureRef.current) return;
+      desktopGoogleEarthProfileSignatureRef.current = signature;
+      optimizeDesktopNavigation(viewer, touchNavTuningRef.current, "google3d");
+      applyScenePresentationQuality("google3d");
+    };
+
+    const moveCameraForSurfaceDrag = (fromSurface, toSurface, options = {}) => {
       if (!fromSurface || !toSurface) return false;
 
       const dragVector = Cesium.Cartesian3.subtract(
@@ -4151,22 +4465,39 @@ function findPickedInteractiveData(
       const dragDistance = Cesium.Cartesian3.magnitude(dragVector);
       if (!Number.isFinite(dragDistance) || dragDistance < 0.01) return false;
       const cameraHeight = Math.max(0, getCameraHeight(viewer) || 1200);
+      const maxStepHeightRatio = Number.isFinite(options.maxStepHeightRatio)
+        ? options.maxStepHeightRatio
+        : MOBILE_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO;
+      const minStepMeters = Number.isFinite(options.minStepMeters)
+        ? options.minStepMeters
+        : MOBILE_SURFACE_DRAG_MIN_STEP_METERS;
+      const maxStepMeters = Number.isFinite(options.maxStepMeters)
+        ? options.maxStepMeters
+        : MOBILE_SURFACE_DRAG_MAX_STEP_METERS;
+      const smoothing = Number.isFinite(options.smoothing)
+        ? options.smoothing
+        : MOBILE_SURFACE_DRAG_SMOOTHING;
       const maxDragStep = Cesium.Math.clamp(
-        cameraHeight * MOBILE_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO,
-        MOBILE_SURFACE_DRAG_MIN_STEP_METERS,
-        MOBILE_SURFACE_DRAG_MAX_STEP_METERS
+        cameraHeight * maxStepHeightRatio,
+        minStepMeters,
+        maxStepMeters
       );
-      const appliedDistance = Math.min(dragDistance, maxDragStep) * MOBILE_SURFACE_DRAG_SMOOTHING;
+      const appliedDistance = Math.min(dragDistance, maxDragStep) * smoothing;
       if (!Number.isFinite(appliedDistance) || appliedDistance <= 0) return false;
+      const dragDirection = Cesium.Cartesian3.divideByScalar(
+        dragVector,
+        dragDistance,
+        new Cesium.Cartesian3()
+      );
 
       viewer.camera.move(
-        Cesium.Cartesian3.divideByScalar(
-          dragVector,
-          dragDistance,
-          new Cesium.Cartesian3()
-        ),
+        dragDirection,
         appliedDistance
       );
+      options.onApplied?.({
+        direction: dragDirection,
+        appliedDistance,
+      });
       viewer.scene.requestRender();
       return true;
     };
@@ -4250,6 +4581,62 @@ function findPickedInteractiveData(
         12
       );
       moveCameraForTouchPan(deltaX, deltaY, moveScale, resolvedMode);
+    };
+
+    const startDesktopPanInertia = () => {
+      const state = desktopPanInertiaRef.current;
+      stopDesktopPanInertia();
+      if (
+        !Number.isFinite(state.worldVelocity) ||
+        state.worldVelocity < DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_START_SPEED_METERS_PER_MS
+      ) {
+        resetDesktopPanInertia();
+        return;
+      }
+
+      state.startedAt = performance.now();
+      state.lastFrameAt = state.startedAt;
+
+      const step = (timestamp) => {
+        if (viewer.isDestroyed()) {
+          resetDesktopPanInertia();
+          return;
+        }
+
+        const elapsed = timestamp - state.startedAt;
+        if (elapsed >= DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MAX_DURATION_MS) {
+          resetDesktopPanInertia();
+          return;
+        }
+
+        const frameDeltaMs = Math.min(
+          32,
+          Math.max(8, timestamp - (state.lastFrameAt || timestamp))
+        );
+        state.lastFrameAt = timestamp;
+        state.worldVelocity *= Math.pow(
+          DESKTOP_GOOGLE_EARTH_PAN_INERTIA_DAMPING_PER_FRAME,
+          frameDeltaMs / 16.67
+        );
+
+        if (
+          !Number.isFinite(state.worldVelocity) ||
+          state.worldVelocity < DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_STOP_SPEED_METERS_PER_MS
+        ) {
+          resetDesktopPanInertia();
+          return;
+        }
+
+        viewer.camera.move(
+          state.worldDirection,
+          state.worldVelocity * frameDeltaMs
+        );
+        enforceSatelliteZoomFloor();
+        viewer.scene.requestRender();
+        state.rafId = window.requestAnimationFrame(step);
+      };
+
+      state.rafId = window.requestAnimationFrame(step);
     };
 
     const updatePanVelocity = (deltaX, deltaY, deltaTimeMs) => {
@@ -4727,6 +5114,169 @@ function findPickedInteractiveData(
 
     renderBoundary();
   }, [boundaryGeoJson]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    let cancelled = false;
+    let lastVisibilitySignature = "";
+
+    const applyCountryContextVisibility = () => {
+      const dataSource = countryContextDataSourceRef.current;
+      if (!dataSource) return;
+
+      const resolvedMode = resolveMode(modeRef.current);
+      const groundClearance =
+        getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 0;
+      const shouldShow =
+        resolvedMode === "google3d" &&
+        groundClearance >= COUNTRY_CONTEXT_MIN_HEIGHT_METERS &&
+        groundClearance <= COUNTRY_CONTEXT_MAX_HEIGHT_METERS;
+      const alphaFactor = shouldShow
+        ? Cesium.Math.lerp(
+            0.34,
+            0.82,
+            Cesium.Math.clamp(
+              (groundClearance - COUNTRY_CONTEXT_MIN_HEIGHT_METERS) / 2200000,
+              0,
+              1
+            )
+          )
+        : 0;
+      const visibilitySignature = `${shouldShow ? 1 : 0}:${Math.round(alphaFactor * 100)}`;
+
+      if (visibilitySignature === lastVisibilitySignature) return;
+      lastVisibilitySignature = visibilitySignature;
+      dataSource.show = shouldShow;
+
+      dataSource.entities.values.forEach((entity) => {
+        if (entity.polyline) {
+          entity.polyline.show = shouldShow;
+          entity.polyline.material = COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(alphaFactor);
+        }
+        if (entity.polygon) {
+          entity.polygon.show = shouldShow;
+          entity.polygon.outlineColor = COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(
+            Math.min(0.74, alphaFactor + 0.12)
+          );
+        }
+        if (entity.label) {
+          entity.label.show = shouldShow;
+          entity.label.fillColor = COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(
+            Math.min(0.96, alphaFactor + 0.14)
+          );
+          entity.label.outlineColor = COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(
+            Math.min(0.9, alphaFactor + 0.2)
+          );
+        }
+      });
+
+      viewer.scene.requestRender();
+    };
+
+    const loadCountryContextOverlay = async () => {
+      if (countryContextDataSourceRef.current || countryContextLoadPromiseRef.current) return;
+
+      const loadPromise = Cesium.GeoJsonDataSource.load(COUNTRY_CONTEXT_GEOJSON_URL, {
+        clampToGround: true,
+        stroke: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.58),
+        fill: Cesium.Color.TRANSPARENT,
+        strokeWidth: 1.2,
+      });
+      countryContextLoadPromiseRef.current = loadPromise;
+
+      try {
+        const dataSource = await loadPromise;
+        if (cancelled) return;
+
+        const labelEntities = [];
+        const sourceEntities = [...dataSource.entities.values];
+
+        sourceEntities.forEach((entity, index) => {
+          if (entity.polygon) {
+            entity.polygon.material = Cesium.Color.TRANSPARENT;
+            entity.polygon.outline = true;
+            entity.polygon.outlineColor = COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.58);
+            entity.polygon.outlineWidth = 1.2;
+          }
+
+          if (entity.polyline) {
+            entity.polyline.width = 1.1;
+            entity.polyline.material = COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.58);
+            entity.polyline.clampToGround = true;
+          }
+
+          const anchor = getCountryContextAnchor(entity);
+          const countryName = getCountryContextLabelText(getCountryContextEntityName(entity));
+          if (
+            anchor &&
+            countryName &&
+            anchor.radius >= COUNTRY_CONTEXT_LABEL_MIN_RADIUS_METERS
+          ) {
+            labelEntities.push({
+              id: `country-context-label-${index}`,
+              position: anchor.position,
+              text: countryName,
+              radius: anchor.radius,
+            });
+          }
+        });
+
+        labelEntities
+          .sort((left, right) => right.radius - left.radius)
+          .slice(0, 140)
+          .forEach((labelEntity) => {
+            dataSource.entities.add({
+              id: labelEntity.id,
+              position: labelEntity.position,
+              label: {
+                text: labelEntity.text,
+                font: COUNTRY_CONTEXT_LABEL_FONT,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                fillColor: COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(0.94),
+                outlineColor: COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(0.86),
+                outlineWidth: 3,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                pixelOffset: COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET,
+                scaleByDistance: COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE,
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+                  COUNTRY_CONTEXT_MIN_HEIGHT_METERS * 0.65,
+                  COUNTRY_CONTEXT_MAX_HEIGHT_METERS * 1.3
+                ),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                showBackground: false,
+              },
+            });
+          });
+
+        dataSource.show = false;
+        countryContextDataSourceRef.current = dataSource;
+        viewer.dataSources.add(dataSource);
+        applyCountryContextVisibility();
+      } catch (error) {
+        console.warn("Impossible de charger l'overlay pays/frontieres.", error);
+      } finally {
+        if (countryContextLoadPromiseRef.current === loadPromise) {
+          countryContextLoadPromiseRef.current = null;
+        }
+      }
+    };
+
+    void loadCountryContextOverlay();
+    viewer.scene.postRender.addEventListener(applyCountryContextVisibility);
+
+    return () => {
+      cancelled = true;
+      viewer.scene.postRender.removeEventListener(applyCountryContextVisibility);
+      if (countryContextDataSourceRef.current) {
+        viewer.dataSources.remove(countryContextDataSourceRef.current, true);
+        countryContextDataSourceRef.current = null;
+      }
+      countryContextLoadPromiseRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -5257,22 +5807,32 @@ function findPickedInteractiveData(
       activeMode = modeRef.current,
       tileset = tilesetRef.current
     ) => {
+      const groundClearance =
+        getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 0;
       const useCinematicDesktopScene =
         !isMobile &&
         !isIOSDevice &&
         activeMode === "google3d" &&
         preferMaximumDesktopDetail;
+      const useDistantDesktopGlobeScene =
+        !isMobile &&
+        !isIOSDevice &&
+        activeMode === "google3d" &&
+        groundClearance >= DESKTOP_GOOGLE_EARTH_DISTANT_SCENE_MIN_HEIGHT;
+      const useEnhancedPlanetBackdrop =
+        useCinematicDesktopScene || useDistantDesktopGlobeScene;
+      const usePlanetLighting = useEnhancedPlanetBackdrop;
 
-      viewer.scene.globe.enableLighting = useCinematicDesktopScene;
-      viewer.scene.globe.dynamicAtmosphereLighting = useCinematicDesktopScene;
-      viewer.scene.globe.dynamicAtmosphereLightingFromSun = useCinematicDesktopScene;
-      viewer.scene.globe.showGroundAtmosphere = useCinematicDesktopScene;
+      viewer.scene.globe.enableLighting = usePlanetLighting;
+      viewer.scene.globe.dynamicAtmosphereLighting = usePlanetLighting;
+      viewer.scene.globe.dynamicAtmosphereLightingFromSun = usePlanetLighting;
+      viewer.scene.globe.showGroundAtmosphere = useEnhancedPlanetBackdrop;
       viewer.scene.globe.showWaterEffect = useCinematicDesktopScene;
       viewer.scene.globe.shadows = useCinematicDesktopScene
         ? Cesium.ShadowMode.ENABLED
         : Cesium.ShadowMode.DISABLED;
       viewer.scene.skyAtmosphere.show = !isIOSDevice;
-      viewer.scene.skyBox.show = useCinematicDesktopScene;
+      viewer.scene.skyBox.show = useEnhancedPlanetBackdrop;
       viewer.scene.fog.enabled = useCinematicDesktopScene;
       viewer.scene.highDynamicRange = !isIOSDevice;
       viewer.scene.sunBloom = useCinematicDesktopScene;
@@ -5327,7 +5887,9 @@ function findPickedInteractiveData(
 
       viewer.scene.backgroundColor = useCinematicDesktopScene
         ? CINEMATIC_SCENE_BACKGROUND_COLOR
-        : DEFAULT_SCENE_BACKGROUND_COLOR;
+        : useDistantDesktopGlobeScene
+          ? DISTANT_GLOBE_SCENE_BACKGROUND_COLOR
+          : DEFAULT_SCENE_BACKGROUND_COLOR;
     };
 
     const setCurrentQualityTelemetry = ({
@@ -6445,6 +7007,44 @@ function findPickedInteractiveData(
 
     const handleDesktopPointerDown = (event) => {
       if (useTouchNavigation) return;
+      const resolvedMode = resolveMode(mapModeRef.current);
+      if (resolvedMode === "google3d") {
+        updateDesktopGoogleEarthControllerProfile();
+        resetDesktopPanInertia();
+        const canvasRect = viewer.canvas.getBoundingClientRect();
+        const pointerPosition = new Cesium.Cartesian2(
+          event.clientX - canvasRect.left,
+          event.clientY - canvasRect.top
+        );
+        if (event?.button === 0) {
+          desktopSurfacePanRef.current.active = true;
+          desktopSurfacePanRef.current.lastX = event.clientX;
+          desktopSurfacePanRef.current.lastY = event.clientY;
+          desktopSurfacePanRef.current.lastTimestamp = performance.now();
+          desktopSurfacePanRef.current.lastSurface = getClickPosition(
+            viewer.scene,
+            pointerPosition
+          );
+          desktopSurfacePanRef.current.moved = false;
+        } else if (event?.button === 2) {
+          const centerPoint = new Cesium.Cartesian2(
+            canvasRect.width / 2,
+            canvasRect.height / 2
+          );
+          desktopOrbitNavigationRef.current.active = true;
+          desktopOrbitNavigationRef.current.lastX = event.clientX;
+          desktopOrbitNavigationRef.current.lastY = event.clientY;
+          desktopOrbitNavigationRef.current.pivot =
+            getClickPosition(viewer.scene, pointerPosition) ||
+            getClickPosition(viewer.scene, centerPoint);
+          desktopOrbitNavigationRef.current.moved = false;
+        } else {
+          return;
+        }
+        desktopPointerNavigationActiveRef.current = true;
+        markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
+        return;
+      }
       if (event?.button === 2) return;
       desktopPointerNavigationActiveRef.current = true;
       markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
@@ -6452,6 +7052,95 @@ function findPickedInteractiveData(
 
     const handleDesktopPointerMove = (event) => {
       if (useTouchNavigation) return;
+      const resolvedMode = resolveMode(mapModeRef.current);
+      if (resolvedMode === "google3d") {
+        if (desktopSurfacePanRef.current.active) {
+          const deltaX = event.clientX - desktopSurfacePanRef.current.lastX;
+          const deltaY = event.clientY - desktopSurfacePanRef.current.lastY;
+          const now = performance.now();
+          const deltaTimeMs = Math.max(
+            1,
+            now - (desktopSurfacePanRef.current.lastTimestamp || now)
+          );
+          desktopSurfacePanRef.current.lastX = event.clientX;
+          desktopSurfacePanRef.current.lastY = event.clientY;
+          desktopSurfacePanRef.current.lastTimestamp = now;
+
+          if (Math.abs(deltaX) < 0.25 && Math.abs(deltaY) < 0.25) return;
+
+          const canvasRect = viewer.canvas.getBoundingClientRect();
+          const pointerPosition = new Cesium.Cartesian2(
+            event.clientX - canvasRect.left,
+            event.clientY - canvasRect.top
+          );
+          const currentSurface = getClickPosition(viewer.scene, pointerPosition);
+          const profile = getDesktopGoogleEarthNavigationProfile(viewer);
+          const movedWithSurfaceDrag = moveCameraForSurfaceDrag(
+            desktopSurfacePanRef.current.lastSurface,
+            currentSurface,
+            {
+              maxStepHeightRatio: DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO,
+              minStepMeters: DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MIN_STEP_METERS,
+              maxStepMeters: profile.surfaceDragMaxStep,
+              smoothing: profile.surfaceDragSmoothing,
+              onApplied: ({ direction, appliedDistance }) => {
+                desktopPanInertiaRef.current.worldDirection =
+                  Cesium.Cartesian3.clone(direction);
+                desktopPanInertiaRef.current.worldVelocity =
+                  appliedDistance / deltaTimeMs;
+              },
+            }
+          );
+          desktopSurfacePanRef.current.lastSurface = currentSurface;
+          if (!movedWithSurfaceDrag) {
+            moveCameraForTouchPan(
+              deltaX,
+              deltaY,
+              profile.panFallbackMoveScale,
+              resolvedMode
+            );
+            resetDesktopPanInertia();
+          }
+          desktopSurfacePanRef.current.moved = true;
+          desktopPointerNavigationActiveRef.current = true;
+          markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
+          enforceSatelliteZoomFloor();
+          return;
+        }
+
+        if (desktopOrbitNavigationRef.current.active) {
+          const deltaX = event.clientX - desktopOrbitNavigationRef.current.lastX;
+          const deltaY = event.clientY - desktopOrbitNavigationRef.current.lastY;
+          desktopOrbitNavigationRef.current.lastX = event.clientX;
+          desktopOrbitNavigationRef.current.lastY = event.clientY;
+          if (Math.abs(deltaX) < 0.25 && Math.abs(deltaY) < 0.25) return;
+          const profile = getDesktopGoogleEarthNavigationProfile(viewer);
+          if (desktopOrbitNavigationRef.current.pivot && Math.abs(deltaX) >= 0.25) {
+            orbitCameraAroundPivot(
+              viewer.camera,
+              desktopOrbitNavigationRef.current.pivot,
+              deltaX * profile.headingGain
+            );
+          }
+          const nextPitch = Cesium.Math.clamp(
+            viewer.camera.pitch + deltaY * profile.pitchGain,
+            profile.minPitch,
+            profile.maxPitch
+          );
+          viewer.camera.setView({
+            orientation: {
+              heading: viewer.camera.heading,
+              pitch: nextPitch,
+              roll: 0,
+            },
+          });
+          desktopOrbitNavigationRef.current.moved = true;
+          desktopPointerNavigationActiveRef.current = true;
+          markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
+          viewer.scene.requestRender();
+          return;
+        }
+      }
       const buttons = Number(event?.buttons) || 0;
       const isDragging =
         desktopPointerNavigationActiveRef.current || Boolean(buttons & 1) || Boolean(buttons & 4);
@@ -6460,14 +7149,106 @@ function findPickedInteractiveData(
       markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
     };
 
-    const handleDesktopPointerUp = () => {
+    const handleDesktopPointerUp = (event) => {
+      if (!useTouchNavigation && resolveMode(mapModeRef.current) === "google3d") {
+        const releasedButton = Number(event?.button);
+        const releaseAll = !Number.isFinite(releasedButton);
+        if (releaseAll || releasedButton === 0) {
+          const shouldStartPanInertia = desktopSurfacePanRef.current.moved;
+          desktopSurfacePanRef.current.active = false;
+          desktopSurfacePanRef.current.lastSurface = null;
+          if (shouldStartPanInertia) {
+            ignoreNextClickRef.current = true;
+            startDesktopPanInertia();
+          } else {
+            resetDesktopPanInertia();
+          }
+          desktopSurfacePanRef.current.moved = false;
+        }
+        if (releaseAll || releasedButton === 2) {
+          if (desktopOrbitNavigationRef.current.moved) {
+            desktopOrbitNavigationRef.current.suppressContextClickUntil = Date.now() + 220;
+          }
+          desktopOrbitNavigationRef.current.active = false;
+          desktopOrbitNavigationRef.current.pivot = null;
+          desktopOrbitNavigationRef.current.moved = false;
+        }
+        desktopPointerNavigationActiveRef.current =
+          desktopSurfacePanRef.current.active || desktopOrbitNavigationRef.current.active;
+        return;
+      }
       desktopPointerNavigationActiveRef.current = false;
     };
 
-    const handleDesktopWheelIntent = () => {
+    const handleDesktopWheelIntent = (event) => {
       if (useTouchNavigation) return;
       const autoStabilityProfile = getDesktopAutoStabilityProfile(viewer);
       markDesktopNavigationIntent(autoStabilityProfile.wheelIntentMs, true);
+      if (resolveMode(mapModeRef.current) !== "google3d") return;
+      event.preventDefault();
+      resetDesktopPanInertia();
+      updateDesktopGoogleEarthControllerProfile();
+      const normalizedDeltaY =
+        event.deltaMode === 1
+          ? event.deltaY * 40
+          : event.deltaMode === 2
+            ? event.deltaY * 120
+            : event.deltaY;
+      if (!Number.isFinite(normalizedDeltaY) || normalizedDeltaY === 0) return;
+
+      const canvasRect = viewer.canvas.getBoundingClientRect();
+      const pointerPosition = new Cesium.Cartesian2(
+        event.clientX - canvasRect.left,
+        event.clientY - canvasRect.top
+      );
+      const anchor =
+        getClickPosition(viewer.scene, pointerPosition) ||
+        getClickPosition(
+          viewer.scene,
+          new Cesium.Cartesian2(canvasRect.width / 2, canvasRect.height / 2)
+        );
+        const profile = getDesktopGoogleEarthNavigationProfile(viewer);
+        const intensity = Cesium.Math.clamp(
+          Math.abs(normalizedDeltaY) / DESKTOP_GOOGLE_EARTH_WHEEL_DELTA_BASE,
+          0.22,
+          2.8
+        );
+      let travelDistance = profile.wheelStepMeters * intensity;
+      let zoomDirection = Cesium.Cartesian3.clone(
+        viewer.camera.directionWC,
+        new Cesium.Cartesian3()
+      );
+
+      if (anchor) {
+        zoomDirection = Cesium.Cartesian3.subtract(
+          anchor,
+          viewer.camera.positionWC,
+          new Cesium.Cartesian3()
+        );
+        const anchorDistance = Cesium.Cartesian3.magnitude(zoomDirection);
+        if (anchorDistance > 0.001) {
+          Cesium.Cartesian3.divideByScalar(
+            zoomDirection,
+            anchorDistance,
+            zoomDirection
+          );
+          if (normalizedDeltaY < 0) {
+            travelDistance = Math.min(travelDistance, anchorDistance * 0.72);
+          }
+        } else {
+          zoomDirection = Cesium.Cartesian3.clone(
+            viewer.camera.directionWC,
+            new Cesium.Cartesian3()
+          );
+        }
+      }
+
+      viewer.camera.move(
+        zoomDirection,
+        normalizedDeltaY < 0 ? travelDistance : -travelDistance
+      );
+      enforceSatelliteZoomFloor();
+      viewer.scene.requestRender();
     };
 
     const handleDesktopMoveStart = () => {
@@ -6577,7 +7358,7 @@ function findPickedInteractiveData(
         passive: true,
       });
       viewer.container.addEventListener("wheel", handleDesktopWheelIntent, {
-        passive: true,
+        passive: false,
       });
       viewer.camera.moveStart.addEventListener(handleDesktopMoveStart);
       viewer.camera.moveEnd.addEventListener(handleDesktopMoveEnd);
@@ -6585,6 +7366,7 @@ function findPickedInteractiveData(
     }
 
     viewer.scene.postRender.addEventListener(handleAdaptiveFrameQuality);
+    viewer.scene.postRender.addEventListener(updateDesktopGoogleEarthControllerProfile);
 
     const hasPredictiveZoneContext = Boolean(String(searchZone || "").trim()) || syncVersion > 0;
     const activeZoneKey = activeZoneCacheKeyRef.current;
@@ -6644,8 +7426,10 @@ function findPickedInteractiveData(
       applyFpsBenchmarkSegmentQualityRef.current = () => {};
       prepareFpsBenchmarkQualityRef.current = () => {};
       resetAdaptiveQualityStats();
+      resetDesktopPanInertia();
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(handleAdaptiveFrameQuality);
+        viewer.scene.postRender.removeEventListener(updateDesktopGoogleEarthControllerProfile);
       }
       if (modeTransitionTimeoutRef.current) {
         window.clearTimeout(modeTransitionTimeoutRef.current);
