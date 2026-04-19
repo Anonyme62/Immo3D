@@ -5680,14 +5680,20 @@ function findPickedInteractiveData(
         typeof segmentMeta.benchmarkMoving === "boolean"
           ? Boolean(segmentMeta.benchmarkMoving)
           : true;
-      traceBranch = shouldMove ? "move" : "settle";
+      const keepMovingQualityLocked = fpsBenchmarkQualityLockRef.current;
+      const effectiveShouldMove = keepMovingQualityLocked ? true : shouldMove;
+      traceBranch = effectiveShouldMove
+        ? shouldMove
+          ? "move"
+          : "locked_settle"
+        : "settle";
 
       try {
-        adaptiveQualityStateRef.current.isMoving = shouldMove;
+        adaptiveQualityStateRef.current.isMoving = effectiveShouldMove;
         clearQualityRecoverySafetyTimeout();
         resetAdaptiveQualityStats();
 
-        if (shouldMove) {
+        if (effectiveShouldMove) {
           if (!isMobile && selectedDesktopQualityProfileId === "auto") {
             desktopMovingVisibleUntilRef.current = Math.max(
               desktopMovingVisibleUntilRef.current,
@@ -8235,6 +8241,7 @@ function findPickedInteractiveData(
           : !isSatelliteReady
             ? "Prechargement long detecte. Premier basculement possible mais peut prendre quelques secondes."
           : "Passer a la vue satellite";
+  const showDesktopFpsControls = currentResolvedMode === "google3d";
   const mobileTopInset = isMobile
     ? isStandalonePwa
       ? "calc(env(safe-area-inset-top, 0px) + 8px)"
@@ -9350,34 +9357,38 @@ function findPickedInteractiveData(
           >
             +
           </button>
-          <button
-            onClick={handleRecordFpsBenchmark}
-            disabled={isFpsBenchmarkRecordingDisabled}
-            style={desktopMapButtonStyle(
-              desktopBenchmarkRecordBottom,
-              !isFpsBenchmarkRecordingDisabled
-            )}
-            title={fpsBenchmarkRecordButtonTitle}
-          >
-            <span style={mapModeButtonContentStyle()}>
-              {fpsBenchmarkState.recording ? <LoadingSpinner size={14} /> : null}
-              <span>{fpsBenchmarkRecordButtonLabel}</span>
-            </span>
-          </button>
-          <button
-            onClick={handleStartFpsBenchmark}
-            disabled={isFpsBenchmarkButtonDisabled}
-            style={desktopMapButtonStyle(
-              desktopBenchmarkBottom,
-              !isFpsBenchmarkButtonDisabled
-            )}
-            title={fpsBenchmarkPrimaryButtonTitle}
-          >
-            <span style={mapModeButtonContentStyle()}>
-              {fpsBenchmarkState.running ? <LoadingSpinner size={14} /> : null}
-              <span>{fpsBenchmarkButtonLabel}</span>
-            </span>
-          </button>
+          {showDesktopFpsControls ? (
+            <>
+              <button
+                onClick={handleRecordFpsBenchmark}
+                disabled={isFpsBenchmarkRecordingDisabled}
+                style={desktopMapButtonStyle(
+                  desktopBenchmarkRecordBottom,
+                  !isFpsBenchmarkRecordingDisabled
+                )}
+                title={fpsBenchmarkRecordButtonTitle}
+              >
+                <span style={mapModeButtonContentStyle()}>
+                  {fpsBenchmarkState.recording ? <LoadingSpinner size={14} /> : null}
+                  <span>{fpsBenchmarkRecordButtonLabel}</span>
+                </span>
+              </button>
+              <button
+                onClick={handleStartFpsBenchmark}
+                disabled={isFpsBenchmarkButtonDisabled}
+                style={desktopMapButtonStyle(
+                  desktopBenchmarkBottom,
+                  !isFpsBenchmarkButtonDisabled
+                )}
+                title={fpsBenchmarkPrimaryButtonTitle}
+              >
+                <span style={mapModeButtonContentStyle()}>
+                  {fpsBenchmarkState.running ? <LoadingSpinner size={14} /> : null}
+                  <span>{fpsBenchmarkButtonLabel}</span>
+                </span>
+              </button>
+            </>
+          ) : null}
           <button
             onClick={handleToggleMapMode}
             disabled={isMapModeToggleDisabled}

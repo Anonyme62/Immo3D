@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -85,6 +87,24 @@ APP_BUILD_REF = (
 ).strip()
 APP_BUILD_TIME = os.environ.get("APP_BUILD_TIME", "").strip()
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
+
+
+def build_runtime_config_js() -> str:
+    runtime_api_base_url = ""
+    runtime_cesium_ion_token = settings.cesium_ion_token or ""
+    runtime_build_version = APP_BUILD_VERSION
+    runtime_build_ref = APP_BUILD_REF
+
+    return "\n".join(
+        [
+            "window.__IMMO3D_RUNTIME_CONFIG__ = window.__IMMO3D_RUNTIME_CONFIG__ || {};",
+            f"window.__IMMO3D_RUNTIME_CONFIG__.apiBaseUrl = window.__IMMO3D_RUNTIME_CONFIG__.apiBaseUrl || {json.dumps(runtime_api_base_url)};",
+            f"window.__IMMO3D_RUNTIME_CONFIG__.cesiumIonToken = window.__IMMO3D_RUNTIME_CONFIG__.cesiumIonToken || {json.dumps(runtime_cesium_ion_token)};",
+            f"window.__IMMO3D_RUNTIME_CONFIG__.buildVersion = window.__IMMO3D_RUNTIME_CONFIG__.buildVersion || {json.dumps(runtime_build_version)};",
+            f"window.__IMMO3D_RUNTIME_CONFIG__.buildRef = window.__IMMO3D_RUNTIME_CONFIG__.buildRef || {json.dumps(runtime_build_ref)};",
+            "",
+        ]
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -228,6 +248,14 @@ if FRONTEND_DIST.exists():
     @app.get("/test-bien.kml", include_in_schema=False)
     def serve_test_kml():
         return FileResponse(FRONTEND_DIST / "test-bien.kml")
+
+
+    @app.get("/runtime-config.js", include_in_schema=False)
+    def serve_runtime_config():
+        return Response(
+            content=build_runtime_config_js(),
+            media_type="application/javascript; charset=utf-8",
+        )
 
 
     @app.get("/{full_path:path}", include_in_schema=False)

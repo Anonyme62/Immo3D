@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     backup_verify_after_create: bool = True
     backup_encryption_key: str | None = None
     photo_upload_max_bytes: int = 8 * 1024 * 1024
+    cesium_ion_token: str | None = None
     r2_bucket: str | None = None
     r2_region: str = "auto"
     r2_endpoint_url: str | None = None
@@ -169,6 +170,14 @@ class Settings(BaseSettings):
     @field_validator("r2_bucket", "r2_access_key_id", "r2_secret_access_key", "r2_object_key_prefix")
     @classmethod
     def normalize_r2_text_values(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("cesium_ion_token")
+    @classmethod
+    def normalize_cesium_ion_token(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()

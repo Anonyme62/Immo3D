@@ -113,7 +113,9 @@ Recommended DNS:
 
 Recommended frontend runtime:
 - leave `VITE_API_BASE_URL` empty for production
-- keep only `VITE_CESIUM_ION_TOKEN=<restricted-token>` if needed at build time
+- prefer `CESIUM_ION_TOKEN=<restricted-token>` in `deploy/v2/backend.env`
+- this token is then injected at runtime through `/runtime-config.js`
+- no local `immo-app/src/*token*.txt` file is required on the VPS
 
 ## 6) J1 done criteria
 
