@@ -26,7 +26,54 @@ Base.metadata.create_all(bind=engine)
 ensure_sqlite_compatibility_migrations()
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-FRONTEND_DIST = BACKEND_ROOT / "frontend_dist"
+REPO_ROOT = BACKEND_ROOT.parent
+FRONTEND_DIST_CANDIDATES = (
+    ("backend_frontend_dist", BACKEND_ROOT / "frontend_dist"),
+    ("vite_dist", REPO_ROOT / "immo-app" / "dist"),
+)
+
+
+def get_directory_latest_mtime(directory: Path) -> float:
+    if not directory.exists():
+        return 0.0
+
+    latest_mtime = directory.stat().st_mtime
+    try:
+        for child in directory.rglob("*"):
+            try:
+                child_mtime = child.stat().st_mtime
+            except OSError:
+                continue
+            if child_mtime > latest_mtime:
+                latest_mtime = child_mtime
+    except OSError:
+        return latest_mtime
+
+    return latest_mtime
+
+
+def resolve_frontend_dist():
+    available_directories = []
+    for source, path in FRONTEND_DIST_CANDIDATES:
+        if not path.exists():
+            continue
+        available_directories.append(
+            (get_directory_latest_mtime(path), source, path)
+        )
+
+    if not available_directories:
+        return BACKEND_ROOT / "frontend_dist", "missing", None
+
+    available_directories.sort(key=lambda item: item[0], reverse=True)
+    latest_mtime, source, path = available_directories[0]
+    return (
+        path,
+        source,
+        datetime.fromtimestamp(latest_mtime, timezone.utc).isoformat(),
+    )
+
+
+FRONTEND_DIST, FRONTEND_DIST_SOURCE, FRONTEND_DIST_UPDATED_AT = resolve_frontend_dist()
 
 app = FastAPI(title="Immo 3D API", version="1.0.0")
 
@@ -138,6 +185,8 @@ def health():
         "build_time": APP_BUILD_TIME,
         "started_at": APP_STARTED_AT,
         "frontend_dist_present": FRONTEND_DIST.exists(),
+        "frontend_dist_source": FRONTEND_DIST_SOURCE,
+        "frontend_dist_updated_at": FRONTEND_DIST_UPDATED_AT,
     }
 
 

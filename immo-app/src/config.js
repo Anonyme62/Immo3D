@@ -37,6 +37,8 @@ export const API_BASE_URL = normalizeBaseUrl(
   runtimeApiBaseUrl || import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl()
 );
 
+export const API_HEALTH_URL = `${API_BASE_URL || ""}/health`;
+
 export const CESIUM_ION_TOKEN = (
   runtimeCesiumIonToken ||
   import.meta.env.VITE_CESIUM_ION_TOKEN ||

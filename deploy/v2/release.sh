@@ -64,10 +64,17 @@ checkout_ref() {
 healthcheck_url() {
   local value
   value="$(
-    awk -F= '$1=="API_HEALTHCHECK_URL"{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" \
+    awk -F= '$1=="APP_HEALTHCHECK_URL"{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" \
       | head -n1 \
       | tr -d '\r'
   )"
+  if [[ -z "${value}" ]]; then
+    value="$(
+      awk -F= '$1=="API_HEALTHCHECK_URL"{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" \
+      | head -n1 \
+      | tr -d '\r'
+    )"
+  fi
   if [[ -n "${value}" ]]; then
     echo "${value}"
   else

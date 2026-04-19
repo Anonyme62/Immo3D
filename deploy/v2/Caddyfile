@@ -2,7 +2,11 @@
   email {$TLS_EMAIL}
 }
 
-{$API_DOMAIN} {
+{$ROOT_DOMAIN} {
+  redir https://{$APP_DOMAIN}{uri} permanent
+}
+
+{$APP_DOMAIN} {
   encode gzip zstd
 
   reverse_proxy api:10000 {

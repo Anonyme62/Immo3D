@@ -25,7 +25,13 @@ import {
 } from "./api";
 import AppMenu from "./components/AppMenu";
 import BiensSidebar from "./components/BiensSidebar";
-import { APP_BUILD_REF, APP_BUILD_VERSION, CESIUM_ION_TOKEN } from "./config";
+import {
+  API_BASE_URL,
+  API_HEALTH_URL,
+  APP_BUILD_REF,
+  APP_BUILD_VERSION,
+  CESIUM_ION_TOKEN,
+} from "./config";
 import LoginScreen from "./components/LoginScreen";
 import SelectedBienPanel from "./components/SelectedBienPanel";
 import SubscriptionScreen from "./components/SubscriptionScreen";
@@ -2448,6 +2454,10 @@ function SettingsOverlay({
   const backendBuildVersion = backendHealthInfo?.build_version || "n/a";
   const backendBuildRef = backendHealthInfo?.build_ref || "n/a";
   const backendStatus = backendHealthInfo?.status || "n/a";
+  const backendFrontendSource = backendHealthInfo?.frontend_dist_source || "n/a";
+  const resolvedApiBaseUrl = API_BASE_URL || window.location.origin;
+  const resolvedHealthUrl =
+    API_HEALTH_URL || `${window.location.origin.replace(/\/+$/, "")}/health`;
   return (
     <div
       style={{
@@ -2617,10 +2627,16 @@ function SettingsOverlay({
             Front: v{appBuildVersion} ({appBuildRef})
             <br />
             Back: {backendStatus} - v{backendBuildVersion} ({backendBuildRef})
+            <br />
+            API: {resolvedApiBaseUrl}
+            <br />
+            Sante API: {resolvedHealthUrl}
+            <br />
+            Front servi par le backend: {backendFrontendSource}
             {backendHealthError ? (
               <>
                 <br />
-                /health: {backendHealthError}
+                Health check: {backendHealthError}
               </>
             ) : null}
             {modeSwitchStats ? (
@@ -2645,6 +2661,24 @@ function SettingsOverlay({
               </>
             ) : null}
           </div>
+          <button
+            onClick={() =>
+              window.open(resolvedHealthUrl, "_blank", "noopener,noreferrer")
+            }
+            style={{
+              marginTop: 10,
+              width: "100%",
+              height: 38,
+              borderRadius: 11,
+              border: "1px solid var(--border-color)",
+              background: "var(--panel-bg)",
+              color: "var(--text-primary)",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Ouvrir sante API
+          </button>
         </div>
 
         <div

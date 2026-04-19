@@ -1,17 +1,18 @@
-# V2 Turbo - J1/J2 Runbook (HA -> VPS + CDN)
+# V2 Turbo - J1/J2 Runbook (HA -> VPS, domaine unique)
 
 This runbook is the executable path for the infra sprint:
-- frontend on Cloudflare Pages
-- FastAPI on VPS behind Caddy
+- frontend build embarque dans l'image backend
+- FastAPI sur VPS derriere Caddy
 - PostgreSQL managed (Neon/Supabase)
 - one-command deploy + rollback by SHA
 
-Note: `release.sh` builds the API image with `deploy/v2/Dockerfile.vps` (backend-only),
-so frontend deployment stays fully on Cloudflare Pages.
+Goal for production:
+- canonical public URL: `https://www.example.com`
+- apex redirect: `https://example.com` -> `https://www.example.com`
+- same-origin frontend + API on the canonical domain
 
 ## Target budget (monthly)
 
-- Cloudflare Pages: free
 - Neon/Supabase starter: free tier
 - Cloudflare R2: free tier (within limits)
 - VPS (Hetzner CX11 or OVH small): about 5 to 7 EUR
@@ -27,9 +28,10 @@ cp deploy/v2/backend.env.example deploy/v2/backend.env
 ```
 
 Edit `deploy/v2/backend.env` with your real values:
-- `API_DOMAIN`
+- `APP_DOMAIN`
+- `ROOT_DOMAIN`
 - `TLS_EMAIL`
-- `FRONTEND_ORIGIN` and `FRONTEND_ORIGINS` (Cloudflare Pages URL)
+- `FRONTEND_ORIGIN` and `FRONTEND_ORIGINS` (canonical frontend URL)
 - `DATABASE_URL` (managed PostgreSQL URL)
 - strong keys (`APP_SECRET_KEY`, `DATA_ENCRYPTION_KEY`, `BACKUP_ENCRYPTION_KEY`)
 - R2 settings (`R2_BUCKET`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`)
@@ -60,7 +62,7 @@ On the VPS:
 Health check:
 
 ```bash
-curl -fsS https://<API_DOMAIN>/health
+curl -fsS https://<APP_DOMAIN>/health
 ```
 
 ## 3) Rollback in one command
@@ -97,22 +99,27 @@ python scripts/migrate_sqlite_to_postgres.py \
   --dry-run
 ```
 
-## 5) Cloudflare Pages setup (frontend)
+## 5) Production routing model
 
-Set these project variables:
-- `VITE_API_BASE_URL=https://<API_DOMAIN>`
-- `VITE_CESIUM_ION_TOKEN=<restricted-token>`
+The VPS image now builds the Vite frontend and ships it inside the backend image.
+That means:
+- the SPA is served by FastAPI on the same origin as the API
+- browser calls stay same-origin by default
+- no public `api.example.com` is required anymore
 
-Build settings:
-- Framework: Vite
-- Build command: `npm run build`
-- Output directory: `dist`
-- Root directory: `immo-app`
+Recommended DNS:
+- `www.example.com` -> VPS / reverse proxy
+- `example.com` -> same VPS / reverse proxy, with redirect to `www`
+
+Recommended frontend runtime:
+- leave `VITE_API_BASE_URL` empty for production
+- keep only `VITE_CESIUM_ION_TOKEN=<restricted-token>` if needed at build time
 
 ## 6) J1 done criteria
 
-- `https://<API_DOMAIN>/health` returns `status=ok`
-- frontend on Cloudflare Pages calls the new API successfully
+- `https://<APP_DOMAIN>/health` returns `status=ok`
+- `https://<ROOT_DOMAIN>` redirects to `https://<APP_DOMAIN>`
+- frontend is served from the same production domain as the API
 - no Home Assistant runtime dependency in public path
 - deploy works with one command (`release.sh deploy`)
 - rollback works with one command (`release.sh rollback`)

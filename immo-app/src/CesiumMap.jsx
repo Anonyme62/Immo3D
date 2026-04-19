@@ -118,6 +118,9 @@ const ADAPTIVE_QUALITY_AUTO_RECOVERY_RECHECK_MS = 240;
 const ADAPTIVE_QUALITY_AUTO_TILE_BUSY_THRESHOLD = 10;
 const ADAPTIVE_QUALITY_AUTO_DROP_MIN_INTERVAL_MS = 420;
 const ADAPTIVE_QUALITY_AUTO_SLOW_AVG_FRAME_MS = 17.5;
+const FPS_BENCHMARK_HOT_PATH_MIN_DURATION_MS = 12;
+const FPS_BENCHMARK_HOT_PATH_COOLDOWN_MS = 180;
+const FPS_BENCHMARK_HOT_PATH_CAPTURE_LIMIT = 18;
 const ADAPTIVE_QUALITY_RAISE_FPS_MOBILE = 52;
 const ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP = 57;
 const MOBILE_QUALITY_PROFILE_DEFAULT = "auto";
@@ -1473,6 +1476,8 @@ function sanitizeBenchmarkHistoryEntry(entry) {
     maxFrameMs: roundBenchmarkValue(Number(entry.maxFrameMs)),
     longTaskCount: Math.max(0, Number(entry.longTaskCount || 0)),
     maxLongTaskMs: roundBenchmarkValue(Number(entry.maxLongTaskMs)),
+    hotPathCount: Math.max(0, Number(entry.hotPathCount || 0)),
+    maxHotPathMs: roundBenchmarkValue(Number(entry.maxHotPathMs)),
     qualityProfile: String(entry.qualityProfile || ""),
     runKind,
     coldStart: Boolean(entry.coldStart),
@@ -1678,6 +1683,7 @@ function buildBenchmarkPerfEventSamples(
         at: String(event?.at || ""),
         elapsedMs: roundBenchmarkValue(elapsedMs),
         durationMs,
+        handler: event?.handler ? String(event.handler) : null,
         segmentKey: segmentMeta?.key || null,
         segmentLabel: segmentMeta?.label || null,
         phaseKey: segmentMeta?.phaseKey || null,
@@ -1701,6 +1707,9 @@ function buildBenchmarkPerfEventSamples(
         peakRemainingTiles: Number.isFinite(Number(event?.peakRemainingTiles))
           ? Math.max(0, Math.round(Number(event.peakRemainingTiles)))
           : null,
+        cameraHeight: roundBenchmarkValue(Number(event?.cameraHeight), 1),
+        branch: event?.branch ? String(event.branch) : null,
+        detail: event?.detail ? String(event.detail) : null,
       };
     })
     .filter(Boolean)
@@ -2669,6 +2678,11 @@ export default function CesiumMap({
     globeSse: null,
     tilesetSse: null,
   });
+  const fpsBenchmarkHotPathTraceRef = useRef({
+    totalCount: 0,
+    topEvents: [],
+    lastRecordedAtByKey: new Map(),
+  });
   const isAwaitingMarkerPlacementRef = useRef(false);
   const selectedCustomMarkerIdRef = useRef(null);
   const markerEditorOpenRef = useRef(false);
@@ -2758,6 +2772,82 @@ export default function CesiumMap({
 
   const isSatelliteReadyRef = useRef(false);
   const isTouchNavigationDevice = isMobile && hasTouchInput();
+
+  function resetFpsBenchmarkHotPathTrace() {
+    fpsBenchmarkHotPathTraceRef.current = {
+      totalCount: 0,
+      topEvents: [],
+      lastRecordedAtByKey: new Map(),
+    };
+  }
+
+  function captureFpsBenchmarkHotPathEvent(handler, durationMs, extra = {}) {
+    if (!fpsBenchmarkActiveRef.current) return;
+
+    const normalizedDurationMs = roundBenchmarkValue(Number(durationMs) || 0);
+    if (
+      !Number.isFinite(normalizedDurationMs) ||
+      normalizedDurationMs < FPS_BENCHMARK_HOT_PATH_MIN_DURATION_MS
+    ) {
+      return;
+    }
+
+    const traceState = fpsBenchmarkHotPathTraceRef.current;
+    const nowMs = Date.now();
+    const branch = extra?.branch ? String(extra.branch) : "";
+    const detail = extra?.detail ? String(extra.detail) : "";
+    const cooldownMs = Number.isFinite(Number(extra?.cooldownMs))
+      ? Math.max(0, Number(extra.cooldownMs))
+      : FPS_BENCHMARK_HOT_PATH_COOLDOWN_MS;
+    const dedupeKey = `${String(handler || "")}|${branch}|${detail}`;
+    const lastRecordedAt = Number(
+      traceState.lastRecordedAtByKey.get(dedupeKey) || 0
+    );
+
+    if (cooldownMs > 0 && nowMs - lastRecordedAt < cooldownMs) {
+      return;
+    }
+
+    traceState.lastRecordedAtByKey.set(dedupeKey, nowMs);
+    traceState.totalCount += 1;
+
+    const viewer = viewerRef.current;
+    const qualitySnapshot = currentQualityTelemetryRef.current || {};
+    const cameraHeight =
+      viewer && !viewer.isDestroyed?.() ? getCameraHeight(viewer) : null;
+    const nextEvent = {
+      type: "hot_path_duration",
+      at: new Date().toISOString(),
+      handler: String(handler || ""),
+      durationMs: normalizedDurationMs,
+      moving: Boolean(adaptiveQualityStateRef.current.isMoving),
+      qualityPreset: String(qualitySnapshot.preset || ""),
+      qualityMoving:
+        typeof qualitySnapshot.moving === "boolean"
+          ? Boolean(qualitySnapshot.moving)
+          : null,
+      resolutionScale: roundBenchmarkValue(
+        Number(qualitySnapshot.resolutionScale),
+        2
+      ),
+      msaaSamples: Number.isFinite(Number(qualitySnapshot.msaaSamples))
+        ? Math.max(0, Number(qualitySnapshot.msaaSamples))
+        : null,
+      globeSse: roundBenchmarkValue(Number(qualitySnapshot.globeSse), 2),
+      tilesetSse: roundBenchmarkValue(Number(qualitySnapshot.tilesetSse), 2),
+      remainingTiles: Math.max(
+        0,
+        Math.round(Number(tileLoadBurstStateRef.current.lastRemainingTiles) || 0)
+      ),
+      cameraHeight: roundBenchmarkValue(Number(cameraHeight), 1),
+      branch: branch || null,
+      detail: detail || null,
+    };
+
+    traceState.topEvents = [...traceState.topEvents, nextEvent]
+      .sort((left, right) => Number(right.durationMs) - Number(left.durationMs))
+      .slice(0, FPS_BENCHMARK_HOT_PATH_CAPTURE_LIMIT);
+  }
 
   useEffect(() => {
     onSelectBienRef.current = setSelectedBien;
@@ -5582,67 +5672,82 @@ function findPickedInteractiveData(
     };
 
     const applyBenchmarkSegmentQuality = (segmentMeta) => {
+      const traceStartedAt = performance.now();
+      let traceBranch = "unknown";
       if (!segmentMeta) return;
 
       const shouldMove =
         typeof segmentMeta.benchmarkMoving === "boolean"
           ? Boolean(segmentMeta.benchmarkMoving)
           : true;
+      traceBranch = shouldMove ? "move" : "settle";
 
-      adaptiveQualityStateRef.current.isMoving = shouldMove;
-      clearQualityRecoverySafetyTimeout();
-      resetAdaptiveQualityStats();
+      try {
+        adaptiveQualityStateRef.current.isMoving = shouldMove;
+        clearQualityRecoverySafetyTimeout();
+        resetAdaptiveQualityStats();
 
-      if (shouldMove) {
-        if (!isMobile && selectedDesktopQualityProfileId === "auto") {
-          desktopMovingVisibleUntilRef.current = Math.max(
-            desktopMovingVisibleUntilRef.current,
-            Date.now() +
-              Math.max(
-                DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS,
-                Number(segmentMeta?.durationMs) || 0
-              )
-          );
-          desktopSettleSnapshotRef.current = null;
-        }
-        clearDesktopQualityRestoreTimeouts();
-        clearMobileQualityRestoreTimeout();
-        clearMobileUltraRestoreTimeout();
-        if (isMobile) {
-          applyMobileMovingQuality();
-          return;
-        }
-        applyDesktopMovingQuality();
-        return;
-      }
-
-      if (isMobile) {
-        clearMobileQualityRestoreTimeout();
-        clearMobileUltraRestoreTimeout();
-        mobileQualityRestoreTimeoutRef.current = window.setTimeout(() => {
-          if (cancelled) return;
-          if (adaptiveQualityStateRef.current.isMoving) return;
-          applyMobileIdleQuality();
-          if (!selectedMobileQualityProfile.enableUltra || modeRef.current !== "google3d") {
+        if (shouldMove) {
+          if (!isMobile && selectedDesktopQualityProfileId === "auto") {
+            desktopMovingVisibleUntilRef.current = Math.max(
+              desktopMovingVisibleUntilRef.current,
+              Date.now() +
+                Math.max(
+                  DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS,
+                  Number(segmentMeta?.durationMs) || 0
+                )
+            );
+            desktopSettleSnapshotRef.current = null;
+          }
+          clearDesktopQualityRestoreTimeouts();
+          clearMobileQualityRestoreTimeout();
+          clearMobileUltraRestoreTimeout();
+          if (isMobile) {
+            applyMobileMovingQuality();
             return;
           }
-          mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+          applyDesktopMovingQuality();
+          return;
+        }
+
+        if (isMobile) {
+          clearMobileQualityRestoreTimeout();
+          clearMobileUltraRestoreTimeout();
+          mobileQualityRestoreTimeoutRef.current = window.setTimeout(() => {
             if (cancelled) return;
             if (adaptiveQualityStateRef.current.isMoving) return;
-            if (modeRef.current !== "google3d") return;
-            applyMobileUltraQuality();
-          }, selectedMobileQualityProfile.ultraRestoreDelayMs);
-        }, selectedMobileQualityProfile.idleRestoreDelayMs);
-        return;
-      }
+            applyMobileIdleQuality();
+            if (!selectedMobileQualityProfile.enableUltra || modeRef.current !== "google3d") {
+              return;
+            }
+            mobileUltraRestoreTimeoutRef.current = window.setTimeout(() => {
+              if (cancelled) return;
+              if (adaptiveQualityStateRef.current.isMoving) return;
+              if (modeRef.current !== "google3d") return;
+              applyMobileUltraQuality();
+            }, selectedMobileQualityProfile.ultraRestoreDelayMs);
+          }, selectedMobileQualityProfile.idleRestoreDelayMs);
+          return;
+        }
 
-      clearDesktopQualityRestoreTimeouts();
-      const restoreAttemptId = desktopIdleRestoreAttemptRef.current;
-      desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
-      scheduleDesktopIdleRestore(
-        restoreAttemptId,
-        selectedDesktopQualityProfile.idleRestoreDelayMs
-      );
+        clearDesktopQualityRestoreTimeouts();
+        const restoreAttemptId = desktopIdleRestoreAttemptRef.current;
+        desktopSettleSnapshotRef.current = captureQualityCameraSnapshot(viewer);
+        scheduleDesktopIdleRestore(
+          restoreAttemptId,
+          selectedDesktopQualityProfile.idleRestoreDelayMs
+        );
+      } finally {
+        captureFpsBenchmarkHotPathEvent(
+          "apply_benchmark_segment_quality",
+          performance.now() - traceStartedAt,
+          {
+            branch: traceBranch,
+            detail: String(segmentMeta?.phaseKey || segmentMeta?.key || ""),
+            cooldownMs: 0,
+          }
+        );
+      }
     };
 
     const applyBenchmarkMovingQualityLock = (durationMs = null) => {
@@ -5791,144 +5896,160 @@ function findPickedInteractiveData(
     };
 
     const handleAdaptiveFrameQuality = () => {
-      if (cancelled) return;
-      if (modeRef.current !== "google3d") {
-        adaptiveQualityStateRef.current.isUltraActive = false;
-        resetAdaptiveQualityStats();
-        return;
-      }
-      if (!isSatelliteReadyRef.current && !tilesetRef.current?.tilesLoaded) {
-        resetAdaptiveQualityStats();
-        return;
-      }
-      if (adaptiveQualityStateRef.current.isMoving) {
-        resetAdaptiveQualityStats();
-        return;
-      }
+      const traceStartedAt = performance.now();
+      let traceBranch = "skip";
+      try {
+        if (cancelled) return;
+        if (modeRef.current !== "google3d") {
+          adaptiveQualityStateRef.current.isUltraActive = false;
+          resetAdaptiveQualityStats();
+          return;
+        }
+        if (!isSatelliteReadyRef.current && !tilesetRef.current?.tilesLoaded) {
+          resetAdaptiveQualityStats();
+          return;
+        }
+        if (adaptiveQualityStateRef.current.isMoving) {
+          resetAdaptiveQualityStats();
+          return;
+        }
 
-      const now = performance.now();
-      if (!adaptiveQualityStateRef.current.lastFrameAt) {
+        const now = performance.now();
+        if (!adaptiveQualityStateRef.current.lastFrameAt) {
+          adaptiveQualityStateRef.current.lastFrameAt = now;
+          adaptiveQualityStateRef.current.sampleStartAt = now;
+          return;
+        }
+
+        const frameDeltaMs = now - adaptiveQualityStateRef.current.lastFrameAt;
+        adaptiveQualityStateRef.current.lastFrameAt = now;
+        if (!Number.isFinite(frameDeltaMs) || frameDeltaMs <= 0) return;
+
+        adaptiveQualityStateRef.current.sampleFrameCount += 1;
+        adaptiveQualityStateRef.current.sampleFrameMsTotal += frameDeltaMs;
+
+        if (!isMobile && selectedDesktopQualityProfileId === "auto") {
+          if (frameDeltaMs >= ADAPTIVE_QUALITY_AUTO_SEVERE_FRAME_MS) {
+            traceBranch = "auto_severe_frame";
+            adaptiveQualityStateRef.current.overloadFrameStreak = 0;
+            triggerAutoStabilityDrop({
+              holdMs: ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS + 1000,
+            });
+            resetAdaptiveQualityStats();
+            adaptiveQualityStateRef.current.lastFrameAt = now;
+            adaptiveQualityStateRef.current.sampleStartAt = now;
+            return;
+          }
+
+          if (frameDeltaMs >= ADAPTIVE_QUALITY_AUTO_DROP_FRAME_MS) {
+            adaptiveQualityStateRef.current.overloadFrameStreak += 1;
+          } else {
+            adaptiveQualityStateRef.current.overloadFrameStreak = Math.max(
+              0,
+              adaptiveQualityStateRef.current.overloadFrameStreak - 1
+            );
+          }
+
+          if (
+            adaptiveQualityStateRef.current.overloadFrameStreak >=
+            ADAPTIVE_QUALITY_AUTO_DROP_STREAK_LIMIT
+          ) {
+            traceBranch = "auto_drop_streak";
+            adaptiveQualityStateRef.current.overloadFrameStreak = 0;
+            triggerAutoStabilityDrop();
+            resetAdaptiveQualityStats();
+            adaptiveQualityStateRef.current.lastFrameAt = now;
+            adaptiveQualityStateRef.current.sampleStartAt = now;
+            return;
+          }
+        }
+
+        if (adaptiveQualityStateRef.current.isUltraActive) {
+          if (frameDeltaMs > ADAPTIVE_QUALITY_DROP_FRAME_MS) {
+            adaptiveQualityStateRef.current.dropFrameStreak += 1;
+          } else {
+            adaptiveQualityStateRef.current.dropFrameStreak = Math.max(
+              0,
+              adaptiveQualityStateRef.current.dropFrameStreak - 1
+            );
+          }
+
+          if (
+            adaptiveQualityStateRef.current.dropFrameStreak >=
+            ADAPTIVE_QUALITY_DROP_STREAK_LIMIT
+          ) {
+            traceBranch = "ultra_drop_streak";
+            adaptiveQualityStateRef.current.dropFrameStreak = 0;
+            if (isMobile) {
+              clearMobileUltraRestoreTimeout();
+              applyMobileIdleQuality();
+            } else if (!isMobile) {
+              applyDesktopIdleQuality();
+            }
+            resetAdaptiveQualityStats();
+            return;
+          }
+        }
+
+        if (
+          now - adaptiveQualityStateRef.current.sampleStartAt <
+          ADAPTIVE_QUALITY_SAMPLE_WINDOW_MS
+        ) {
+          return;
+        }
+
+        const frameCount = adaptiveQualityStateRef.current.sampleFrameCount;
+        const totalFrameMs = adaptiveQualityStateRef.current.sampleFrameMsTotal;
+        resetAdaptiveQualityStats();
         adaptiveQualityStateRef.current.lastFrameAt = now;
         adaptiveQualityStateRef.current.sampleStartAt = now;
-        return;
-      }
+        if (!frameCount || !totalFrameMs) return;
 
-      const frameDeltaMs = now - adaptiveQualityStateRef.current.lastFrameAt;
-      adaptiveQualityStateRef.current.lastFrameAt = now;
-      if (!Number.isFinite(frameDeltaMs) || frameDeltaMs <= 0) return;
+        const avgFrameMs = totalFrameMs / frameCount;
+        const avgFps = avgFrameMs > 0 ? 1000 / avgFrameMs : 0;
+        if (!Number.isFinite(avgFps) || avgFps <= 0) return;
 
-      adaptiveQualityStateRef.current.sampleFrameCount += 1;
-      adaptiveQualityStateRef.current.sampleFrameMsTotal += frameDeltaMs;
-
-      if (!isMobile && selectedDesktopQualityProfileId === "auto") {
-        if (frameDeltaMs >= ADAPTIVE_QUALITY_AUTO_SEVERE_FRAME_MS) {
-          adaptiveQualityStateRef.current.overloadFrameStreak = 0;
+        if (
+          !isMobile &&
+          selectedDesktopQualityProfileId === "auto" &&
+          avgFrameMs >= ADAPTIVE_QUALITY_AUTO_SLOW_AVG_FRAME_MS
+        ) {
+          traceBranch = "auto_slow_average";
           triggerAutoStabilityDrop({
-            holdMs: ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS + 1000,
+            holdMs: ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS,
           });
-          resetAdaptiveQualityStats();
-          adaptiveQualityStateRef.current.lastFrameAt = now;
-          adaptiveQualityStateRef.current.sampleStartAt = now;
           return;
         }
 
-        if (frameDeltaMs >= ADAPTIVE_QUALITY_AUTO_DROP_FRAME_MS) {
-          adaptiveQualityStateRef.current.overloadFrameStreak += 1;
-        } else {
-          adaptiveQualityStateRef.current.overloadFrameStreak = Math.max(
-            0,
-            adaptiveQualityStateRef.current.overloadFrameStreak - 1
-          );
-        }
+        if (adaptiveQualityStateRef.current.isUltraActive) return;
 
-        if (
-          adaptiveQualityStateRef.current.overloadFrameStreak >=
-          ADAPTIVE_QUALITY_AUTO_DROP_STREAK_LIMIT
-        ) {
-          adaptiveQualityStateRef.current.overloadFrameStreak = 0;
-          triggerAutoStabilityDrop();
-          resetAdaptiveQualityStats();
-          adaptiveQualityStateRef.current.lastFrameAt = now;
-          adaptiveQualityStateRef.current.sampleStartAt = now;
-          return;
-        }
-      }
-
-      if (adaptiveQualityStateRef.current.isUltraActive) {
-        if (frameDeltaMs > ADAPTIVE_QUALITY_DROP_FRAME_MS) {
-          adaptiveQualityStateRef.current.dropFrameStreak += 1;
-        } else {
-          adaptiveQualityStateRef.current.dropFrameStreak = Math.max(
-            0,
-            adaptiveQualityStateRef.current.dropFrameStreak - 1
-          );
-        }
-
-        if (
-          adaptiveQualityStateRef.current.dropFrameStreak >=
-          ADAPTIVE_QUALITY_DROP_STREAK_LIMIT
-        ) {
-          adaptiveQualityStateRef.current.dropFrameStreak = 0;
-          if (isMobile) {
-            clearMobileUltraRestoreTimeout();
-            applyMobileIdleQuality();
-          } else if (!isMobile) {
-            applyDesktopIdleQuality();
+        if (isMobile) {
+          if (
+            selectedMobileQualityProfile.enableUltra &&
+            avgFps >= selectedMobileQualityProfile.adaptiveRaiseFps
+          ) {
+            traceBranch = "mobile_raise_ultra";
+            applyMobileUltraQuality();
           }
-          resetAdaptiveQualityStats();
           return;
         }
-      }
 
-      if (
-        now - adaptiveQualityStateRef.current.sampleStartAt <
-        ADAPTIVE_QUALITY_SAMPLE_WINDOW_MS
-      ) {
-        return;
-      }
-
-      const frameCount = adaptiveQualityStateRef.current.sampleFrameCount;
-      const totalFrameMs = adaptiveQualityStateRef.current.sampleFrameMsTotal;
-      resetAdaptiveQualityStats();
-      adaptiveQualityStateRef.current.lastFrameAt = now;
-      adaptiveQualityStateRef.current.sampleStartAt = now;
-      if (!frameCount || !totalFrameMs) return;
-
-      const avgFrameMs = totalFrameMs / frameCount;
-      const avgFps = avgFrameMs > 0 ? 1000 / avgFrameMs : 0;
-      if (!Number.isFinite(avgFps) || avgFps <= 0) return;
-
-      if (
-        !isMobile &&
-        selectedDesktopQualityProfileId === "auto" &&
-        avgFrameMs >= ADAPTIVE_QUALITY_AUTO_SLOW_AVG_FRAME_MS
-      ) {
-        triggerAutoStabilityDrop({
-          holdMs: ADAPTIVE_QUALITY_AUTO_FRAME_RECOVERY_MS,
-        });
-        return;
-      }
-
-      if (adaptiveQualityStateRef.current.isUltraActive) return;
-
-      if (isMobile) {
         if (
-          selectedMobileQualityProfile.enableUltra &&
-          avgFps >= selectedMobileQualityProfile.adaptiveRaiseFps
+          !isMobile &&
+          selectedDesktopQualityProfile.enableUltra &&
+          avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps &&
+          (selectedDesktopQualityProfileId !== "auto" ||
+            getAutoRecoveryBlockDelayMs() <= 0)
         ) {
-          applyMobileUltraQuality();
+          traceBranch = "desktop_raise_ultra";
+          applyDesktopUltraQuality();
         }
-        return;
-      }
-
-      if (
-        !isMobile &&
-        selectedDesktopQualityProfile.enableUltra &&
-        avgFps >= selectedDesktopQualityProfile.adaptiveRaiseFps &&
-        (selectedDesktopQualityProfileId !== "auto" ||
-          getAutoRecoveryBlockDelayMs() <= 0)
-      ) {
-        applyDesktopUltraQuality();
+      } finally {
+        captureFpsBenchmarkHotPathEvent(
+          "handle_adaptive_frame_quality",
+          performance.now() - traceStartedAt,
+          { branch: traceBranch }
+        );
       }
     };
 
@@ -7251,206 +7372,232 @@ function findPickedInteractiveData(
     };
 
     const applyMarkerLod = () => {
-      if (cancelled || !viewer || viewer.isDestroyed()) return;
-
-      const isSatelliteMode =
-        modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
-      const bienEntities = entitiesRef.current;
-      const customEntities = customMarkerEntitiesRef.current;
-
-      if (!Array.isArray(bienEntities) || bienEntities.length === 0) return;
-
-      const selectedId = selectedBienIdRef.current;
-      const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
-      if (isMoving && markerLodRuntimeRef.current.movingStateApplied) {
-        return;
-      }
-
-      const now = performance.now();
-      if (!isMoving && now < markerLodRuntimeRef.current.nextUpdateAt) return;
-      markerLodRuntimeRef.current.nextUpdateAt =
-        now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
-
+      const traceStartedAt = performance.now();
+      let traceBranch = "skip";
+      let traceCameraHeight = null;
+      let traceMarkerCount = 0;
       let changed = false;
 
-      if (!isSatelliteMode) {
-        const signature = `osm|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
+      try {
+        if (cancelled || !viewer || viewer.isDestroyed()) return;
+
+        const isSatelliteMode =
+          modeRef.current === "google3d" || Boolean(tilesetRef.current?.show);
+        const bienEntities = entitiesRef.current;
+        const customEntities = customMarkerEntitiesRef.current;
+        traceMarkerCount = bienEntities.length + customEntities.length;
+
+        if (!Array.isArray(bienEntities) || bienEntities.length === 0) return;
+
+        const selectedId = selectedBienIdRef.current;
+        const isMoving = Boolean(adaptiveQualityStateRef.current.isMoving);
+        if (isMoving && markerLodRuntimeRef.current.movingStateApplied) {
+          return;
+        }
+
+        const now = performance.now();
+        if (!isMoving && now < markerLodRuntimeRef.current.nextUpdateAt) return;
+        markerLodRuntimeRef.current.nextUpdateAt =
+          now + SATELLITE_MARKER_LOD_UPDATE_INTERVAL_MS;
+
+        if (!isSatelliteMode) {
+          traceBranch = "osm";
+          const signature = `osm|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
+          if (markerLodRuntimeRef.current.lastSignature === signature) return;
+          markerLodRuntimeRef.current.lastSignature = signature;
+          markerLodRuntimeRef.current.movingStateApplied = false;
+
+          bienEntities.forEach((entity) => {
+            const shouldShowPoint = entity.showPointByPriority !== false;
+            if (entity.point?.show !== shouldShowPoint) {
+              entity.point.show = shouldShowPoint;
+              changed = true;
+            }
+            if (entity.label?.show !== true) {
+              entity.label.show = true;
+              changed = true;
+            }
+          });
+
+          customEntities.forEach((entity) => {
+            if (entity.point?.show !== true) {
+              entity.point.show = true;
+              changed = true;
+            }
+            if (entity.label?.show !== true) {
+              entity.label.show = true;
+              changed = true;
+            }
+          });
+
+          if (changed) viewer.scene.requestRender();
+          return;
+        }
+
+        if (isMoving && !isMobile) {
+          traceBranch = "sat-moving-hold";
+          const signature = `sat-moving-hold|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
+          if (markerLodRuntimeRef.current.lastSignature === signature) return;
+          markerLodRuntimeRef.current.lastSignature = signature;
+
+          bienEntities.forEach((entity) => {
+            const bienId = entity.bienData?.id;
+            const isSelected = bienId != null && bienId === selectedId;
+            const shouldShowPoint = entity.showPointByPriority !== false;
+            if (entity.point?.show !== shouldShowPoint) {
+              entity.point.show = shouldShowPoint;
+              changed = true;
+            }
+            if (isSelected && entity.label?.show !== true) {
+              entity.label.show = true;
+              changed = true;
+            }
+          });
+
+          customEntities.forEach((entity) => {
+            if (entity.point?.show !== true) {
+              entity.point.show = true;
+              changed = true;
+            }
+          });
+
+          markerLodRuntimeRef.current.movingStateApplied = true;
+          if (changed) {
+            viewer.scene.requestRender();
+          }
+          return;
+        }
+
+        const cameraPosition = viewer.camera?.positionWC;
+        if (!cameraPosition) return;
+        const cameraHeight = getCameraHeight(viewer);
+        traceCameraHeight = cameraHeight;
+        traceBranch = "sat-rank";
+        const currentMobileProfile = normalizeMobileQualityProfile(
+          mobileQualityProfileRef.current
+        );
+        const currentDesktopProfile = normalizeDesktopQualityProfile(
+          desktopQualityProfileRef.current
+        );
+        const lodBudget = getSatelliteMarkerLodBudget(
+          cameraHeight,
+          isMobile,
+          isMoving,
+          currentMobileProfile,
+          currentDesktopProfile
+        );
+        const cameraBucket = Number.isFinite(cameraHeight)
+          ? Math.round(Math.min(12000, cameraHeight) / 140)
+          : -1;
+        const signature = [
+          "sat",
+          isMoving ? 1 : 0,
+          cameraBucket,
+          lodBudget.bienLabelBudget,
+          lodBudget.bienPointBudget,
+          lodBudget.customLabelBudget,
+          lodBudget.customPointBudget,
+          isMobile ? currentMobileProfile : currentDesktopProfile,
+          bienEntities.length,
+          customEntities.length,
+          selectedId ?? "",
+        ].join("|");
         if (markerLodRuntimeRef.current.lastSignature === signature) return;
         markerLodRuntimeRef.current.lastSignature = signature;
-        markerLodRuntimeRef.current.movingStateApplied = false;
 
-        bienEntities.forEach((entity) => {
-          const shouldShowPoint = entity.showPointByPriority !== false;
-          if (entity.point?.show !== shouldShowPoint) {
-            entity.point.show = shouldShowPoint;
-            changed = true;
-          }
-          if (entity.label?.show !== true) {
-            entity.label.show = true;
-            changed = true;
-          }
-        });
+        const bienRanked = bienEntities
+          .map((entity) => ({
+            entity,
+            distanceSquared: Cesium.Cartesian3.distanceSquared(
+              cameraPosition,
+              entity.markerPositionCartesian ||
+                entity.position?.getValue?.(viewer.clock.currentTime) ||
+                cameraPosition
+            ),
+          }))
+          .sort((left, right) => left.distanceSquared - right.distanceSquared);
+        const customRanked = customEntities
+          .map((entity) => ({
+            entity,
+            distanceSquared: Cesium.Cartesian3.distanceSquared(
+              cameraPosition,
+              entity.markerPositionCartesian ||
+                entity.position?.getValue?.(viewer.clock.currentTime) ||
+                cameraPosition
+            ),
+          }))
+          .sort((left, right) => left.distanceSquared - right.distanceSquared);
 
-        customEntities.forEach((entity) => {
-          if (entity.point?.show !== true) {
-            entity.point.show = true;
-            changed = true;
-          }
-          if (entity.label?.show !== true) {
-            entity.label.show = true;
-            changed = true;
-          }
-        });
-
-        if (changed) viewer.scene.requestRender();
-        return;
-      }
-
-      if (isMoving && !isMobile) {
-        const signature = `sat-moving-hold|${bienEntities.length}|${customEntities.length}|${selectedId ?? ""}`;
-        if (markerLodRuntimeRef.current.lastSignature === signature) return;
-        markerLodRuntimeRef.current.lastSignature = signature;
+        const bienLabelVisibleSet = new Set(
+          bienRanked.slice(0, lodBudget.bienLabelBudget).map((entry) => entry.entity)
+        );
+        const bienPointVisibleSet = new Set(
+          bienRanked.slice(0, lodBudget.bienPointBudget).map((entry) => entry.entity)
+        );
+        const customLabelVisibleSet = new Set(
+          customRanked.slice(0, lodBudget.customLabelBudget).map((entry) => entry.entity)
+        );
+        const customPointVisibleSet = new Set(
+          customRanked.slice(0, lodBudget.customPointBudget).map((entry) => entry.entity)
+        );
+        const shouldShowDesktopLabelsForVisiblePoints = !isMobile && !isMoving;
 
         bienEntities.forEach((entity) => {
           const bienId = entity.bienData?.id;
           const isSelected = bienId != null && bienId === selectedId;
-          const shouldShowPoint = entity.showPointByPriority !== false;
+          const shouldShowPointBase = entity.showPointByPriority !== false;
+          const shouldShowPoint =
+            isSelected || (shouldShowPointBase && bienPointVisibleSet.has(entity));
+          const shouldShowLabel =
+            isSelected ||
+            (shouldShowDesktopLabelsForVisiblePoints
+              ? shouldShowPoint
+              : bienLabelVisibleSet.has(entity));
           if (entity.point?.show !== shouldShowPoint) {
             entity.point.show = shouldShowPoint;
             changed = true;
           }
-          if (isSelected && entity.label?.show !== true) {
-            entity.label.show = true;
+          if (entity.label?.show !== shouldShowLabel) {
+            entity.label.show = shouldShowLabel;
             changed = true;
           }
         });
 
         customEntities.forEach((entity) => {
-          if (entity.point?.show !== true) {
-            entity.point.show = true;
+          const shouldShowPoint = customPointVisibleSet.has(entity);
+          const shouldShowLabel = shouldShowDesktopLabelsForVisiblePoints
+            ? shouldShowPoint
+            : customLabelVisibleSet.has(entity);
+          if (entity.point?.show !== shouldShowPoint) {
+            entity.point.show = shouldShowPoint;
+            changed = true;
+          }
+          if (entity.label?.show !== shouldShowLabel) {
+            entity.label.show = shouldShowLabel;
             changed = true;
           }
         });
 
-        markerLodRuntimeRef.current.movingStateApplied = true;
+        markerLodRuntimeRef.current.movingStateApplied = isMoving;
+
         if (changed) {
           viewer.scene.requestRender();
         }
-        return;
-      }
-
-      const cameraPosition = viewer.camera?.positionWC;
-      if (!cameraPosition) return;
-      const cameraHeight = getCameraHeight(viewer);
-      const currentMobileProfile = normalizeMobileQualityProfile(
-        mobileQualityProfileRef.current
-      );
-      const currentDesktopProfile = normalizeDesktopQualityProfile(
-        desktopQualityProfileRef.current
-      );
-      const lodBudget = getSatelliteMarkerLodBudget(
-        cameraHeight,
-        isMobile,
-        isMoving,
-        currentMobileProfile,
-        currentDesktopProfile
-      );
-      const cameraBucket = Number.isFinite(cameraHeight)
-        ? Math.round(Math.min(12000, cameraHeight) / 140)
-        : -1;
-      const signature = [
-        "sat",
-        isMoving ? 1 : 0,
-        cameraBucket,
-        lodBudget.bienLabelBudget,
-        lodBudget.bienPointBudget,
-        lodBudget.customLabelBudget,
-        lodBudget.customPointBudget,
-        isMobile ? currentMobileProfile : currentDesktopProfile,
-        bienEntities.length,
-        customEntities.length,
-        selectedId ?? "",
-      ].join("|");
-      if (markerLodRuntimeRef.current.lastSignature === signature) return;
-      markerLodRuntimeRef.current.lastSignature = signature;
-
-      const bienRanked = bienEntities
-        .map((entity) => ({
-          entity,
-          distanceSquared: Cesium.Cartesian3.distanceSquared(
-            cameraPosition,
-            entity.markerPositionCartesian ||
-              entity.position?.getValue?.(viewer.clock.currentTime) ||
-              cameraPosition
-          ),
-        }))
-        .sort((left, right) => left.distanceSquared - right.distanceSquared);
-      const customRanked = customEntities
-        .map((entity) => ({
-          entity,
-          distanceSquared: Cesium.Cartesian3.distanceSquared(
-            cameraPosition,
-            entity.markerPositionCartesian ||
-              entity.position?.getValue?.(viewer.clock.currentTime) ||
-              cameraPosition
-          ),
-        }))
-        .sort((left, right) => left.distanceSquared - right.distanceSquared);
-
-      const bienLabelVisibleSet = new Set(
-        bienRanked.slice(0, lodBudget.bienLabelBudget).map((entry) => entry.entity)
-      );
-      const bienPointVisibleSet = new Set(
-        bienRanked.slice(0, lodBudget.bienPointBudget).map((entry) => entry.entity)
-      );
-      const customLabelVisibleSet = new Set(
-        customRanked.slice(0, lodBudget.customLabelBudget).map((entry) => entry.entity)
-      );
-      const customPointVisibleSet = new Set(
-        customRanked.slice(0, lodBudget.customPointBudget).map((entry) => entry.entity)
-      );
-      const shouldShowDesktopLabelsForVisiblePoints = !isMobile && !isMoving;
-
-      bienEntities.forEach((entity) => {
-        const bienId = entity.bienData?.id;
-        const isSelected = bienId != null && bienId === selectedId;
-        const shouldShowPointBase = entity.showPointByPriority !== false;
-        const shouldShowPoint =
-          isSelected || (shouldShowPointBase && bienPointVisibleSet.has(entity));
-        const shouldShowLabel =
-          isSelected ||
-          (shouldShowDesktopLabelsForVisiblePoints
-            ? shouldShowPoint
-            : bienLabelVisibleSet.has(entity));
-        if (entity.point?.show !== shouldShowPoint) {
-          entity.point.show = shouldShowPoint;
-          changed = true;
-        }
-        if (entity.label?.show !== shouldShowLabel) {
-          entity.label.show = shouldShowLabel;
-          changed = true;
-        }
-      });
-
-      customEntities.forEach((entity) => {
-        const shouldShowPoint = customPointVisibleSet.has(entity);
-        const shouldShowLabel = shouldShowDesktopLabelsForVisiblePoints
-          ? shouldShowPoint
-          : customLabelVisibleSet.has(entity);
-        if (entity.point?.show !== shouldShowPoint) {
-          entity.point.show = shouldShowPoint;
-          changed = true;
-        }
-        if (entity.label?.show !== shouldShowLabel) {
-          entity.label.show = shouldShowLabel;
-          changed = true;
-        }
-      });
-
-      markerLodRuntimeRef.current.movingStateApplied = isMoving;
-
-      if (changed) {
-        viewer.scene.requestRender();
+      } finally {
+        captureFpsBenchmarkHotPathEvent(
+          "apply_marker_lod",
+          performance.now() - traceStartedAt,
+          {
+            branch: traceBranch,
+            detail:
+              traceMarkerCount > 0
+                ? `${traceMarkerCount} markers${changed ? " changed" : ""}`
+                : changed
+                  ? "changed"
+                  : "",
+            cameraHeight: traceCameraHeight,
+          }
+        );
       }
     };
 
@@ -8241,6 +8388,7 @@ function findPickedInteractiveData(
 
     finishFpsBenchmarkRecording();
     finishFpsBenchmarkRun(viewer);
+    resetFpsBenchmarkHotPathTrace();
     fpsBenchmarkActiveRef.current = true;
     prepareFpsBenchmarkQualityRef.current?.();
 
@@ -8285,7 +8433,7 @@ function findPickedInteractiveData(
     }
     if (initialSegmentShouldMove) {
       applyFpsBenchmarkMovingQualityRef.current?.(
-        Number(initialSegmentMeta?.durationMs) || null
+        benchmarkTotalDurationMs + FPS_BENCHMARK_PREPARE_DELAY_MS + 120
       );
     } else {
       applyFpsBenchmarkInitialPauseQualityRef.current?.();
@@ -8342,6 +8490,7 @@ function findPickedInteractiveData(
       let recordingSampleIndex = 0;
 
       const stepBenchmark = (timestamp) => {
+        const stepStartedAt = performance.now();
         if (viewer.isDestroyed()) {
           finishFpsBenchmarkRun(viewer);
           return;
@@ -8381,6 +8530,7 @@ function findPickedInteractiveData(
           applyFpsBenchmarkSegmentQualityRef.current?.(segmentMeta);
         }
         if (recording?.samples?.length > 1) {
+          const cameraUpdateStartedAt = performance.now();
           while (
             recordingSampleIndex < recording.samples.length - 2 &&
             elapsedMs >= Number(recording.samples[recordingSampleIndex + 1]?.elapsedMs || 0)
@@ -8407,7 +8557,16 @@ function findPickedInteractiveData(
             sampleProgress
           );
           restoreSerializableCameraState(viewer, nextCameraState);
+          captureFpsBenchmarkHotPathEvent(
+            "fps_benchmark_camera_update",
+            performance.now() - cameraUpdateStartedAt,
+            {
+              branch: "recorded",
+              detail: `sample ${recordingSampleIndex}`,
+            }
+          );
         } else {
+          const cameraUpdateStartedAt = performance.now();
           const offset = getFpsBenchmarkOffsetAt(elapsedMs, benchmarkDistanceMeters);
           const rotatedOffset = rotateBenchmarkOffsetByHeading(
             offset.x,
@@ -8435,6 +8594,14 @@ function findPickedInteractiveData(
               roll: Number(startCamera.roll) || 0,
             },
           });
+          captureFpsBenchmarkHotPathEvent(
+            "fps_benchmark_camera_update",
+            performance.now() - cameraUpdateStartedAt,
+            {
+              branch: "procedural",
+              detail: String(segmentMeta?.key || ""),
+            }
+          );
         }
         viewer.scene.requestRender();
 
@@ -8470,14 +8637,35 @@ function findPickedInteractiveData(
         lastFrameAt = timestamp;
 
         if (elapsedMs < benchmarkTotalDurationMs) {
+          captureFpsBenchmarkHotPathEvent(
+            "fps_benchmark_step",
+            performance.now() - stepStartedAt,
+            {
+              branch: recording?.samples?.length > 1 ? "recorded" : "procedural",
+              detail: String(segmentMeta?.key || ""),
+            }
+          );
           fpsBenchmarkRafRef.current =
             window.requestAnimationFrame(stepBenchmark);
           return;
         }
 
+        captureFpsBenchmarkHotPathEvent(
+          "fps_benchmark_step",
+          performance.now() - stepStartedAt,
+          {
+            branch: recording?.samples?.length > 1 ? "recorded" : "procedural",
+            detail: String(segmentMeta?.key || ""),
+            cooldownMs: 0,
+          }
+        );
         finishFpsBenchmarkRun(viewer);
 
         const telemetry = getMapPerfTelemetry();
+        const benchmarkHotPathTrace = fpsBenchmarkHotPathTraceRef.current || {
+          totalCount: 0,
+          topEvents: [],
+        };
         const benchmarkLongTasks = (telemetry.recentEvents || []).filter(
           (event) =>
             event?.type === "long_task" &&
@@ -8498,12 +8686,22 @@ function findPickedInteractiveData(
           telemetryStartedAtMs,
           benchmarkSegmentTimeline
         );
+        const hotPathEvents = buildBenchmarkPerfEventSamples(
+          benchmarkHotPathTrace.topEvents,
+          telemetryStartedAtMs,
+          benchmarkSegmentTimeline
+        );
         const sortedLongTaskDurationsMs = benchmarkLongTasks
           .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
           .filter((value) => Number.isFinite(value) && value > 0)
           .sort((left, right) => right - left)
           .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
         const sortedTileBurstDurationsMs = benchmarkTileBursts
+          .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
+          .filter((value) => Number.isFinite(value) && value > 0)
+          .sort((left, right) => right - left)
+          .slice(0, FPS_BENCHMARK_SPIKE_SAMPLE_LIMIT);
+        const sortedHotPathDurationsMs = hotPathEvents
           .map((event) => roundBenchmarkValue(Number(event?.durationMs) || 0))
           .filter((value) => Number.isFinite(value) && value > 0)
           .sort((left, right) => right - left)
@@ -8536,10 +8734,24 @@ function findPickedInteractiveData(
             tileBurstCount: benchmarkTileBursts.length,
             tileBurstDurationsMs: sortedTileBurstDurationsMs,
             tileBurstEvents,
+            hotPathCount: Math.max(
+              0,
+              Number(benchmarkHotPathTrace.totalCount) || 0
+            ),
+            maxHotPathMs: roundBenchmarkValue(
+              hotPathEvents.reduce(
+                (maxDuration, event) =>
+                  Math.max(maxDuration, Number(event?.durationMs) || 0),
+                0
+              )
+            ),
+            hotPathDurationsMs: sortedHotPathDurationsMs,
+            hotPathEvents,
           },
           benchmarkSegmentTimeline
         );
         if (!result) {
+          resetFpsBenchmarkHotPathTrace();
           persistFpsBenchmarkState((previousState) => ({
             ...previousState,
             running: false,
@@ -8579,6 +8791,7 @@ function findPickedInteractiveData(
           lastLogText: logText,
           message: `${routeLabel} | ${formatFpsBenchmarkSummaryDisplay(result)}`,
         }));
+        resetFpsBenchmarkHotPathTrace();
       };
 
       fpsBenchmarkRafRef.current = window.requestAnimationFrame(stepBenchmark);
