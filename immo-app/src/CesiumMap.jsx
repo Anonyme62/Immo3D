@@ -2317,47 +2317,35 @@ function optimizeDesktopNavigation(
   const controller = viewer.scene.screenSpaceCameraController;
   const resolvedMode = resolveMode(mapMode);
   const satelliteMinimumZoomDistance = getSatelliteMinimumZoomDistance(tuning);
-  const desktopGoogleEarthProfile =
-    resolvedMode === "google3d"
-      ? getDesktopGoogleEarthNavigationProfile(viewer)
-      : null;
 
   controller.enableInputs = true;
-  controller.inertiaSpin =
-    desktopGoogleEarthProfile?.controller.inertiaSpin ?? tuning.controller.inertiaSpin;
-  controller.inertiaTranslate =
-    desktopGoogleEarthProfile?.controller.inertiaTranslate ??
-    tuning.controller.inertiaTranslate;
+  controller.inertiaSpin = tuning.controller.inertiaSpin;
+  controller.inertiaTranslate = tuning.controller.inertiaTranslate;
   controller.inertiaZoom =
     resolvedMode === "google3d" ? 0 : tuning.controller.inertiaZoom;
-  controller.maximumMovementRatio =
-    desktopGoogleEarthProfile?.controller.maximumMovementRatio ??
-    tuning.controller.maximumMovementRatio;
+  controller.maximumMovementRatio = tuning.controller.maximumMovementRatio;
   controller.bounceAnimationTime =
     resolvedMode === "google3d" ? 0 : tuning.controller.bounceAnimationTime;
   controller.enableCollisionDetection = resolvedMode !== "google3d";
-  controller.zoomFactor =
-    desktopGoogleEarthProfile?.controller.zoomFactor ?? tuning.controller.zoomFactor;
+  controller.zoomFactor = tuning.controller.zoomFactor;
   controller.minimumZoomDistance =
     resolvedMode === "google3d"
       ? satelliteMinimumZoomDistance
       : tuning.zoomLimits.planMinHeight;
   controller.maximumZoomDistance = Number.POSITIVE_INFINITY;
   controller.enableLook = false;
-  controller.enableTilt = resolvedMode !== "google3d";
-  controller.enableRotate = resolvedMode !== "google3d";
-  controller.enableTranslate = resolvedMode !== "google3d";
-  controller.enableZoom = resolvedMode !== "google3d";
+  controller.enableTilt = false;
+  controller.enableRotate = true;
+  controller.enableTranslate = true;
+  controller.enableZoom = true;
   controller.lookEventTypes = [];
   controller.tiltEventTypes = [];
-  controller.rotateEventTypes =
-    resolvedMode === "google3d" ? [] : Cesium.CameraEventType.LEFT_DRAG;
-  controller.zoomEventTypes =
-    resolvedMode === "google3d"
-      ? []
-      : [Cesium.CameraEventType.WHEEL, Cesium.CameraEventType.PINCH];
-  controller.translateEventTypes =
-    resolvedMode === "google3d" ? [] : Cesium.CameraEventType.LEFT_DRAG;
+  controller.rotateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
+  controller.zoomEventTypes = [
+    Cesium.CameraEventType.WHEEL,
+    Cesium.CameraEventType.PINCH,
+  ];
+  controller.translateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
   controller.maximumTiltAngle = undefined;
 }
 
@@ -4435,26 +4423,9 @@ function findPickedInteractiveData(
       desktopPanInertiaRef.current.lastFrameAt = 0;
     };
 
-    const updateDesktopGoogleEarthControllerProfile = () => {
-      if (useTouchNavigation) return;
-      if (resolveMode(mapModeRef.current) !== "google3d") {
-        desktopGoogleEarthProfileSignatureRef.current = "";
-        return;
-      }
-
-      const profile = getDesktopGoogleEarthNavigationProfile(viewer);
-      const signature = [
-        Math.round(profile.groundClearance),
-        profile.controller.inertiaSpin.toFixed(3),
-        profile.controller.inertiaTranslate.toFixed(3),
-        profile.controller.maximumMovementRatio.toFixed(3),
-        profile.controller.zoomFactor.toFixed(2),
-      ].join("|");
-      if (signature === desktopGoogleEarthProfileSignatureRef.current) return;
-      desktopGoogleEarthProfileSignatureRef.current = signature;
-      optimizeDesktopNavigation(viewer, touchNavTuningRef.current, "google3d");
-      applyScenePresentationQuality("google3d");
-    };
+    function updateDesktopGoogleEarthControllerProfile() {
+      desktopGoogleEarthProfileSignatureRef.current = "";
+    }
 
     const moveCameraForSurfaceDrag = (fromSurface, toSurface, options = {}) => {
       if (!fromSurface || !toSurface) return false;
@@ -7018,44 +6989,6 @@ function findPickedInteractiveData(
 
     const handleDesktopPointerDown = (event) => {
       if (useTouchNavigation) return;
-      const resolvedMode = resolveMode(mapModeRef.current);
-      if (resolvedMode === "google3d") {
-        updateDesktopGoogleEarthControllerProfile();
-        resetDesktopPanInertia();
-        const canvasRect = viewer.canvas.getBoundingClientRect();
-        const pointerPosition = new Cesium.Cartesian2(
-          event.clientX - canvasRect.left,
-          event.clientY - canvasRect.top
-        );
-        if (event?.button === 0) {
-          desktopSurfacePanRef.current.active = true;
-          desktopSurfacePanRef.current.lastX = event.clientX;
-          desktopSurfacePanRef.current.lastY = event.clientY;
-          desktopSurfacePanRef.current.lastTimestamp = performance.now();
-          desktopSurfacePanRef.current.lastSurface = getClickPosition(
-            viewer.scene,
-            pointerPosition
-          );
-          desktopSurfacePanRef.current.moved = false;
-        } else if (event?.button === 2) {
-          const centerPoint = new Cesium.Cartesian2(
-            canvasRect.width / 2,
-            canvasRect.height / 2
-          );
-          desktopOrbitNavigationRef.current.active = true;
-          desktopOrbitNavigationRef.current.lastX = event.clientX;
-          desktopOrbitNavigationRef.current.lastY = event.clientY;
-          desktopOrbitNavigationRef.current.pivot =
-            getClickPosition(viewer.scene, pointerPosition) ||
-            getClickPosition(viewer.scene, centerPoint);
-          desktopOrbitNavigationRef.current.moved = false;
-        } else {
-          return;
-        }
-        desktopPointerNavigationActiveRef.current = true;
-        markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
-        return;
-      }
       if (event?.button === 2) return;
       desktopPointerNavigationActiveRef.current = true;
       markDesktopNavigationIntent(DESKTOP_AUTO_INPUT_INTENT_MS, true);
@@ -7063,94 +6996,6 @@ function findPickedInteractiveData(
 
     const handleDesktopPointerMove = (event) => {
       if (useTouchNavigation) return;
-      const resolvedMode = resolveMode(mapModeRef.current);
-      if (resolvedMode === "google3d") {
-        if (desktopSurfacePanRef.current.active) {
-          const deltaX = event.clientX - desktopSurfacePanRef.current.lastX;
-          const deltaY = event.clientY - desktopSurfacePanRef.current.lastY;
-          const now = performance.now();
-          const deltaTimeMs = Math.max(
-            1,
-            now - (desktopSurfacePanRef.current.lastTimestamp || now)
-          );
-          desktopSurfacePanRef.current.lastX = event.clientX;
-          desktopSurfacePanRef.current.lastY = event.clientY;
-          desktopSurfacePanRef.current.lastTimestamp = now;
-
-          if (Math.abs(deltaX) < 0.25 && Math.abs(deltaY) < 0.25) return;
-
-          const canvasRect = viewer.canvas.getBoundingClientRect();
-          const pointerPosition = new Cesium.Cartesian2(
-            event.clientX - canvasRect.left,
-            event.clientY - canvasRect.top
-          );
-          const currentSurface = getClickPosition(viewer.scene, pointerPosition);
-          const profile = getDesktopGoogleEarthNavigationProfile(viewer);
-          const movedWithSurfaceDrag = moveCameraForSurfaceDrag(
-            desktopSurfacePanRef.current.lastSurface,
-            currentSurface,
-            {
-              maxStepHeightRatio: DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO,
-              minStepMeters: DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MIN_STEP_METERS,
-              maxStepMeters: profile.surfaceDragMaxStep,
-              smoothing: profile.surfaceDragSmoothing,
-              onApplied: ({ direction, appliedDistance }) => {
-                desktopPanInertiaRef.current.worldDirection =
-                  Cesium.Cartesian3.clone(direction);
-                desktopPanInertiaRef.current.worldVelocity = appliedDistance / deltaTimeMs;
-              },
-            }
-          );
-          desktopSurfacePanRef.current.lastSurface = currentSurface;
-          if (!movedWithSurfaceDrag) {
-            moveCameraForTouchPan(
-              deltaX,
-              deltaY,
-              profile.panFallbackMoveScale,
-              resolvedMode
-            );
-            resetDesktopPanInertia();
-          }
-          desktopSurfacePanRef.current.moved = true;
-          desktopPointerNavigationActiveRef.current = true;
-          markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
-          enforceSatelliteZoomFloor();
-          return;
-        }
-
-        if (desktopOrbitNavigationRef.current.active) {
-          const deltaX = event.clientX - desktopOrbitNavigationRef.current.lastX;
-          const deltaY = event.clientY - desktopOrbitNavigationRef.current.lastY;
-          desktopOrbitNavigationRef.current.lastX = event.clientX;
-          desktopOrbitNavigationRef.current.lastY = event.clientY;
-          if (Math.abs(deltaX) < 0.25 && Math.abs(deltaY) < 0.25) return;
-          const profile = getDesktopGoogleEarthNavigationProfile(viewer);
-          if (desktopOrbitNavigationRef.current.pivot && Math.abs(deltaX) >= 0.25) {
-            orbitCameraAroundPivot(
-              viewer.camera,
-              desktopOrbitNavigationRef.current.pivot,
-              deltaX * profile.headingGain
-            );
-          }
-          const nextPitch = Cesium.Math.clamp(
-            viewer.camera.pitch + deltaY * profile.pitchGain,
-            profile.minPitch,
-            profile.maxPitch
-          );
-          viewer.camera.setView({
-            orientation: {
-              heading: viewer.camera.heading,
-              pitch: nextPitch,
-              roll: 0,
-            },
-          });
-          desktopOrbitNavigationRef.current.moved = true;
-          desktopPointerNavigationActiveRef.current = true;
-          markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
-          viewer.scene.requestRender();
-          return;
-        }
-      }
       const buttons = Number(event?.buttons) || 0;
       const isDragging =
         desktopPointerNavigationActiveRef.current || Boolean(buttons & 1) || Boolean(buttons & 4);
@@ -7159,102 +7004,14 @@ function findPickedInteractiveData(
       markDesktopNavigationIntent(DESKTOP_AUTO_MIN_MOVING_VISIBLE_MS, false);
     };
 
-    const handleDesktopPointerUp = (event) => {
-      if (!useTouchNavigation && resolveMode(mapModeRef.current) === "google3d") {
-        const releasedButton = Number(event?.button);
-        const releaseAll = !Number.isFinite(releasedButton);
-        if (releaseAll || releasedButton === 0) {
-          const shouldStartPanInertia = desktopSurfacePanRef.current.moved;
-          desktopSurfacePanRef.current.active = false;
-          desktopSurfacePanRef.current.lastSurface = null;
-          if (shouldStartPanInertia) {
-            ignoreNextClickRef.current = true;
-            startDesktopPanInertia();
-          } else {
-            resetDesktopPanInertia();
-          }
-          desktopSurfacePanRef.current.moved = false;
-        }
-        if (releaseAll || releasedButton === 2) {
-          if (desktopOrbitNavigationRef.current.moved) {
-            desktopOrbitNavigationRef.current.suppressContextClickUntil = Date.now() + 220;
-          }
-          desktopOrbitNavigationRef.current.active = false;
-          desktopOrbitNavigationRef.current.pivot = null;
-          desktopOrbitNavigationRef.current.moved = false;
-        }
-        desktopPointerNavigationActiveRef.current =
-          desktopSurfacePanRef.current.active || desktopOrbitNavigationRef.current.active;
-        return;
-      }
+    const handleDesktopPointerUp = () => {
       desktopPointerNavigationActiveRef.current = false;
     };
 
-    const handleDesktopWheelIntent = (event) => {
+    const handleDesktopWheelIntent = () => {
       if (useTouchNavigation) return;
       const autoStabilityProfile = getDesktopAutoStabilityProfile(viewer);
       markDesktopNavigationIntent(autoStabilityProfile.wheelIntentMs, true);
-      if (resolveMode(mapModeRef.current) !== "google3d") return;
-      event.preventDefault();
-      resetDesktopPanInertia();
-      updateDesktopGoogleEarthControllerProfile();
-      const normalizedDeltaY =
-        event.deltaMode === 1
-          ? event.deltaY * 40
-          : event.deltaMode === 2
-            ? event.deltaY * 120
-            : event.deltaY;
-      if (!Number.isFinite(normalizedDeltaY) || normalizedDeltaY === 0) return;
-
-      const canvasRect = viewer.canvas.getBoundingClientRect();
-      const pointerPosition = new Cesium.Cartesian2(
-        event.clientX - canvasRect.left,
-        event.clientY - canvasRect.top
-      );
-      const anchor =
-        getClickPosition(viewer.scene, pointerPosition) ||
-        getClickPosition(
-          viewer.scene,
-          new Cesium.Cartesian2(canvasRect.width / 2, canvasRect.height / 2)
-        );
-      const profile = getDesktopGoogleEarthNavigationProfile(viewer);
-      const intensity = Cesium.Math.clamp(
-        Math.abs(normalizedDeltaY) / DESKTOP_GOOGLE_EARTH_WHEEL_DELTA_BASE,
-        0.22,
-        2.8
-      );
-      let travelDistance = profile.wheelStepMeters * intensity;
-      let zoomDirection = Cesium.Cartesian3.clone(
-        viewer.camera.directionWC,
-        new Cesium.Cartesian3()
-      );
-
-      if (anchor) {
-        zoomDirection = Cesium.Cartesian3.subtract(
-          anchor,
-          viewer.camera.positionWC,
-          new Cesium.Cartesian3()
-        );
-        const anchorDistance = Cesium.Cartesian3.magnitude(zoomDirection);
-        if (anchorDistance > 0.001) {
-          Cesium.Cartesian3.divideByScalar(zoomDirection, anchorDistance, zoomDirection);
-          if (normalizedDeltaY < 0) {
-            travelDistance = Math.min(travelDistance, anchorDistance * 0.72);
-          }
-        } else {
-          zoomDirection = Cesium.Cartesian3.clone(
-            viewer.camera.directionWC,
-            new Cesium.Cartesian3()
-          );
-        }
-      }
-
-      viewer.camera.move(
-        zoomDirection,
-        normalizedDeltaY < 0 ? travelDistance : -travelDistance
-      );
-      enforceSatelliteZoomFloor();
-      viewer.scene.requestRender();
     };
 
     const handleDesktopMoveStart = () => {
@@ -7364,7 +7121,7 @@ function findPickedInteractiveData(
         passive: true,
       });
       viewer.container.addEventListener("wheel", handleDesktopWheelIntent, {
-        passive: false,
+        passive: true,
       });
       viewer.camera.moveStart.addEventListener(handleDesktopMoveStart);
       viewer.camera.moveEnd.addEventListener(handleDesktopMoveEnd);
@@ -7372,7 +7129,6 @@ function findPickedInteractiveData(
     }
 
     viewer.scene.postRender.addEventListener(handleAdaptiveFrameQuality);
-    viewer.scene.postRender.addEventListener(updateDesktopGoogleEarthControllerProfile);
 
     const hasPredictiveZoneContext = Boolean(String(searchZone || "").trim()) || syncVersion > 0;
     const activeZoneKey = activeZoneCacheKeyRef.current;
@@ -7432,10 +7188,8 @@ function findPickedInteractiveData(
       applyFpsBenchmarkSegmentQualityRef.current = () => {};
       prepareFpsBenchmarkQualityRef.current = () => {};
       resetAdaptiveQualityStats();
-      resetDesktopPanInertia();
       if (!viewer.isDestroyed()) {
         viewer.scene.postRender.removeEventListener(handleAdaptiveFrameQuality);
-        viewer.scene.postRender.removeEventListener(updateDesktopGoogleEarthControllerProfile);
       }
       if (modeTransitionTimeoutRef.current) {
         window.clearTimeout(modeTransitionTimeoutRef.current);
