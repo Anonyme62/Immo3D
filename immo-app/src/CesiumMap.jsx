@@ -49,9 +49,9 @@ const SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_MOBILE = 760;
 const SATELLITE_PREDICTIVE_WARMUP_FRESH_MS = 1000 * 60 * 3;
 const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
 const SATELLITE_LOAD_WATCHDOG_MS = 15000;
-const DESKTOP_RESOLUTION_SCALE = 1.22;
-const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
-const DESKTOP_MOVING_RESOLUTION_SCALE = 1.02;
+const DESKTOP_RESOLUTION_SCALE = 1.28;
+const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.42;
+const DESKTOP_MOVING_RESOLUTION_SCALE = 1.0;
 const MOBILE_RESOLUTION_SCALE = 1;
 const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
 const IOS_RESOLUTION_SCALE = 0.30;
@@ -104,15 +104,19 @@ const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
 const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
 const COUNTRY_CONTEXT_GEOJSON_URL =
   "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
-const COUNTRY_CONTEXT_MIN_HEIGHT_METERS = 380000;
-const COUNTRY_CONTEXT_MAX_HEIGHT_METERS = 24000000;
+const COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS = 220000;
+const COUNTRY_CONTEXT_BORDER_MAX_HEIGHT_METERS = 26000000;
+const COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS = 1050000;
+const COUNTRY_CONTEXT_LABEL_MAX_HEIGHT_METERS = 18000000;
 const COUNTRY_CONTEXT_LABEL_MIN_RADIUS_METERS = 80000;
-const COUNTRY_CONTEXT_LABEL_FONT = "600 18px Arial, sans-serif";
+const COUNTRY_CONTEXT_LABEL_FONT = "700 19px Arial, sans-serif";
+const COUNTRY_CONTEXT_MAX_LABELS = 84;
+const COUNTRY_CONTEXT_CAMERA_PERCENTAGE_CHANGED = 0.0025;
 const COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
-  800000,
-  1,
+  1200000,
+  1.04,
   22000000,
-  0.44
+  0.52
 );
 const COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET = new Cesium.Cartesian2(0, -6);
 const COUNTRY_CONTEXT_BORDER_COLOR = Cesium.Color.fromCssColorString("#f8fafc");
@@ -159,18 +163,18 @@ const DESKTOP_QUALITY_PROFILE_CONFIG = {
   auto: {
     // Auto should feel like Google Earth Web while moving: prioritize fluidity,
     // then restore sharper quality once the camera settles.
-    movingResolutionScale: 0.9,
-    movingGlobeSse: 1.92,
-    movingTilesetSse: 19.5,
+    movingResolutionScale: 1.0,
+    movingGlobeSse: 1.82,
+    movingTilesetSse: 18.4,
     movingMsaa: 1,
-    settleResolutionScale: 1.0,
-    settleGlobeSse: 1.48,
-    settleTilesetSse: 11.8,
+    settleResolutionScale: 1.08,
+    settleGlobeSse: 1.34,
+    settleTilesetSse: 10.4,
     settleMsaa: 2,
-    idleResolutionScale: 1.14,
-    idleGlobeSse: 1.12,
-    idleTilesetSse: 8.0,
-    idleMsaa: 2,
+    idleResolutionScale: 1.2,
+    idleGlobeSse: 0.98,
+    idleTilesetSse: 7.2,
+    idleMsaa: 4,
     ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
     ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
     ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
@@ -386,15 +390,15 @@ const SATELLITE_ZONE_LIMIT_PADDING_DEGREES = 0.002;
 let markerPhotoMimeTypeCache = null;
 const MARKER_LABEL_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1200,
-  1.06,
+  1.14,
   30000,
-  0.42
+  0.5
 );
 const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1200,
   1,
   30000,
-  0.58
+  0.66
 );
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
@@ -1018,8 +1022,8 @@ function getPreferredResolutionScale(isMobile, isIOSDevice = false) {
   if (typeof window === "undefined") return DESKTOP_RESOLUTION_SCALE;
   const devicePixelRatio = Number(window.devicePixelRatio) || 1;
   const qualityScale = Math.max(
-    1.06,
-    Math.min(DESKTOP_RESOLUTION_SCALE, devicePixelRatio * 0.9)
+    1.08,
+    Math.min(DESKTOP_RESOLUTION_SCALE, devicePixelRatio)
   );
   return qualityScale;
 }
@@ -5093,6 +5097,48 @@ function findPickedInteractiveData(
 
     let cancelled = false;
     let lastVisibilitySignature = "";
+    let countryLabelCandidates = [];
+    let countryLabelsCreated = false;
+    let scheduledUpdateFrameId = null;
+    const previousCameraPercentageChanged = viewer.camera.percentageChanged;
+
+    const ensureCountryContextLabels = (dataSource) => {
+      if (
+        countryLabelsCreated ||
+        !dataSource ||
+        !Array.isArray(countryLabelCandidates) ||
+        countryLabelCandidates.length === 0
+      ) {
+        return;
+      }
+
+      countryLabelsCreated = true;
+      countryLabelCandidates.forEach((labelEntity) => {
+        dataSource.entities.add({
+          id: labelEntity.id,
+          position: labelEntity.position,
+          label: {
+            text: labelEntity.text,
+            font: COUNTRY_CONTEXT_LABEL_FONT,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            fillColor: COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(0.94),
+            outlineColor: COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(0.86),
+            outlineWidth: 3,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            pixelOffset: COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET,
+            scaleByDistance: COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE,
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+              COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS * 0.72,
+              COUNTRY_CONTEXT_LABEL_MAX_HEIGHT_METERS * 1.08
+            ),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            showBackground: false,
+            show: false,
+          },
+        });
+      });
+    };
 
     const loadCountryContextOverlay = async () => {
       if (countryContextDataSourceRef.current || countryContextLoadPromiseRef.current) {
@@ -5101,9 +5147,9 @@ function findPickedInteractiveData(
 
       const loadPromise = Cesium.GeoJsonDataSource.load(COUNTRY_CONTEXT_GEOJSON_URL, {
         clampToGround: true,
-        stroke: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.58),
+        stroke: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.78),
         fill: Cesium.Color.TRANSPARENT,
-        strokeWidth: 1.2,
+        strokeWidth: 1.45,
       });
       countryContextLoadPromiseRef.current = loadPromise;
 
@@ -5119,14 +5165,16 @@ function findPickedInteractiveData(
             entity.polygon.material = Cesium.Color.TRANSPARENT;
             entity.polygon.outline = true;
             entity.polygon.outlineColor =
-              COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.58);
+              COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.78);
+            entity.polygon.show = false;
           }
 
           if (entity.polyline) {
-            entity.polyline.width = 1.1;
+            entity.polyline.width = 1.4;
             entity.polyline.material =
-              COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.58);
+              COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.78);
             entity.polyline.clampToGround = true;
+            entity.polyline.show = false;
           }
 
           const anchor = getCountryContextAnchor(entity);
@@ -5149,31 +5197,9 @@ function findPickedInteractiveData(
 
         labelEntities
           .sort((left, right) => right.radius - left.radius)
-          .slice(0, 140)
-          .forEach((labelEntity) => {
-            dataSource.entities.add({
-              id: labelEntity.id,
-              position: labelEntity.position,
-              label: {
-                text: labelEntity.text,
-                font: COUNTRY_CONTEXT_LABEL_FONT,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                fillColor: COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(0.94),
-                outlineColor: COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(0.86),
-                outlineWidth: 3,
-                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-                verticalOrigin: Cesium.VerticalOrigin.CENTER,
-                pixelOffset: COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET,
-                scaleByDistance: COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE,
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
-                  COUNTRY_CONTEXT_MIN_HEIGHT_METERS * 0.65,
-                  COUNTRY_CONTEXT_MAX_HEIGHT_METERS * 1.3
-                ),
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                showBackground: false,
-              },
-            });
-          });
+          .slice(0, COUNTRY_CONTEXT_MAX_LABELS);
+
+        countryLabelCandidates = labelEntities;
 
         dataSource.show = false;
         countryContextDataSourceRef.current = dataSource;
@@ -5191,55 +5217,79 @@ function findPickedInteractiveData(
       const resolvedMode = resolveMode(modeRef.current);
       const groundClearance =
         getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 0;
-      const shouldShow =
+      const shouldShowBorders =
         resolvedMode === "google3d" &&
-        groundClearance >= COUNTRY_CONTEXT_MIN_HEIGHT_METERS &&
-        groundClearance <= COUNTRY_CONTEXT_MAX_HEIGHT_METERS;
+        groundClearance >= COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS &&
+        groundClearance <= COUNTRY_CONTEXT_BORDER_MAX_HEIGHT_METERS;
+      const shouldShowLabels =
+        shouldShowBorders &&
+        groundClearance >= COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS &&
+        groundClearance <= COUNTRY_CONTEXT_LABEL_MAX_HEIGHT_METERS;
 
-      if (shouldShow && !countryContextDataSourceRef.current) {
+      if ((shouldShowBorders || shouldShowLabels) && !countryContextDataSourceRef.current) {
         void loadCountryContextOverlay();
       }
 
       const dataSource = countryContextDataSourceRef.current;
       if (!dataSource) return;
 
-      const alphaFactor = shouldShow
+      if (shouldShowLabels) {
+        ensureCountryContextLabels(dataSource);
+      }
+
+      const borderAlpha = shouldShowBorders
         ? Cesium.Math.lerp(
-            0.34,
-            0.82,
+            0.52,
+            0.94,
             Cesium.Math.clamp(
-              (groundClearance - COUNTRY_CONTEXT_MIN_HEIGHT_METERS) / 2200000,
+              (groundClearance - COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS) / 2600000,
               0,
               1
             )
           )
         : 0;
-      const visibilitySignature = `${shouldShow ? 1 : 0}:${Math.round(alphaFactor * 100)}`;
+      const labelAlpha = shouldShowLabels
+        ? Cesium.Math.lerp(
+            0.46,
+            0.88,
+            Cesium.Math.clamp(
+              (groundClearance - COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS) / 2400000,
+              0,
+              1
+            )
+          )
+        : 0;
+      const visibilitySignature = [
+        shouldShowBorders ? 1 : 0,
+        shouldShowLabels ? 1 : 0,
+        Math.round(borderAlpha * 100),
+        Math.round(labelAlpha * 100),
+      ].join(":");
 
       if (visibilitySignature === lastVisibilitySignature) return;
       lastVisibilitySignature = visibilitySignature;
-      dataSource.show = shouldShow;
+      dataSource.show = shouldShowBorders || shouldShowLabels;
 
       dataSource.entities.values.forEach((entity) => {
         if (entity.polyline) {
-          entity.polyline.show = shouldShow;
+          entity.polyline.show = shouldShowBorders;
           entity.polyline.material =
-            COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(alphaFactor);
+            COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(borderAlpha);
         }
         if (entity.polygon) {
-          entity.polygon.show = shouldShow;
+          entity.polygon.show = shouldShowBorders;
           entity.polygon.outlineColor = COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(
-            Math.min(0.74, alphaFactor + 0.12)
+            Math.min(0.98, borderAlpha + 0.08)
           );
         }
         if (entity.label) {
-          entity.label.show = shouldShow;
+          entity.label.show = shouldShowLabels;
           entity.label.fillColor = COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(
-            Math.min(0.96, alphaFactor + 0.14)
+            Math.min(0.96, labelAlpha + 0.12)
           );
           entity.label.outlineColor =
             COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(
-              Math.min(0.9, alphaFactor + 0.2)
+              Math.min(0.92, labelAlpha + 0.18)
             );
         }
       });
@@ -5247,12 +5297,34 @@ function findPickedInteractiveData(
       viewer.scene.requestRender();
     };
 
+    const scheduleCountryContextVisibility = () => {
+      if (scheduledUpdateFrameId !== null) return;
+      scheduledUpdateFrameId = window.requestAnimationFrame(() => {
+        scheduledUpdateFrameId = null;
+        if (cancelled || viewer.isDestroyed()) return;
+        applyCountryContextVisibility();
+      });
+    };
+
     applyCountryContextVisibility();
-    viewer.scene.postRender.addEventListener(applyCountryContextVisibility);
+    viewer.camera.percentageChanged = Math.min(
+      Number.isFinite(Number(previousCameraPercentageChanged))
+        ? Number(previousCameraPercentageChanged)
+        : 0.5,
+      COUNTRY_CONTEXT_CAMERA_PERCENTAGE_CHANGED
+    );
+    viewer.camera.changed.addEventListener(scheduleCountryContextVisibility);
+    viewer.camera.moveEnd.addEventListener(applyCountryContextVisibility);
 
     return () => {
       cancelled = true;
-      viewer.scene.postRender.removeEventListener(applyCountryContextVisibility);
+      if (scheduledUpdateFrameId !== null) {
+        window.cancelAnimationFrame(scheduledUpdateFrameId);
+        scheduledUpdateFrameId = null;
+      }
+      viewer.camera.changed.removeEventListener(scheduleCountryContextVisibility);
+      viewer.camera.moveEnd.removeEventListener(applyCountryContextVisibility);
+      viewer.camera.percentageChanged = previousCameraPercentageChanged;
       if (countryContextDataSourceRef.current) {
         viewer.dataSources.remove(countryContextDataSourceRef.current, true);
         countryContextDataSourceRef.current = null;
@@ -7430,12 +7502,12 @@ function findPickedInteractiveData(
             font: markerState.font,
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 3,
+            outlineWidth: 4,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             pixelOffset: new Cesium.Cartesian2(labelOffset.x, labelOffset.y),
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-            scale: 1.04,
+            scale: 1.12,
             scaleByDistance: MARKER_LABEL_SCALE_BY_DISTANCE,
             pixelOffsetScaleByDistance: MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE,
             heightReference: isOsmMode
@@ -7474,15 +7546,17 @@ function findPickedInteractiveData(
           },
           label: {
             text: truncateMarkerNote(marker.note),
-            font: "15px sans-serif",
+            font: "600 16px sans-serif",
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 3,
+            outlineWidth: 4,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             pixelOffset: new Cesium.Cartesian2(0, -22),
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-            scale: 1.04,
+            scale: 1.08,
+            scaleByDistance: MARKER_LABEL_SCALE_BY_DISTANCE,
+            pixelOffsetScaleByDistance: MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE,
             heightReference: isOsmMode
               ? Cesium.HeightReference.CLAMP_TO_GROUND
               : Cesium.HeightReference.NONE,

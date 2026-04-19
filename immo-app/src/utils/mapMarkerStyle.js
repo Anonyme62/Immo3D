@@ -20,9 +20,9 @@ function getMarkerAgeColor(bien) {
 }
 
 function getMarkerPixelSizeForColor(color) {
-  if (color === "green") return 14;
-  if (color === "orange") return 12;
-  return 10;
+  if (color === "green") return 16;
+  if (color === "orange") return 14;
+  return 12;
 }
 
 export function getMarkerVisualState(bien, selectedBienId) {
@@ -34,8 +34,8 @@ export function getMarkerVisualState(bien, selectedBienId) {
     isSelected: false,
     pixelSize: basePixelSize,
     color: ageColor,
-    outlineWidth: 2,
-    font: "20px sans-serif",
+    outlineWidth: 2.5,
+    font: "700 22px sans-serif",
   };
 }
 
