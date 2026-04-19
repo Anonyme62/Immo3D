@@ -2270,6 +2270,39 @@ function extractBoundaryLines(geometry) {
   return [];
 }
 
+function extractOuterBoundaryLines(geometry) {
+  if (!geometry || !geometry.type || !geometry.coordinates) return [];
+
+  if (geometry.type === "Polygon") {
+    const outerRing = geometry.coordinates[0];
+    return Array.isArray(outerRing) && outerRing.length >= 2 ? [outerRing] : [];
+  }
+
+  if (geometry.type === "MultiPolygon") {
+    return geometry.coordinates
+      .map((polygon) => (Array.isArray(polygon) ? polygon[0] : null))
+      .filter((ring) => Array.isArray(ring) && ring.length >= 2);
+  }
+
+  return [];
+}
+
+function extractGeoJsonBoundaryLines(geoJson) {
+  if (!geoJson) return [];
+
+  if (geoJson.type === "FeatureCollection") {
+    return (Array.isArray(geoJson.features) ? geoJson.features : []).flatMap((feature) =>
+      extractOuterBoundaryLines(feature?.geometry)
+    );
+  }
+
+  if (geoJson.type === "Feature") {
+    return extractOuterBoundaryLines(geoJson.geometry);
+  }
+
+  return extractOuterBoundaryLines(geoJson);
+}
+
 function optimizeTouchNavigation(
   viewer,
   tuning = TOUCH_NAV_TUNING,
@@ -5097,113 +5130,59 @@ function findPickedInteractiveData(
 
     let cancelled = false;
     let lastVisibilitySignature = "";
-    let countryLabelCandidates = [];
-    let countryLabelsCreated = false;
-    let scheduledUpdateFrameId = null;
-    const previousCameraPercentageChanged = viewer.camera.percentageChanged;
-
-    const ensureCountryContextLabels = (dataSource) => {
-      if (
-        countryLabelsCreated ||
-        !dataSource ||
-        !Array.isArray(countryLabelCandidates) ||
-        countryLabelCandidates.length === 0
-      ) {
-        return;
-      }
-
-      countryLabelsCreated = true;
-      countryLabelCandidates.forEach((labelEntity) => {
-        dataSource.entities.add({
-          id: labelEntity.id,
-          position: labelEntity.position,
-          label: {
-            text: labelEntity.text,
-            font: COUNTRY_CONTEXT_LABEL_FONT,
-            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            fillColor: COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(0.94),
-            outlineColor: COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(0.86),
-            outlineWidth: 3,
-            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-            verticalOrigin: Cesium.VerticalOrigin.CENTER,
-            pixelOffset: COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET,
-            scaleByDistance: COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE,
-            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
-              COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS * 0.72,
-              COUNTRY_CONTEXT_LABEL_MAX_HEIGHT_METERS * 1.08
-            ),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-            showBackground: false,
-            show: false,
-          },
-        });
-      });
-    };
+    let lastVisibilityCheckAt = 0;
 
     const loadCountryContextOverlay = async () => {
       if (countryContextDataSourceRef.current || countryContextLoadPromiseRef.current) {
         return;
       }
 
-      const loadPromise = Cesium.GeoJsonDataSource.load(COUNTRY_CONTEXT_GEOJSON_URL, {
-        clampToGround: true,
-        stroke: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.78),
-        fill: Cesium.Color.TRANSPARENT,
-        strokeWidth: 1.45,
-      });
+      const loadPromise = fetch(COUNTRY_CONTEXT_GEOJSON_URL)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((geoJson) => {
+          const rings = extractGeoJsonBoundaryLines(geoJson);
+          const dataSource = new Cesium.CustomDataSource("country-borders");
+
+          rings.forEach((ring, index) => {
+            const flattenedDegrees = ring.flatMap((point) => {
+              const longitude = Number(point?.[0]);
+              const latitude = Number(point?.[1]);
+              return Number.isFinite(longitude) && Number.isFinite(latitude)
+                ? [longitude, latitude]
+                : [];
+            });
+
+            if (flattenedDegrees.length < 4) return;
+
+            dataSource.entities.add({
+              id: `country-border-${index}`,
+              polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray(flattenedDegrees),
+                width: 2.25,
+                material: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.92),
+                depthFailMaterial: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.92),
+                clampToGround: true,
+              },
+            });
+          });
+
+          return dataSource;
+        });
       countryContextLoadPromiseRef.current = loadPromise;
 
       try {
         const dataSource = await loadPromise;
         if (cancelled) return;
 
-        const labelEntities = [];
-        const sourceEntities = [...dataSource.entities.values];
-
-        sourceEntities.forEach((entity, index) => {
-          if (entity.polygon) {
-            entity.polygon.material = Cesium.Color.TRANSPARENT;
-            entity.polygon.outline = true;
-            entity.polygon.outlineColor =
-              COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.78);
-            entity.polygon.show = false;
-          }
-
-          if (entity.polyline) {
-            entity.polyline.width = 1.4;
-            entity.polyline.material =
-              COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.78);
-            entity.polyline.clampToGround = true;
-            entity.polyline.show = false;
-          }
-
-          const anchor = getCountryContextAnchor(entity);
-          const countryName = getCountryContextLabelText(
-            getCountryContextEntityName(entity)
-          );
-          if (
-            anchor &&
-            countryName &&
-            anchor.radius >= COUNTRY_CONTEXT_LABEL_MIN_RADIUS_METERS
-          ) {
-            labelEntities.push({
-              id: `country-context-label-${index}`,
-              position: anchor.position,
-              text: countryName,
-              radius: anchor.radius,
-            });
-          }
-        });
-
-        labelEntities
-          .sort((left, right) => right.radius - left.radius)
-          .slice(0, COUNTRY_CONTEXT_MAX_LABELS);
-
-        countryLabelCandidates = labelEntities;
-
         dataSource.show = false;
         countryContextDataSourceRef.current = dataSource;
         viewer.dataSources.add(dataSource);
+        viewer.scene.requestRender();
       } catch (error) {
         console.warn("Impossible de charger l'overlay pays/frontieres.", error);
       } finally {
@@ -5221,110 +5200,38 @@ function findPickedInteractiveData(
         resolvedMode === "google3d" &&
         groundClearance >= COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS &&
         groundClearance <= COUNTRY_CONTEXT_BORDER_MAX_HEIGHT_METERS;
-      const shouldShowLabels =
-        shouldShowBorders &&
-        groundClearance >= COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS &&
-        groundClearance <= COUNTRY_CONTEXT_LABEL_MAX_HEIGHT_METERS;
 
-      if ((shouldShowBorders || shouldShowLabels) && !countryContextDataSourceRef.current) {
+      if (shouldShowBorders && !countryContextDataSourceRef.current) {
         void loadCountryContextOverlay();
       }
 
       const dataSource = countryContextDataSourceRef.current;
       if (!dataSource) return;
 
-      if (shouldShowLabels) {
-        ensureCountryContextLabels(dataSource);
-      }
-
-      const borderAlpha = shouldShowBorders
-        ? Cesium.Math.lerp(
-            0.52,
-            0.94,
-            Cesium.Math.clamp(
-              (groundClearance - COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS) / 2600000,
-              0,
-              1
-            )
-          )
-        : 0;
-      const labelAlpha = shouldShowLabels
-        ? Cesium.Math.lerp(
-            0.46,
-            0.88,
-            Cesium.Math.clamp(
-              (groundClearance - COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS) / 2400000,
-              0,
-              1
-            )
-          )
-        : 0;
-      const visibilitySignature = [
-        shouldShowBorders ? 1 : 0,
-        shouldShowLabels ? 1 : 0,
-        Math.round(borderAlpha * 100),
-        Math.round(labelAlpha * 100),
-      ].join(":");
+      const visibilitySignature = shouldShowBorders ? "1" : "0";
 
       if (visibilitySignature === lastVisibilitySignature) return;
       lastVisibilitySignature = visibilitySignature;
-      dataSource.show = shouldShowBorders || shouldShowLabels;
-
-      dataSource.entities.values.forEach((entity) => {
-        if (entity.polyline) {
-          entity.polyline.show = shouldShowBorders;
-          entity.polyline.material =
-            COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(borderAlpha);
-        }
-        if (entity.polygon) {
-          entity.polygon.show = shouldShowBorders;
-          entity.polygon.outlineColor = COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(
-            Math.min(0.98, borderAlpha + 0.08)
-          );
-        }
-        if (entity.label) {
-          entity.label.show = shouldShowLabels;
-          entity.label.fillColor = COUNTRY_CONTEXT_LABEL_FILL_COLOR.withAlpha(
-            Math.min(0.96, labelAlpha + 0.12)
-          );
-          entity.label.outlineColor =
-            COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR.withAlpha(
-              Math.min(0.92, labelAlpha + 0.18)
-            );
-        }
-      });
-
+      dataSource.show = shouldShowBorders;
       viewer.scene.requestRender();
     };
 
     const scheduleCountryContextVisibility = () => {
-      if (scheduledUpdateFrameId !== null) return;
-      scheduledUpdateFrameId = window.requestAnimationFrame(() => {
-        scheduledUpdateFrameId = null;
-        if (cancelled || viewer.isDestroyed()) return;
-        applyCountryContextVisibility();
-      });
+      const now = performance.now();
+      if (now - lastVisibilityCheckAt < 220) return;
+      lastVisibilityCheckAt = now;
+      if (cancelled || viewer.isDestroyed()) return;
+      applyCountryContextVisibility();
     };
 
     applyCountryContextVisibility();
-    viewer.camera.percentageChanged = Math.min(
-      Number.isFinite(Number(previousCameraPercentageChanged))
-        ? Number(previousCameraPercentageChanged)
-        : 0.5,
-      COUNTRY_CONTEXT_CAMERA_PERCENTAGE_CHANGED
-    );
-    viewer.camera.changed.addEventListener(scheduleCountryContextVisibility);
+    viewer.scene.postRender.addEventListener(scheduleCountryContextVisibility);
     viewer.camera.moveEnd.addEventListener(applyCountryContextVisibility);
 
     return () => {
       cancelled = true;
-      if (scheduledUpdateFrameId !== null) {
-        window.cancelAnimationFrame(scheduledUpdateFrameId);
-        scheduledUpdateFrameId = null;
-      }
-      viewer.camera.changed.removeEventListener(scheduleCountryContextVisibility);
+      viewer.scene.postRender.removeEventListener(scheduleCountryContextVisibility);
       viewer.camera.moveEnd.removeEventListener(applyCountryContextVisibility);
-      viewer.camera.percentageChanged = previousCameraPercentageChanged;
       if (countryContextDataSourceRef.current) {
         viewer.dataSources.remove(countryContextDataSourceRef.current, true);
         countryContextDataSourceRef.current = null;
