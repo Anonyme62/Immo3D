@@ -49,9 +49,9 @@ const SATELLITE_PREDICTIVE_WARMUP_DELAY_MS_MOBILE = 760;
 const SATELLITE_PREDICTIVE_WARMUP_FRESH_MS = 1000 * 60 * 3;
 const SATELLITE_WARMUP_MAX_BLOCK_MS = 6500;
 const SATELLITE_LOAD_WATCHDOG_MS = 15000;
-const DESKTOP_RESOLUTION_SCALE = 1.28;
-const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.42;
-const DESKTOP_MOVING_RESOLUTION_SCALE = 1.0;
+const DESKTOP_RESOLUTION_SCALE = 1.22;
+const DESKTOP_ULTRA_RESOLUTION_SCALE = 1.35;
+const DESKTOP_MOVING_RESOLUTION_SCALE = 1.02;
 const MOBILE_RESOLUTION_SCALE = 1;
 const MOBILE_MOVING_RESOLUTION_SCALE = 0.84;
 const IOS_RESOLUTION_SCALE = 0.30;
@@ -98,40 +98,8 @@ const DESKTOP_AUTO_VERY_HIGH_ALTITUDE_RECHECK_MS = 320;
 const MODE_TRANSITION_MIN_VISIBLE_MS = 620;
 const MODE_TRANSITION_VISUAL_FADE_OUT_MS = 260;
 const DESKTOP_GOOGLE_OSM_ALPHA = 0.9;
-const DISTANT_GLOBE_SCENE_BACKGROUND_COLOR =
-  Cesium.Color.fromCssColorString("#020617");
 const MOBILE_QUALITY_RESTORE_DELAY_MS = 180;
 const MOBILE_GOOGLE_OSM_ALPHA = 0.78;
-const COUNTRY_CONTEXT_GEOJSON_URL =
-  "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
-const COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS = 220000;
-const COUNTRY_CONTEXT_BORDER_MAX_HEIGHT_METERS = 26000000;
-const COUNTRY_CONTEXT_LABEL_MIN_HEIGHT_METERS = 1050000;
-const COUNTRY_CONTEXT_LABEL_MAX_HEIGHT_METERS = 18000000;
-const COUNTRY_CONTEXT_LABEL_MIN_RADIUS_METERS = 80000;
-const COUNTRY_CONTEXT_LABEL_FONT = "700 19px Arial, sans-serif";
-const COUNTRY_CONTEXT_MAX_LABELS = 84;
-const COUNTRY_CONTEXT_CAMERA_PERCENTAGE_CHANGED = 0.0025;
-const COUNTRY_CONTEXT_LABEL_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
-  1200000,
-  1.04,
-  22000000,
-  0.52
-);
-const COUNTRY_CONTEXT_LABEL_PIXEL_OFFSET = new Cesium.Cartesian2(0, -6);
-const COUNTRY_CONTEXT_BORDER_COLOR = Cesium.Color.fromCssColorString("#f8fafc");
-const COUNTRY_CONTEXT_LABEL_FILL_COLOR = Cesium.Color.fromCssColorString("#f8fafc");
-const COUNTRY_CONTEXT_LABEL_OUTLINE_COLOR = Cesium.Color.fromCssColorString("#0f172a");
-const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_SMOOTHING = 0.92;
-const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO = 0.06;
-const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MIN_STEP_METERS = 1.0;
-const DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_MAX_STEP_METERS = 880;
-const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_START_SPEED_METERS_PER_MS = 0.032;
-const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_STOP_SPEED_METERS_PER_MS = 0.0045;
-const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_DAMPING_PER_FRAME = 0.94;
-const DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MAX_DURATION_MS = 1050;
-const DESKTOP_GOOGLE_EARTH_WHEEL_DELTA_BASE = 200;
-const DESKTOP_GOOGLE_EARTH_DISTANT_SCENE_MIN_HEIGHT = 220000;
 const MOBILE_QUALITY_ULTRA_DELAY_MS = 980;
 const MOBILE_ULTRA_RESOLUTION_SCALE = 1.08;
 const MOBILE_GOOGLE_TILESET_ULTRA_SSE = 6.9;
@@ -163,24 +131,24 @@ const DESKTOP_QUALITY_PROFILE_CONFIG = {
   auto: {
     // Auto should feel like Google Earth Web while moving: prioritize fluidity,
     // then restore sharper quality once the camera settles.
-    movingResolutionScale: 1.0,
-    movingGlobeSse: 1.82,
-    movingTilesetSse: 18.4,
+    movingResolutionScale: 0.86,
+    movingGlobeSse: 2.05,
+    movingTilesetSse: 22,
     movingMsaa: 1,
-    settleResolutionScale: 1.08,
-    settleGlobeSse: 1.34,
-    settleTilesetSse: 10.4,
-    settleMsaa: 2,
-    idleResolutionScale: 1.2,
-    idleGlobeSse: 0.98,
-    idleTilesetSse: 7.2,
-    idleMsaa: 4,
+    settleResolutionScale: 0.94,
+    settleGlobeSse: 1.62,
+    settleTilesetSse: 13.6,
+    settleMsaa: 1,
+    idleResolutionScale: 1.06,
+    idleGlobeSse: 1.28,
+    idleTilesetSse: 9.2,
+    idleMsaa: 2,
     ultraResolutionScaleCap: DESKTOP_ULTRA_RESOLUTION_SCALE,
     ultraGlobeSse: DESKTOP_GLOBE_SSE_ULTRA,
     ultraTilesetSse: DESKTOP_GOOGLE_TILESET_ULTRA_SSE,
     ultraMsaa: DESKTOP_ULTRA_MSAA_SAMPLES,
-    fastTilesetSse: 14.5,
-    premiumTilesetSse: 7.2,
+    fastTilesetSse: 16,
+    premiumTilesetSse: 8.4,
     adaptiveRaiseFps: ADAPTIVE_QUALITY_RAISE_FPS_DESKTOP,
     idleRestoreDelayMs: 720,
     settleHoldMs: 900,
@@ -390,15 +358,15 @@ const SATELLITE_ZONE_LIMIT_PADDING_DEGREES = 0.002;
 let markerPhotoMimeTypeCache = null;
 const MARKER_LABEL_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1200,
-  1.14,
+  1.06,
   30000,
-  0.5
+  0.42
 );
 const MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1200,
   1,
   30000,
-  0.66
+  0.58
 );
 const MOBILE_BIEN_CARD_HEIGHT = 134;
 const FPS_BENCHMARK_STORAGE_KEY = "immo3d_fps_benchmark_v1";
@@ -1022,8 +990,8 @@ function getPreferredResolutionScale(isMobile, isIOSDevice = false) {
   if (typeof window === "undefined") return DESKTOP_RESOLUTION_SCALE;
   const devicePixelRatio = Number(window.devicePixelRatio) || 1;
   const qualityScale = Math.max(
-    1.08,
-    Math.min(DESKTOP_RESOLUTION_SCALE, devicePixelRatio)
+    1.06,
+    Math.min(DESKTOP_RESOLUTION_SCALE, devicePixelRatio * 0.9)
   );
   return qualityScale;
 }
@@ -1075,10 +1043,10 @@ function tuneImageryLayer(imageryLayer, mode = "satellite") {
   if (!imageryLayer) return;
 
   if (mode === "satellite") {
-    imageryLayer.brightness = 1.03;
-    imageryLayer.contrast = 1.14;
-    imageryLayer.gamma = 0.99;
-    imageryLayer.saturation = 1.1;
+    imageryLayer.brightness = 1.04;
+    imageryLayer.contrast = 1.1;
+    imageryLayer.gamma = 1.02;
+    imageryLayer.saturation = 1.08;
     return;
   }
 
@@ -1086,67 +1054,6 @@ function tuneImageryLayer(imageryLayer, mode = "satellite") {
   imageryLayer.contrast = 1;
   imageryLayer.gamma = 1;
   imageryLayer.saturation = 1;
-}
-
-function getCountryContextLabelText(name) {
-  const normalizedName = String(name || "").trim();
-  if (!normalizedName) return "";
-
-  const countryNameTranslations = {
-    Algeria: "Algerie",
-    Belgium: "Belgique",
-    France: "France",
-    Germany: "Allemagne",
-    Greece: "Grece",
-    Ireland: "Irlande",
-    Italy: "Italie",
-    Luxembourg: "Luxembourg",
-    Morocco: "Maroc",
-    Netherlands: "Pays-Bas",
-    Poland: "Pologne",
-    Portugal: "Portugal",
-    Romania: "Roumanie",
-    Spain: "Espagne",
-    Switzerland: "Suisse",
-    Tunisia: "Tunisie",
-    "United Kingdom": "Royaume-Uni",
-    Ukraine: "Ukraine",
-  };
-
-  return countryNameTranslations[normalizedName] || normalizedName;
-}
-
-function getCountryContextEntityName(entity) {
-  if (!entity) return "";
-  const sampleTime = Cesium.JulianDate.now();
-  const propertyName = entity.properties?.name?.getValue?.(sampleTime);
-  return String(propertyName || entity.name || "").trim();
-}
-
-function getCountryContextAnchor(entity) {
-  if (!entity) return null;
-
-  const sampleTime = Cesium.JulianDate.now();
-  let positions = null;
-
-  if (entity.polygon?.hierarchy) {
-    const hierarchy =
-      entity.polygon.hierarchy.getValue?.(sampleTime) ?? entity.polygon.hierarchy;
-    positions = hierarchy?.positions ?? null;
-  } else if (entity.polyline?.positions) {
-    positions =
-      entity.polyline.positions.getValue?.(sampleTime) ?? entity.polyline.positions;
-  }
-
-  if (!Array.isArray(positions) || positions.length < 3) return null;
-
-  const boundingSphere = Cesium.BoundingSphere.fromPoints(positions);
-  if (!boundingSphere?.center || !Number.isFinite(boundingSphere.radius)) return null;
-
-  return {
-    position: boundingSphere.center,
-    radius: boundingSphere.radius,
-  };
 }
 
 function buildZoneCacheKey(searchZone) {
@@ -2270,39 +2177,6 @@ function extractBoundaryLines(geometry) {
   return [];
 }
 
-function extractOuterBoundaryLines(geometry) {
-  if (!geometry || !geometry.type || !geometry.coordinates) return [];
-
-  if (geometry.type === "Polygon") {
-    const outerRing = geometry.coordinates[0];
-    return Array.isArray(outerRing) && outerRing.length >= 2 ? [outerRing] : [];
-  }
-
-  if (geometry.type === "MultiPolygon") {
-    return geometry.coordinates
-      .map((polygon) => (Array.isArray(polygon) ? polygon[0] : null))
-      .filter((ring) => Array.isArray(ring) && ring.length >= 2);
-  }
-
-  return [];
-}
-
-function extractGeoJsonBoundaryLines(geoJson) {
-  if (!geoJson) return [];
-
-  if (geoJson.type === "FeatureCollection") {
-    return (Array.isArray(geoJson.features) ? geoJson.features : []).flatMap((feature) =>
-      extractOuterBoundaryLines(feature?.geometry)
-    );
-  }
-
-  if (geoJson.type === "Feature") {
-    return extractOuterBoundaryLines(geoJson.geometry);
-  }
-
-  return extractOuterBoundaryLines(geoJson);
-}
-
 function optimizeTouchNavigation(
   viewer,
   tuning = TOUCH_NAV_TUNING,
@@ -2467,155 +2341,6 @@ function getCameraHeight(viewer) {
   const cartographic = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC);
   if (!cartographic || !Number.isFinite(cartographic.height)) return null;
   return cartographic.height;
-}
-
-function interpolateHeightStops(value, stops = []) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue) || !Array.isArray(stops) || stops.length === 0) {
-    return null;
-  }
-
-  const sortedStops = [...stops]
-    .map(([height, stopValue]) => [Number(height), Number(stopValue)])
-    .filter(([height, stopValue]) => Number.isFinite(height) && Number.isFinite(stopValue))
-    .sort((left, right) => left[0] - right[0]);
-
-  if (sortedStops.length === 0) return null;
-  if (numericValue <= sortedStops[0][0]) return sortedStops[0][1];
-  if (numericValue >= sortedStops[sortedStops.length - 1][0]) {
-    return sortedStops[sortedStops.length - 1][1];
-  }
-
-  for (let index = 1; index < sortedStops.length; index += 1) {
-    const [nextHeight, nextValue] = sortedStops[index];
-    const [previousHeight, previousValue] = sortedStops[index - 1];
-    if (numericValue > nextHeight) continue;
-    const progress = Cesium.Math.clamp(
-      (numericValue - previousHeight) / Math.max(0.0001, nextHeight - previousHeight),
-      0,
-      1
-    );
-    return Cesium.Math.lerp(previousValue, nextValue, progress);
-  }
-
-  return sortedStops[sortedStops.length - 1][1];
-}
-
-function getCameraGroundClearance(viewer) {
-  const cartographic = viewer?.camera?.positionCartographic;
-  if (!cartographic || !Number.isFinite(cartographic.height)) return null;
-  const surfaceHeight = getSurfaceHeight(viewer.scene, cartographic);
-  if (Number.isFinite(surfaceHeight)) {
-    return Math.max(0, cartographic.height - surfaceHeight);
-  }
-  return Math.max(0, cartographic.height);
-}
-
-function getDesktopGoogleEarthNavigationProfile(viewer) {
-  const groundClearance = Math.max(
-    0,
-    getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 1200
-  );
-  const maxPitchDegrees =
-    interpolateHeightStops(groundClearance, [
-      [40, -34],
-      [120, -33],
-      [420, -30],
-      [1200, -26],
-      [6000, -22],
-      [24000, -18],
-    ]) ?? -26;
-
-  return {
-    groundClearance,
-    surfaceDragSmoothing:
-      interpolateHeightStops(groundClearance, [
-        [40, 0.86],
-        [220, 0.89],
-        [1000, 0.92],
-        [6000, 0.945],
-        [24000, 0.965],
-      ]) ?? DESKTOP_GOOGLE_EARTH_SURFACE_DRAG_SMOOTHING,
-    surfaceDragMaxStep:
-      interpolateHeightStops(groundClearance, [
-        [40, 5],
-        [160, 10],
-        [600, 28],
-        [2400, 108],
-        [8000, 340],
-        [26000, 760],
-      ]) ?? 120,
-    panFallbackMoveScale:
-      interpolateHeightStops(groundClearance, [
-        [40, 0.62],
-        [160, 1.25],
-        [600, 3.1],
-        [2400, 8.8],
-        [8000, 23],
-        [26000, 52],
-      ]) ?? 4.5,
-    wheelStepMeters:
-      interpolateHeightStops(groundClearance, [
-        [40, 8],
-        [120, 16],
-        [420, 46],
-        [1200, 112],
-        [6000, 540],
-        [26000, 2400],
-      ]) ?? 120,
-    headingGain:
-      interpolateHeightStops(groundClearance, [
-        [40, 0.0034],
-        [220, 0.0039],
-        [1200, 0.0047],
-        [6000, 0.0056],
-        [26000, 0.0062],
-      ]) ?? 0.0048,
-    pitchGain:
-      interpolateHeightStops(groundClearance, [
-        [40, 0.002],
-        [220, 0.0025],
-        [1200, 0.0031],
-        [6000, 0.0038],
-        [26000, 0.0044],
-      ]) ?? 0.0034,
-    minPitch: Cesium.Math.toRadians(-89),
-    maxPitch: Cesium.Math.toRadians(maxPitchDegrees),
-    controller: {
-      inertiaSpin:
-        interpolateHeightStops(groundClearance, [
-          [40, 0.68],
-          [220, 0.73],
-          [1200, 0.79],
-          [6000, 0.85],
-          [26000, 0.89],
-        ]) ?? 0.8,
-      inertiaTranslate:
-        interpolateHeightStops(groundClearance, [
-          [40, 0.8],
-          [220, 0.84],
-          [1200, 0.88],
-          [6000, 0.915],
-          [26000, 0.945],
-        ]) ?? 0.86,
-      maximumMovementRatio:
-        interpolateHeightStops(groundClearance, [
-          [40, 0.075],
-          [220, 0.095],
-          [1200, 0.115],
-          [6000, 0.145],
-          [26000, 0.17],
-        ]) ?? 0.12,
-      zoomFactor:
-        interpolateHeightStops(groundClearance, [
-          [40, 1.0],
-          [220, 1.45],
-          [1200, 2.35],
-          [6000, 5.1],
-          [26000, 11.6],
-        ]) ?? 3.2,
-    },
-  };
 }
 
 function getModePanConfig(tuning) {
@@ -2846,8 +2571,6 @@ export default function CesiumMap({
     new Cesium.EllipsoidTerrainProvider()
   );
   const osmImageryLayerRef = useRef(null);
-  const countryContextDataSourceRef = useRef(null);
-  const countryContextLoadPromiseRef = useRef(null);
   const boundaryDataSourceRef = useRef(null);
   const placementGhostDataSourceRef = useRef(null);
   const placementGhostEntityRef = useRef(null);
@@ -2940,30 +2663,6 @@ export default function CesiumMap({
   const fpsBenchmarkLastSegmentKeyRef = useRef("");
   const desktopIdleRestoreAttemptRef = useRef(0);
   const desktopPointerNavigationActiveRef = useRef(false);
-  const desktopSurfacePanRef = useRef({
-    active: false,
-    lastX: 0,
-    lastY: 0,
-    lastTimestamp: 0,
-    lastSurface: null,
-    moved: false,
-  });
-  const desktopOrbitNavigationRef = useRef({
-    active: false,
-    lastX: 0,
-    lastY: 0,
-    pivot: null,
-    moved: false,
-    suppressContextClickUntil: 0,
-  });
-  const desktopPanInertiaRef = useRef({
-    rafId: null,
-    worldVelocity: 0,
-    worldDirection: new Cesium.Cartesian3(),
-    startedAt: 0,
-    lastFrameAt: 0,
-  });
-  const desktopGoogleEarthProfileSignatureRef = useRef("");
   const desktopSettleSnapshotRef = useRef(null);
   const desktopMovingVisibleUntilRef = useRef(0);
   const applyFpsBenchmarkMovingQualityRef = useRef(() => {});
@@ -4372,9 +4071,6 @@ function findPickedInteractiveData(
     handler.setInputAction((click) => {
       if (isMobile || !click?.position) return;
       if (placingBienIdRef.current) return;
-      if (Date.now() < (desktopOrbitNavigationRef.current.suppressContextClickUntil || 0)) {
-        return;
-      }
 
       const cartesian = getClickPosition(viewer.scene, click.position);
       if (!cartesian) return;
@@ -4444,27 +4140,7 @@ function findPickedInteractiveData(
       touchPanInertiaRef.current.worldDirection = new Cesium.Cartesian3();
     };
 
-    const stopDesktopPanInertia = () => {
-      const state = desktopPanInertiaRef.current;
-      if (state.rafId !== null) {
-        window.cancelAnimationFrame(state.rafId);
-        state.rafId = null;
-      }
-    };
-
-    const resetDesktopPanInertia = () => {
-      stopDesktopPanInertia();
-      desktopPanInertiaRef.current.worldVelocity = 0;
-      desktopPanInertiaRef.current.worldDirection = new Cesium.Cartesian3();
-      desktopPanInertiaRef.current.startedAt = 0;
-      desktopPanInertiaRef.current.lastFrameAt = 0;
-    };
-
-    function updateDesktopGoogleEarthControllerProfile() {
-      desktopGoogleEarthProfileSignatureRef.current = "";
-    }
-
-    const moveCameraForSurfaceDrag = (fromSurface, toSurface, options = {}) => {
+    const moveCameraForSurfaceDrag = (fromSurface, toSurface) => {
       if (!fromSurface || !toSurface) return false;
 
       const dragVector = Cesium.Cartesian3.subtract(
@@ -4475,39 +4151,22 @@ function findPickedInteractiveData(
       const dragDistance = Cesium.Cartesian3.magnitude(dragVector);
       if (!Number.isFinite(dragDistance) || dragDistance < 0.01) return false;
       const cameraHeight = Math.max(0, getCameraHeight(viewer) || 1200);
-      const maxStepHeightRatio = Number.isFinite(options.maxStepHeightRatio)
-        ? options.maxStepHeightRatio
-        : MOBILE_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO;
-      const minStepMeters = Number.isFinite(options.minStepMeters)
-        ? options.minStepMeters
-        : MOBILE_SURFACE_DRAG_MIN_STEP_METERS;
-      const maxStepMeters = Number.isFinite(options.maxStepMeters)
-        ? options.maxStepMeters
-        : MOBILE_SURFACE_DRAG_MAX_STEP_METERS;
-      const smoothing = Number.isFinite(options.smoothing)
-        ? options.smoothing
-        : MOBILE_SURFACE_DRAG_SMOOTHING;
       const maxDragStep = Cesium.Math.clamp(
-        cameraHeight * maxStepHeightRatio,
-        minStepMeters,
-        maxStepMeters
+        cameraHeight * MOBILE_SURFACE_DRAG_MAX_STEP_HEIGHT_RATIO,
+        MOBILE_SURFACE_DRAG_MIN_STEP_METERS,
+        MOBILE_SURFACE_DRAG_MAX_STEP_METERS
       );
-      const appliedDistance = Math.min(dragDistance, maxDragStep) * smoothing;
+      const appliedDistance = Math.min(dragDistance, maxDragStep) * MOBILE_SURFACE_DRAG_SMOOTHING;
       if (!Number.isFinite(appliedDistance) || appliedDistance <= 0) return false;
-      const dragDirection = Cesium.Cartesian3.divideByScalar(
-        dragVector,
-        dragDistance,
-        new Cesium.Cartesian3()
-      );
 
       viewer.camera.move(
-        dragDirection,
+        Cesium.Cartesian3.divideByScalar(
+          dragVector,
+          dragDistance,
+          new Cesium.Cartesian3()
+        ),
         appliedDistance
       );
-      options.onApplied?.({
-        direction: dragDirection,
-        appliedDistance,
-      });
       viewer.scene.requestRender();
       return true;
     };
@@ -4591,59 +4250,6 @@ function findPickedInteractiveData(
         12
       );
       moveCameraForTouchPan(deltaX, deltaY, moveScale, resolvedMode);
-    };
-
-    const startDesktopPanInertia = () => {
-      const state = desktopPanInertiaRef.current;
-      stopDesktopPanInertia();
-      if (
-        !Number.isFinite(state.worldVelocity) ||
-        state.worldVelocity < DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_START_SPEED_METERS_PER_MS
-      ) {
-        resetDesktopPanInertia();
-        return;
-      }
-
-      state.startedAt = performance.now();
-      state.lastFrameAt = state.startedAt;
-
-      const step = (timestamp) => {
-        if (viewer.isDestroyed()) {
-          resetDesktopPanInertia();
-          return;
-        }
-
-        const elapsed = timestamp - state.startedAt;
-        if (elapsed >= DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MAX_DURATION_MS) {
-          resetDesktopPanInertia();
-          return;
-        }
-
-        const frameDeltaMs = Math.min(
-          32,
-          Math.max(8, timestamp - (state.lastFrameAt || timestamp))
-        );
-        state.lastFrameAt = timestamp;
-        state.worldVelocity *= Math.pow(
-          DESKTOP_GOOGLE_EARTH_PAN_INERTIA_DAMPING_PER_FRAME,
-          frameDeltaMs / 16.67
-        );
-
-        if (
-          !Number.isFinite(state.worldVelocity) ||
-          state.worldVelocity < DESKTOP_GOOGLE_EARTH_PAN_INERTIA_MIN_STOP_SPEED_METERS_PER_MS
-        ) {
-          resetDesktopPanInertia();
-          return;
-        }
-
-        viewer.camera.move(state.worldDirection, state.worldVelocity * frameDeltaMs);
-        enforceSatelliteZoomFloor();
-        viewer.scene.requestRender();
-        state.rafId = window.requestAnimationFrame(step);
-      };
-
-      state.rafId = window.requestAnimationFrame(step);
     };
 
     const updatePanVelocity = (deltaX, deltaY, deltaTimeMs) => {
@@ -5068,8 +4674,6 @@ function findPickedInteractiveData(
       satelliteWarmupPromiseRef.current = null;
       worldTerrainProviderRef.current = null;
       osmImageryLayerRef.current = null;
-      countryContextDataSourceRef.current = null;
-      countryContextLoadPromiseRef.current = null;
       boundaryDataSourceRef.current = null;
       placementGhostEntityRef.current = null;
       placementGhostDataSourceRef.current = null;
@@ -5123,122 +4727,6 @@ function findPickedInteractiveData(
 
     renderBoundary();
   }, [boundaryGeoJson]);
-
-  useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-
-    let cancelled = false;
-    let lastVisibilitySignature = "";
-    let lastVisibilityCheckAt = 0;
-
-    const loadCountryContextOverlay = async () => {
-      if (countryContextDataSourceRef.current || countryContextLoadPromiseRef.current) {
-        return;
-      }
-
-      const loadPromise = fetch(COUNTRY_CONTEXT_GEOJSON_URL)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          return response.json();
-        })
-        .then((geoJson) => {
-          const rings = extractGeoJsonBoundaryLines(geoJson);
-          const dataSource = new Cesium.CustomDataSource("country-borders");
-
-          rings.forEach((ring, index) => {
-            const flattenedDegrees = ring.flatMap((point) => {
-              const longitude = Number(point?.[0]);
-              const latitude = Number(point?.[1]);
-              return Number.isFinite(longitude) && Number.isFinite(latitude)
-                ? [longitude, latitude]
-                : [];
-            });
-
-            if (flattenedDegrees.length < 4) return;
-
-            dataSource.entities.add({
-              id: `country-border-${index}`,
-              polyline: {
-                positions: Cesium.Cartesian3.fromDegreesArray(flattenedDegrees),
-                width: 2.25,
-                material: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.92),
-                depthFailMaterial: COUNTRY_CONTEXT_BORDER_COLOR.withAlpha(0.92),
-                clampToGround: true,
-              },
-            });
-          });
-
-          return dataSource;
-        });
-      countryContextLoadPromiseRef.current = loadPromise;
-
-      try {
-        const dataSource = await loadPromise;
-        if (cancelled) return;
-
-        dataSource.show = false;
-        countryContextDataSourceRef.current = dataSource;
-        viewer.dataSources.add(dataSource);
-        viewer.scene.requestRender();
-      } catch (error) {
-        console.warn("Impossible de charger l'overlay pays/frontieres.", error);
-      } finally {
-        if (countryContextLoadPromiseRef.current === loadPromise) {
-          countryContextLoadPromiseRef.current = null;
-        }
-      }
-    };
-
-    const applyCountryContextVisibility = () => {
-      const resolvedMode = resolveMode(modeRef.current);
-      const groundClearance =
-        getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 0;
-      const shouldShowBorders =
-        resolvedMode === "google3d" &&
-        groundClearance >= COUNTRY_CONTEXT_BORDER_MIN_HEIGHT_METERS &&
-        groundClearance <= COUNTRY_CONTEXT_BORDER_MAX_HEIGHT_METERS;
-
-      if (shouldShowBorders && !countryContextDataSourceRef.current) {
-        void loadCountryContextOverlay();
-      }
-
-      const dataSource = countryContextDataSourceRef.current;
-      if (!dataSource) return;
-
-      const visibilitySignature = shouldShowBorders ? "1" : "0";
-
-      if (visibilitySignature === lastVisibilitySignature) return;
-      lastVisibilitySignature = visibilitySignature;
-      dataSource.show = shouldShowBorders;
-      viewer.scene.requestRender();
-    };
-
-    const scheduleCountryContextVisibility = () => {
-      const now = performance.now();
-      if (now - lastVisibilityCheckAt < 220) return;
-      lastVisibilityCheckAt = now;
-      if (cancelled || viewer.isDestroyed()) return;
-      applyCountryContextVisibility();
-    };
-
-    applyCountryContextVisibility();
-    viewer.scene.postRender.addEventListener(scheduleCountryContextVisibility);
-    viewer.camera.moveEnd.addEventListener(applyCountryContextVisibility);
-
-    return () => {
-      cancelled = true;
-      viewer.scene.postRender.removeEventListener(scheduleCountryContextVisibility);
-      viewer.camera.moveEnd.removeEventListener(applyCountryContextVisibility);
-      if (countryContextDataSourceRef.current) {
-        viewer.dataSources.remove(countryContextDataSourceRef.current, true);
-        countryContextDataSourceRef.current = null;
-      }
-      countryContextLoadPromiseRef.current = null;
-    };
-  }, []);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -5769,31 +5257,22 @@ function findPickedInteractiveData(
       activeMode = modeRef.current,
       tileset = tilesetRef.current
     ) => {
-      const groundClearance = getCameraGroundClearance(viewer) ?? getCameraHeight(viewer) ?? 0;
       const useCinematicDesktopScene =
         !isMobile &&
         !isIOSDevice &&
         activeMode === "google3d" &&
         preferMaximumDesktopDetail;
-      const useDistantDesktopGlobeScene =
-        !isMobile &&
-        !isIOSDevice &&
-        activeMode === "google3d" &&
-        groundClearance >= DESKTOP_GOOGLE_EARTH_DISTANT_SCENE_MIN_HEIGHT;
-      const useEnhancedPlanetBackdrop =
-        useCinematicDesktopScene || useDistantDesktopGlobeScene;
-      const usePlanetLighting = useEnhancedPlanetBackdrop;
 
-      viewer.scene.globe.enableLighting = usePlanetLighting;
-      viewer.scene.globe.dynamicAtmosphereLighting = usePlanetLighting;
-      viewer.scene.globe.dynamicAtmosphereLightingFromSun = usePlanetLighting;
-      viewer.scene.globe.showGroundAtmosphere = useEnhancedPlanetBackdrop;
+      viewer.scene.globe.enableLighting = useCinematicDesktopScene;
+      viewer.scene.globe.dynamicAtmosphereLighting = useCinematicDesktopScene;
+      viewer.scene.globe.dynamicAtmosphereLightingFromSun = useCinematicDesktopScene;
+      viewer.scene.globe.showGroundAtmosphere = useCinematicDesktopScene;
       viewer.scene.globe.showWaterEffect = useCinematicDesktopScene;
       viewer.scene.globe.shadows = useCinematicDesktopScene
         ? Cesium.ShadowMode.ENABLED
         : Cesium.ShadowMode.DISABLED;
       viewer.scene.skyAtmosphere.show = !isIOSDevice;
-      viewer.scene.skyBox.show = useEnhancedPlanetBackdrop;
+      viewer.scene.skyBox.show = useCinematicDesktopScene;
       viewer.scene.fog.enabled = useCinematicDesktopScene;
       viewer.scene.highDynamicRange = !isIOSDevice;
       viewer.scene.sunBloom = useCinematicDesktopScene;
@@ -5848,8 +5327,6 @@ function findPickedInteractiveData(
 
       viewer.scene.backgroundColor = useCinematicDesktopScene
         ? CINEMATIC_SCENE_BACKGROUND_COLOR
-        : useDistantDesktopGlobeScene
-          ? DISTANT_GLOBE_SCENE_BACKGROUND_COLOR
         : DEFAULT_SCENE_BACKGROUND_COLOR;
     };
 
@@ -7409,12 +6886,12 @@ function findPickedInteractiveData(
             font: markerState.font,
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 4,
+            outlineWidth: 3,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             pixelOffset: new Cesium.Cartesian2(labelOffset.x, labelOffset.y),
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-            scale: 1.12,
+            scale: 1.04,
             scaleByDistance: MARKER_LABEL_SCALE_BY_DISTANCE,
             pixelOffsetScaleByDistance: MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE,
             heightReference: isOsmMode
@@ -7453,17 +6930,15 @@ function findPickedInteractiveData(
           },
           label: {
             text: truncateMarkerNote(marker.note),
-            font: "600 16px sans-serif",
+            font: "15px sans-serif",
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 4,
+            outlineWidth: 3,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             pixelOffset: new Cesium.Cartesian2(0, -22),
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-            scale: 1.08,
-            scaleByDistance: MARKER_LABEL_SCALE_BY_DISTANCE,
-            pixelOffsetScaleByDistance: MARKER_LABEL_OFFSET_SCALE_BY_DISTANCE,
+            scale: 1.04,
             heightReference: isOsmMode
               ? Cesium.HeightReference.CLAMP_TO_GROUND
               : Cesium.HeightReference.NONE,
