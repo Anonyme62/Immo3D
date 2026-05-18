@@ -35,7 +35,7 @@ export function getMarkerVisualState(bien, selectedBienId) {
     pixelSize: basePixelSize,
     color: ageColor,
     outlineWidth: 2,
-    font: "20px sans-serif",
+    font: "26px sans-serif",
   };
 }
 

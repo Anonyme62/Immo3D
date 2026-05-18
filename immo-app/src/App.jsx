@@ -83,8 +83,8 @@ function readSafeAreaBottomInsetPx() {
   return inset;
 }
 
-const MOBILE_QUALITY_PROFILE_OPTIONS = ["auto", "high", "ultra", "perf"];
-const DESKTOP_QUALITY_PROFILE_OPTIONS = ["auto", "high", "ultra", "perf"];
+const MOBILE_QUALITY_PROFILE_OPTIONS = ["auto"];
+const DESKTOP_QUALITY_PROFILE_OPTIONS = ["auto"];
 
 function normalizeMobileQualityProfile(value) {
   return MOBILE_QUALITY_PROFILE_OPTIONS.includes(value) ? value : "auto";
@@ -164,7 +164,9 @@ function App() {
   const [noteDraft, setNoteDraft] = useState("");
   const [notePhotosDraft, setNotePhotosDraft] = useState([]);
   const [noteStatus, setNoteStatus] = useState("");
-  const [mapMode, setMapMode] = useState("osm");
+  const [mapMode, setMapMode] = useState(() =>
+    CESIUM_ION_TOKEN ? "google3d" : "osm"
+  );
   const [syncVersion, setSyncVersion] = useState(0);
   const [focusBienId, setFocusBienId] = useState(null);
   const [focusBienVersion, setFocusBienVersion] = useState(0);
@@ -1522,83 +1524,32 @@ function App() {
           boxSizing: "border-box",
         }}
       >
-      {!isMobile ? (
-        <DesktopSidePanel
-          side="left"
-          width={DESKTOP_LEFT_WIDTH}
-          collapsedWidth={DESKTOP_COLLAPSED_HANDLE}
-          collapsed={isLeftSidebarCollapsed}
-          onToggle={() => setIsLeftSidebarCollapsed((value) => !value)}
-        >
-          <BiensSidebar
-            desktopHeader={
-              <AppMenu
-                onLogout={seDeconnecter}
-                onExportKml={handleExportKml}
-                onOpenSettings={() => setSettingsPanelOpen(true)}
-                showBoundary={showBoundary}
-                onToggleBoundary={() => setShowBoundary((value) => !value)}
-                themeMode={themeMode}
-                onToggleTheme={() =>
-                  setThemeMode((value) => (value === "dark" ? "light" : "dark"))
-                }
-                styleMode={styleMode}
-                onChangeStyle={setStyleMode}
-                hapticsEnabled={hapticsEnabled}
-                onToggleHaptics={handleToggleHaptics}
-                touchNavTuning={touchNavTuning}
-                compact
-              />
-            }
-            zoneRecherche={zoneRecherche}
-            recentSearches={recentSearches}
-            search={search}
-            loading={loading}
-            syncError={syncError}
-            filteredBiens={biensFiltres}
-            selectedBienId={selectedBien?.id ?? null}
-            counts={counts}
-            filterState={{
-              showAllBiens,
-              showFavorites,
-              showSetAside,
-              showProfessionnels,
-              showParticuliers,
-              showBlacklist,
-              showSansAdresse,
-              showNouveaux,
-            }}
-            onZoneRechercheChange={setZoneRecherche}
-            onSelectRecentSearch={setZoneRecherche}
-            onSearchChange={setSearch}
-            onSynchronize={chargerBiens}
-            onFilterChange={handleFilterChange}
-            onSelectBien={handleSidebarSelection}
-            isMobile={false}
-          />
-        </DesktopSidePanel>
-      ) : null}
-
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {!isMobile ? (
           <div
             style={{
               flex: 1,
-              display: "flex",
-              flexDirection: "row",
+              position: "relative",
               minHeight: 0,
+              overflow: "visible",
+              background: "var(--map-shell-bg)",
             }}
           >
             <div
               style={{
-                flex: 1,
-                position: "relative",
-                minHeight: 0,
+                position: "absolute",
+                inset: 0,
                 overflow: "hidden",
-                background: "var(--map-shell-bg)",
               }}
             >
-              <Suspense fallback={<MapLoadingFallback isMobile={false} />}>
+              <Suspense
+                fallback={
+                  <MapLoadingFallback
+                    isMobile={false}
+                    preferSatellite={canUseGoogle3D && mapMode === "google3d"}
+                  />
+                }
+              >
                 <CesiumMap
                   biens={biensFiltres}
                   customMarkers={customMarkers}
@@ -1635,9 +1586,69 @@ function App() {
                     biens.find((bien) => bien.id === placingBienId)?.id || placingBienId
                   }
                   onPlaceBien={handlePlaceBienOnMap}
+                  desktopRightInset={
+                    isRightPanelCollapsed
+                      ? 20
+                      : DESKTOP_RIGHT_WIDTH + DESKTOP_COLLAPSED_HANDLE + 20
+                  }
                 />
               </Suspense>
             </div>
+
+            <DesktopSidePanel
+              side="left"
+              width={DESKTOP_LEFT_WIDTH}
+              collapsedWidth={DESKTOP_COLLAPSED_HANDLE}
+              collapsed={isLeftSidebarCollapsed}
+              onToggle={() => setIsLeftSidebarCollapsed((value) => !value)}
+            >
+              <BiensSidebar
+                desktopHeader={
+                  <AppMenu
+                    onLogout={seDeconnecter}
+                    onExportKml={handleExportKml}
+                    onOpenSettings={() => setSettingsPanelOpen(true)}
+                    showBoundary={showBoundary}
+                    onToggleBoundary={() => setShowBoundary((value) => !value)}
+                    themeMode={themeMode}
+                    onToggleTheme={() =>
+                      setThemeMode((value) => (value === "dark" ? "light" : "dark"))
+                    }
+                    styleMode={styleMode}
+                    onChangeStyle={setStyleMode}
+                    hapticsEnabled={hapticsEnabled}
+                    onToggleHaptics={handleToggleHaptics}
+                    touchNavTuning={touchNavTuning}
+                    compact
+                  />
+                }
+                zoneRecherche={zoneRecherche}
+                recentSearches={recentSearches}
+                search={search}
+                loading={loading}
+                syncError={syncError}
+                filteredBiens={biensFiltres}
+                selectedBienId={selectedBien?.id ?? null}
+                counts={counts}
+                filterState={{
+                  showAllBiens,
+                  showFavorites,
+                  showSetAside,
+                  showProfessionnels,
+                  showParticuliers,
+                  showBlacklist,
+                  showSansAdresse,
+                  showNouveaux,
+                }}
+                onZoneRechercheChange={setZoneRecherche}
+                onSelectRecentSearch={setZoneRecherche}
+                onSearchChange={setSearch}
+                onSynchronize={chargerBiens}
+                onFilterChange={handleFilterChange}
+                onSelectBien={handleSidebarSelection}
+                isMobile={false}
+              />
+            </DesktopSidePanel>
 
             <DesktopSidePanel
               side="right"
@@ -1683,7 +1694,14 @@ function App() {
                 background: "var(--map-shell-bg)",
               }}
             >
-              <Suspense fallback={<MapLoadingFallback isMobile />}>
+              <Suspense
+                fallback={
+                  <MapLoadingFallback
+                    isMobile
+                    preferSatellite={canUseGoogle3D && mapMode === "google3d"}
+                  />
+                }
+              >
                 <CesiumMap
                   biens={biensFiltres}
                   customMarkers={customMarkers}
@@ -1838,7 +1856,7 @@ function App() {
   );
 }
 
-function MapLoadingFallback({ isMobile = false }) {
+function MapLoadingFallback({ isMobile = false, preferSatellite = false }) {
   return (
     <div
       style={{
@@ -1847,25 +1865,54 @@ function MapLoadingFallback({ isMobile = false }) {
         minHeight: isMobile ? "var(--immo3d-mobile-vh, 100svh)" : 0,
         display: "grid",
         placeItems: "center",
-        background: "var(--map-shell-bg)",
+        background: preferSatellite
+          ? "radial-gradient(circle at 50% 36%, rgba(59,130,246,0.12), transparent 34%), #020617"
+          : "var(--map-shell-bg)",
+        color: preferSatellite ? "#f8fafc" : "var(--text-primary)",
+        position: "relative",
+        overflow: "hidden",
       }}
     >
+      {preferSatellite ? (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage:
+              "radial-gradient(circle at 14% 18%, rgba(255,255,255,0.18) 0 1px, transparent 1.8px), radial-gradient(circle at 78% 28%, rgba(255,255,255,0.12) 0 1px, transparent 1.8px), radial-gradient(circle at 66% 72%, rgba(255,255,255,0.1) 0 1px, transparent 1.6px), radial-gradient(circle at 32% 76%, rgba(255,255,255,0.12) 0 1px, transparent 1.6px)",
+            backgroundSize: "280px 280px, 340px 340px, 420px 420px, 380px 380px",
+            opacity: 0.48,
+          }}
+        />
+      ) : null}
       <div
         style={{
+          position: "relative",
+          zIndex: 1,
           display: "inline-flex",
           alignItems: "center",
           gap: 10,
-          padding: "12px 16px",
+          padding: preferSatellite ? "14px 18px" : "12px 16px",
           borderRadius: 999,
-          border: "1px solid var(--border-color)",
-          background: "var(--panel-bg)",
-          color: "var(--text-primary)",
+          border: preferSatellite
+            ? "1px solid rgba(148,163,184,0.28)"
+            : "1px solid var(--border-color)",
+          background: preferSatellite
+            ? "rgba(2,6,23,0.76)"
+            : "var(--panel-bg)",
+          color: preferSatellite ? "#f8fafc" : "var(--text-primary)",
           fontWeight: 700,
-          boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
+          boxShadow: preferSatellite
+            ? "0 24px 50px rgba(0,0,0,0.34)"
+            : "0 12px 30px rgba(0,0,0,0.16)",
+          backdropFilter: preferSatellite ? "blur(10px)" : "none",
         }}
       >
         <LoadingSpinner size={16} />
-        <span>Chargement de la carte...</span>
+        <span>
+          {preferSatellite ? "Chargement de la vue satellite..." : "Chargement de la carte..."}
+        </span>
       </div>
     </div>
   );
@@ -1912,14 +1959,18 @@ function DesktopSidePanel({
   return (
     <div
       style={{
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        [isLeft ? "left" : "right"]: 0,
         width: panelWidth,
         minWidth: panelWidth,
         maxWidth: panelWidth,
-        height: "100%",
-        position: "relative",
+        height: "auto",
         overflow: "visible",
         transition: "width 220ms ease, min-width 220ms ease, max-width 220ms ease",
         flexShrink: 0,
+        zIndex: 6,
       }}
     >
       <div
@@ -2527,37 +2578,25 @@ function SettingsOverlay({
               marginBottom: 10,
             }}
           >
-            Auto recommande. Haute ameliore les details. Tres haute maximise le rendu satellite.
-            Perf favorise la fluidite.
+            Le mode Auto est maintenant le seul mode disponible. On le garde comme
+            base unique pour polir la fluidite et le rendu.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
-            {[
-              { value: "auto", label: "Auto" },
-              { value: "high", label: "Haute" },
-              { value: "ultra", label: "Tres haute" },
-              { value: "perf", label: "Perf" },
-            ].map((option) => {
-              const active = normalizedMobileQualityProfile === option.value;
-              return (
-                <button
-                  key={option.value}
-                  onClick={() => onChangeMobileQualityProfile?.(option.value)}
-                  style={{
-                    height: 38,
-                    borderRadius: 11,
-                    border: active
-                      ? "1px solid var(--text-primary)"
-                      : "1px solid var(--border-color)",
-                    background: active ? "var(--text-primary)" : "var(--panel-bg)",
-                    color: active ? "var(--panel-bg)" : "var(--text-primary)",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: 110,
+              height: 38,
+              padding: "0 14px",
+              borderRadius: 11,
+              border: "1px solid var(--text-primary)",
+              background: "var(--text-primary)",
+              color: "var(--panel-bg)",
+              fontWeight: 700,
+            }}
+          >
+            {normalizedMobileQualityProfile === "auto" ? "Auto actif" : "Auto"}
           </div>
         </div>
 
@@ -2579,37 +2618,25 @@ function SettingsOverlay({
               marginBottom: 10,
             }}
           >
-            Auto est equilibre. Haute et Tres haute poussent les details 3D sur PC.
-            Perf reduit la charge GPU pour les machines modestes.
+            Le mode Auto reste seul actif sur desktop pour concentrer les prochains
+            reglages sur la fluidite et la stabilite.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
-            {[
-              { value: "auto", label: "Auto" },
-              { value: "high", label: "Haute" },
-              { value: "ultra", label: "Tres haute" },
-              { value: "perf", label: "Perf" },
-            ].map((option) => {
-              const active = normalizedDesktopQualityProfile === option.value;
-              return (
-                <button
-                  key={option.value}
-                  onClick={() => onChangeDesktopQualityProfile?.(option.value)}
-                  style={{
-                    height: 38,
-                    borderRadius: 11,
-                    border: active
-                      ? "1px solid var(--text-primary)"
-                      : "1px solid var(--border-color)",
-                    background: active ? "var(--text-primary)" : "var(--panel-bg)",
-                    color: active ? "var(--panel-bg)" : "var(--text-primary)",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: 110,
+              height: 38,
+              padding: "0 14px",
+              borderRadius: 11,
+              border: "1px solid var(--text-primary)",
+              background: "var(--text-primary)",
+              color: "var(--panel-bg)",
+              fontWeight: 700,
+            }}
+          >
+            {normalizedDesktopQualityProfile === "auto" ? "Auto actif" : "Auto"}
           </div>
         </div>
 
@@ -2786,7 +2813,7 @@ function CloseIcon() {
 function ChevronIcon({ direction }) {
   const rotation = {
     left: "rotate(180 12 12)",
-    right: "none",
+    right: undefined,
   };
 
   return (

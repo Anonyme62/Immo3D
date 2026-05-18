@@ -3,6 +3,24 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
+const SATELLITE_BOOT_ASSET_URLS = [
+  '/globe/etoiles.jpg',
+  '/globe/terre%20nuit.jpg',
+  '/globe/Nuage%20test.png',
+]
+
+function preloadImageAsset(src) {
+  const image = new Image()
+  image.decoding = 'async'
+  image.fetchPriority = 'high'
+  image.src = src
+}
+
+function warmupSatelliteBootAssets() {
+  import('./CesiumMap.jsx').catch(() => {})
+  SATELLITE_BOOT_ASSET_URLS.forEach((src) => preloadImageAsset(src))
+}
+
 function isLocalLikeHost(hostname) {
   if (!hostname) return false
   if (
@@ -56,6 +74,8 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 )
+
+warmupSatelliteBootAssets()
 
 const shouldUseServiceWorker =
   import.meta.env.PROD && !isLocalLikeHost(window.location.hostname)
