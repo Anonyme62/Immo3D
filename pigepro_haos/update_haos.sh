@@ -48,8 +48,8 @@ run_update() {
   log "update: ECHEC"
   echo "${out}"
   if echo "${out}" | grep -qi "No update available"; then
-    log "update: aucune mise a jour disponible (on continue quand meme)."
-    return 0
+    log "update: aucune mise a jour disponible -> rebuild requis."
+    return 3
   fi
   return 1
 }
@@ -148,11 +148,6 @@ attempt=1
 while [ "${attempt}" -le "${RETRY_MAX}" ]; do
   log "Tentative deploy ${attempt}/${RETRY_MAX}"
 
-  if run_update && start_and_verify; then
-    log "Deploy valide via update."
-    break
-  fi
-
   rebuild_rc=1
   if run_rebuild; then
     rebuild_rc=0
@@ -172,6 +167,26 @@ while [ "${attempt}" -le "${RETRY_MAX}" ]; do
     fi
   else
     log "rebuild non exploitable sur cette tentative."
+  fi
+
+  update_rc=1
+  if run_update; then
+    update_rc=0
+  else
+    update_rc=$?
+  fi
+
+  if [ "${update_rc}" -eq 0 ]; then
+    if start_and_verify; then
+      log "Deploy valide via update."
+      break
+    fi
+  elif [ "${update_rc}" -eq 3 ]; then
+    log "update indisponible; on retentera rebuild apres reload."
+    ha supervisor reload
+    ha addons reload
+  else
+    log "update non exploitable sur cette tentative."
   fi
 
   if [ "${attempt}" -ge "${RETRY_MAX}" ]; then
